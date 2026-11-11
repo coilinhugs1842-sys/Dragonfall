@@ -1,5 +1,9 @@
 /**
- * Boot: create the one renderer, start the App state machine in `title`, start the frame driver.
+ * Boot: create the one renderer, start the App state machine, start the frame driver.
+ *
+ * Phase 1 has no title screen or lobby yet, so the app starts in `match`, which is the flight
+ * sandbox (game/match-scene.ts). The other states exist and are reachable from the `?debug`
+ * panel; they draw nothing.
  *
  * Only ./dev/query-flags and ./dev/boot may be imported from `dev` here. They are tiny; the
  * `./dev` barrel would pull stats-gl and lil-gui into the entry chunk.
@@ -8,20 +12,15 @@ import './style.css';
 import { loadDevTools } from './dev/boot';
 import type { PerfHud } from './dev/perf-hud';
 import { getQueryFlags } from './dev/query-flags';
-import { App, FrameDriver, readStoredQuality } from './game';
+import { App, FrameDriver, createMatchScene, readStoredQuality } from './game';
 import { WebGL2UnavailableError, createGameRenderer } from './render';
 import type { GameRenderer } from './render';
 import { DEFAULT_QUALITY, TICK_MS } from './shared';
 import type { QualityPresetId } from './shared';
-import { FixedStepLoop, createSim } from './sim';
-import type { SimInputs } from './sim';
-import { createPlaceholderScene } from './world/placeholder-scene';
+import { FixedStepLoop } from './sim';
 
 /** EMA weight for the HUD's sim figure. Most 60 Hz frames run 0 or 1 sim steps, so raw is noisy. */
 const SIM_MS_SMOOTHING = 0.05;
-
-/** No players yet: the Phase 0 sim only advances time. */
-const NO_INPUTS: SimInputs = [];
 
 function requireElement<T extends HTMLElement>(id: string, type: new () => T): T {
   const element = document.getElementById(id);
@@ -84,22 +83,28 @@ function boot(): void {
   const renderer = createRendererOrFallback(canvas, pickQuality(flags.quality));
   if (renderer === null) return;
 
-  const view = createPlaceholderScene();
+  const app = new App('match');
+  const match = createMatchScene({
+    app,
+    renderer,
+    canvas,
+    autopilot: flags.autopilot,
+    skipSeconds: flags.skipSeconds,
+  });
 
   const applySize = (): void => {
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     renderer.resize(width, height, window.devicePixelRatio);
-    if (width > 0 && height > 0) view.setAspect(width / height);
+    if (width > 0 && height > 0) match.setAspect(width / height);
   };
   applySize();
   new ResizeObserver(applySize).observe(canvas);
   watchDevicePixelRatio(applySize);
 
-  const app = new App('title');
-  const sim = createSim();
+  // The active state's scene samples input and steps its sim inside `app.update`, so the
+  // frame driver's sim timing (the HUD's `sim` line) covers all of it.
   const loop = new FixedStepLoop(TICK_MS, (tick) => {
-    sim.step(tick, NO_INPUTS);
     app.update(tick);
   });
 
@@ -113,8 +118,7 @@ function boot(): void {
     render: (alpha, frameMs) => {
       perfHud?.begin(frameMs);
       simMs += (driver.simMs - simMs) * SIM_MS_SMOOTHING;
-      view.update(sim.prev.timeS, sim.current.timeS, alpha);
-      renderer.render(view.scene, view.camera, frameMs);
+      match.renderFrame(alpha, frameMs);
       perfHud?.end();
     },
   });

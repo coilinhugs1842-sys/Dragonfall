@@ -13,15 +13,15 @@ Ids are `T-<phase>.<n>`. Work top to bottom unless the user says otherwise. Each
 - [x] T-0.6 Vitest setup + first sim-loop tests; `npm run build` green; tell the user what to check for the Phase 0 gate
 
 ## Phase 1: Flight sandbox
-- [ ] T-1.1 Flight model in `src/sim` (energy, stall, boost/stamina, flap, dive, roll-dodge) with a tuning table
-- [ ] T-1.2 `src/input`: keyboard/mouse with pointer lock → `InputFrame`, rebind table
-- [ ] T-1.3 Chase camera rig: speed-based FOV, banking lag, collision-free offset, subtle boost shake
-- [ ] T-1.4 Sky: gradient sky shader + sun + fog per the ART_DIRECTION lighting recipe
-- [ ] T-1.5 Cloud sea shader + instanced cloud billboards (layers per preset, overdraw-capped)
-- [ ] T-1.6 Greybox map: collider + spawn gates in `MapManifest`; chunked merged meshes for rendering
-- [ ] T-1.7 Terrain collision: BVH raycasts, bounce + damage; storm wall bounds
-- [ ] T-1.8 Placeholder dragon (primitive body + flapping wing quads) driven by `WorldView`
-- [ ] T-1.9 Flight sim tests (no NaNs, bounded energy, determinism for replay); perf check on Medium
+- [x] T-1.1 Flight model in `src/sim` (energy, stall, boost/stamina, flap, dive, roll-dodge) with a tuning table
+- [x] T-1.2 `src/input`: keyboard/mouse with pointer lock → `InputFrame`, rebind table
+- [x] T-1.3 Chase camera rig: speed-based FOV, banking lag, collision-free offset, subtle boost shake
+- [x] T-1.4 Sky: gradient sky shader + sun + fog per the ART_DIRECTION lighting recipe
+- [x] T-1.5 Cloud sea shader + instanced cloud billboards (layers per preset, overdraw-capped)
+- [x] T-1.6 Greybox map: collider + spawn gates in `MapManifest`; chunked merged meshes for rendering
+- [x] T-1.7 Terrain collision: BVH raycasts, bounce + damage; storm wall bounds
+- [x] T-1.8 Placeholder dragon (primitive body + flapping wing quads) driven by `WorldView`
+- [x] T-1.9 Flight sim tests (no NaNs, bounded energy, determinism for replay); perf check on Medium
 
 ## Phase 2: Netcode core
 - [ ] T-2.1 Spike: PeerJS host/join; confirm unreliable channel + LAN-over-HTTP behaviour → DECISIONS

@@ -66,3 +66,13 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
     would cause a visible dip for a rare case. The scaler's `reset()` already re-detects; the Settings menu
     (T-3.9) will call it when the player changes quality or presses a "re-detect display" control. Revisit if
     playtests on battery show the scale stuck at minimum.
+
+## 2026-11-10: Phase 1
+
+17. **`src/sim` may import three.js data containers and `three-mesh-bvh`.** Terrain collision builds a
+    `BufferGeometry` + `MeshBVH` from the shared map data. Allowed imports are `BufferGeometry`, `BufferAttribute`
+    and the math classes: none of them touch the DOM or WebGL, so the sim still runs in node tests and a Web
+    Worker. `src/shared` stays free of three.js. The boundary test enforces this allow-list.
+18. **Collision and visuals are built from one triangle source.** The greybox map is pure data in
+    `src/shared/maps`; `buildMapTriangles` feeds both the sim's BVH and the map view's merged chunks, so what
+    you see is what you hit. Real maps (Phase 4) keep the rule with a dedicated collider mesh in the manifest.

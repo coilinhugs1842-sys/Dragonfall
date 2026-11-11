@@ -112,7 +112,8 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
     frames.read(summary);
     const heap = readHeapBytes();
     const heapText = heap < 0 ? 'n/a' : `${(heap / BYTES_PER_MB).toFixed(0)} MB`;
-    const simText = getSimMs ? `${getSimMs().toFixed(2)} ms` : NO_VALUE;
+    // Three decimals: a 10-dragon tick is tens of microseconds.
+    const simText = getSimMs ? `${getSimMs().toFixed(3)} ms` : NO_VALUE;
     text.data =
       `fps ${summary.fps.toFixed(1)}  1% low ${summary.onePercentLowFps.toFixed(1)}\n` +
       `ms  avg ${summary.avgMs.toFixed(2)}  1% ${summary.onePercentLowMs.toFixed(2)}` +

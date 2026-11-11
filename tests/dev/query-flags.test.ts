@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { getQueryFlags, parseQueryFlags } from '../../src/dev/query-flags';
+import { MAX_SKIP_SECONDS, getQueryFlags, parseQueryFlags } from '../../src/dev/query-flags';
 
 describe('parseQueryFlags', () => {
   it('has everything off for an empty query', () => {
-    const off = { perf: false, debug: false, bench: false, quality: null };
+    const off = {
+      perf: false,
+      debug: false,
+      bench: false,
+      autopilot: false,
+      skipSeconds: 0,
+      quality: null,
+    };
     expect(parseQueryFlags('')).toEqual(off);
     expect(parseQueryFlags('?')).toEqual(off);
     expect(parseQueryFlags('?other=1')).toEqual(off);
@@ -13,6 +20,7 @@ describe('parseQueryFlags', () => {
     expect(parseQueryFlags('?perf')).toMatchObject({ perf: true, debug: false, bench: false });
     expect(parseQueryFlags('perf&debug')).toMatchObject({ perf: true, debug: true });
     expect(parseQueryFlags('?bench&perf=1')).toMatchObject({ perf: true, bench: true });
+    expect(parseQueryFlags('?perf&autopilot')).toMatchObject({ perf: true, autopilot: true });
   });
 
   it('treats 0 / false / off / no as off', () => {
@@ -27,6 +35,16 @@ describe('parseQueryFlags', () => {
     expect(flags.debug).toBe(false);
   });
 
+  it('reads ?skip as seconds, ignoring junk and capping the value', () => {
+    expect(parseQueryFlags('?skip=20').skipSeconds).toBe(20);
+    expect(parseQueryFlags('?skip=2.5').skipSeconds).toBe(2.5);
+    expect(parseQueryFlags('?skip').skipSeconds).toBe(0);
+    expect(parseQueryFlags('?skip=-3').skipSeconds).toBe(0);
+    expect(parseQueryFlags('?skip=soon').skipSeconds).toBe(0);
+    expect(parseQueryFlags('?skip=Infinity').skipSeconds).toBe(MAX_SKIP_SECONDS);
+    expect(parseQueryFlags('?skip=99999').skipSeconds).toBe(MAX_SKIP_SECONDS);
+  });
+
   it('accepts only known quality presets', () => {
     expect(parseQueryFlags('?quality=low').quality).toBe('low');
     expect(parseQueryFlags('?quality=HIGH').quality).toBe('high');
@@ -37,6 +55,13 @@ describe('parseQueryFlags', () => {
 
 describe('getQueryFlags', () => {
   it('is all off where there is no location (node)', () => {
-    expect(getQueryFlags()).toEqual({ perf: false, debug: false, bench: false, quality: null });
+    expect(getQueryFlags()).toEqual({
+      perf: false,
+      debug: false,
+      bench: false,
+      autopilot: false,
+      skipSeconds: 0,
+      quality: null,
+    });
   });
 });
