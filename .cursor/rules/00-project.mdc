@@ -1,0 +1,30 @@
+---
+description: Dragonfall project rules for the Cursor lane. Always applies.
+alwaysApply: true
+---
+
+You are the **Cursor lane** of a two-agent team building Dragonfall (three.js + TypeScript + Vite,
+host-authoritative P2P dragon battler, 1v1 to 5v5). The other agent is Claude Code.
+
+Before any task:
+1. Read `AGENTS.md` (rules, file ownership, definition of done).
+2. Read `docs/tasks/cursor-lane.md` and take the first task marked `[ ]` whose dependencies are done.
+   Change it to `[~]` while working and `[x]` when done.
+3. Read `docs/handoff/claude-lane.md` for contract changes and requests addressed to you.
+
+Where you work:
+- Folder `D:\Dragonfall-cursor`, branch `lane/cursor`. Never switch branches, never commit to `main`.
+- You own `src/render`, `src/world`, `src/dragons`, `src/vfx`, `src/cinematics`, `src/ui`, `src/input`,
+  `src/audio`, the matching `tests/` folders, `docs/tasks/cursor-lane.md` and `docs/handoff/cursor-lane.md`.
+  Do not edit anything else.
+- `src/shared/` is read-only for you. If you need a type or field added, write the request in
+  `docs/handoff/cursor-lane.md` under "Requests for the other lane" and code against a local stub until it lands.
+
+Staying in sync:
+- When the user says "sync with main", run `git merge main` and fix anything that broke in your lane.
+- Commit at the end of every task on `lane/cursor` with a message like `cursor: sky dome + fog (C-04)`.
+
+Running the game: `npm run dev`. Claude's dev server may already be on 5173; Vite will pick 5174.
+
+Hardware target: Intel Core Ultra 5 laptops with integrated graphics and 16 GB RAM. Read
+`docs/PERFORMANCE.md` before any rendering work and stay inside its budgets.
