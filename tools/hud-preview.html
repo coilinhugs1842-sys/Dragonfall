@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dragonfall HUD preview (dev only)</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0b1020;
+        font-family: system-ui, sans-serif;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      /* A mid-tone stand-in for the golden-hour sky and slate spires. Not game art. */
+      #backdrop {
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(ellipse 60% 40% at 72% 30%, rgb(255 226 170 / 85%), transparent 70%),
+          linear-gradient(
+            180deg,
+            #7f93b8 0%,
+            #b9a9b4 34%,
+            #f2c796 56%,
+            #f4e6cc 66%,
+            #b9c4c9 78%,
+            #6f8aa0 100%
+          );
+      }
+      #backdrop i {
+        position: absolute;
+        bottom: 0;
+        background: linear-gradient(180deg, #5b7691, #33415a);
+        clip-path: polygon(30% 0, 62% 6%, 100% 100%, 0 100%);
+      }
+      #ui {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      #stats {
+        position: fixed;
+        left: 50%;
+        bottom: 4px;
+        transform: translateX(-50%);
+        color: #fff;
+        font: 11px/1.2 monospace;
+        background: rgb(0 0 0 / 55%);
+        padding: 2px 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="backdrop">
+      <i style="left: 6%; width: 13%; height: 58%"></i>
+      <i style="left: 24%; width: 8%; height: 36%"></i>
+      <i style="left: 58%; width: 10%; height: 44%"></i>
+      <i style="left: 80%; width: 16%; height: 66%"></i>
+    </div>
+    <div id="ui"></div>
+    <div id="stats" hidden></div>
+    <script type="module" src="./hud-preview.ts"></script>
+  </body>
+</html>

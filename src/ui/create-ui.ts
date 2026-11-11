@@ -11,6 +11,7 @@
 import './ui.css';
 import type { UiIntentHandler, UiState } from '../shared/ui';
 import { el } from './dom';
+import { createHud } from './hud';
 import { LobbyScreen } from './screens/lobby';
 import {
   ConnectionChip,
@@ -19,6 +20,7 @@ import {
   SessionNotice,
   createReconnectStrip,
 } from './screens/overlays';
+import { ResultsPanel } from './screens/results';
 import { TitleScreen } from './screens/title';
 import type { NameStore } from './screens/title';
 import { computeLayers, createLayerFlags } from './view-model/connection';
@@ -82,6 +84,9 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
   const strip = createReconnectStrip();
   const pause = new PauseMenu(onIntent);
   const notice = new SessionNotice(onIntent);
+  const results = new ResultsPanel();
+  results.root.hidden = true;
+  let resultsShown = false;
 
   const layers: LayerFlags = createLayerFlags();
   // What is on the page now. Everything starts hidden; the first update reveals.
@@ -102,6 +107,14 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
   base.append(title.root, lobby.root, loading.root, chip.root, strip);
   container.append(base, pause.root, notice.root);
   root.appendChild(container);
+  // The match HUD sits inside `base`, under everything else there, so the escape menu and the
+  // session notice cover it and `inert` disables it with the rest. The results go on top of it.
+  // The scoreboard key is a rebindable action: the game sets `HudState.scoreboardOpen` from the
+  // bindings, so the HUD must not also listen for a hardcoded Tab (nor swallow Tab under the
+  // pause menu, where it moves the focus).
+  const hud = createHud(base, { listenForTab: false });
+  base.insertBefore(hud.element, base.firstChild);
+  base.appendChild(results.root);
 
   function update(state: UiState): void {
     if (disposed) return;
@@ -118,6 +131,16 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
     );
 
     // Fill a layer before revealing it, so it never flashes stale content.
+    const inMatch = state.screen === 'match' && !layers.notice;
+    hud.update(inMatch ? state.hud : null);
+    const showResults = inMatch && state.results !== null;
+    if (showResults) results.update(state);
+    if (showResults !== resultsShown) setHidden(results.root, !(resultsShown = showResults));
+    // The chip is a setting during a match (the lobby always shows it).
+    if (layers.chip && state.screen === 'match' && state.settings.showNetChip === false) {
+      layers.chip = false;
+    }
+
     if (layers.title) title.update(state);
     if (layers.lobby) lobby.update(state);
     if (layers.loading) loading.update(state);
@@ -136,7 +159,7 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
     }
 
     // A dialog disables what is behind it, so Tab cannot reach covered buttons.
-    const inert = layers.notice || layers.pause;
+    const inert = layers.notice || layers.pause || state.settingsOpen === true;
     if (inert !== baseInert) {
       baseInert = inert;
       base.inert = inert;
@@ -158,7 +181,8 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
    */
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape' || event.repeat || last === null) return;
-    if (shown.notice) return;
+    // The settings panel owns Escape while it is open (it closes itself).
+    if (shown.notice || last.settingsOpen === true) return;
     if (shown.pause) {
       event.preventDefault();
       onIntent({ type: 'match.resume' });
@@ -178,6 +202,7 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
       if (disposed) return;
       disposed = true;
       document.removeEventListener('keydown', onKeyDown);
+      hud.dispose();
       title.dispose();
       lobby.dispose();
       pause.dispose();

@@ -178,6 +178,11 @@ export class TitleScreen {
     this.signalingHint = el('p', 'dfu-hint', '');
     append(this.signalingRow, segment, this.signalingHint);
 
+    const settingsButton = button(
+      'dfu-btn dfu-btn-small dfu-title-settings',
+      'Settings',
+      'settings',
+    );
     append(
       card,
       nameLabel,
@@ -186,6 +191,7 @@ export class TitleScreen {
       this.joinBody,
       this.connectingBody,
       this.signalingRow,
+      settingsButton,
     );
 
     const foot = el(
@@ -346,6 +352,9 @@ export class TitleScreen {
         break;
       case 'dismissError':
         this.onIntent({ type: 'title.dismissError' });
+        break;
+      case 'settings':
+        this.onIntent({ type: 'settings.open' });
         break;
       case 'signalingOnline':
         this.onIntent({ type: 'settings.update', patch: { signaling: 'online' } });

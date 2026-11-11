@@ -1,0 +1,1366 @@
+/*
+ * Match HUD (src/ui/hud). Everything is prefixed `dfh-`.
+ *
+ * Look (docs/ART_DIRECTION.md, "UI"): parchment-white on translucent ink, thin serif for the few
+ * words, geometric sans numbers, team colours only on team information and always with the
+ * team's shape (triangle = Ember, diamond = Frost). Small, at the edges: the sky stays the star.
+ *
+ * Cost rules: no backdrop-filter, no blur, no large shadows. Values arrive as CSS variables or
+ * `opacity` / `transform`; nothing here animates layout. The two full-screen veils are static
+ * gradients whose opacity is the only thing that changes, and they are `display: none` when off.
+ * Decorative motion sits behind `prefers-reduced-motion: no-preference`.
+ *
+ * Scale: every size is in em of the root, which follows the window and `--df-ui-scale` (set by
+ * Settings on any ancestor; default 1). The reticle and damage arcs are in px because they
+ * mirror the input layer's steering circle.
+ */
+
+.dfh-root {
+  --dfh-ink: #141824;
+  --dfh-panel: #141824cc;
+  --dfh-panel-soft: rgb(20 24 36 / 58%);
+  --dfh-text: #fff6e8;
+  --dfh-muted: rgb(255 246 232 / 66%);
+  --dfh-faint: rgb(255 246 232 / 38%);
+  --dfh-line: rgb(255 246 232 / 18%);
+  --dfh-line-strong: rgb(255 246 232 / 40%);
+  --dfh-edge: #c9b79a;
+  --dfh-ember: #ff7a1a;
+  --dfh-frost: #3fd7ff;
+  --dfh-objective: #ff3fa4;
+  --dfh-harm: #ff6a5c;
+  --dfh-own: var(--dfh-text);
+  --dfh-serif:
+    'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Constantia, Georgia, serif;
+  --dfh-sans: 'Avenir Next', Avenir, 'Century Gothic', Futura, 'Segoe UI', system-ui, sans-serif;
+  --dfh-shadow: 0 1px 2px rgb(20 24 36 / 75%);
+
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  color: var(--dfh-text);
+  font-family: var(--dfh-sans);
+  font-size: calc(clamp(13px, 0.42vw + 0.5vh + 4.5px, 24px) * var(--df-ui-scale, 1));
+  line-height: 1.3;
+  contain: strict;
+}
+
+.dfh-root[hidden],
+.dfh-root [hidden] {
+  display: none !important;
+}
+
+.dfh-root[data-team='ember'] {
+  --dfh-own: var(--dfh-ember);
+}
+
+.dfh-root[data-team='frost'] {
+  --dfh-own: var(--dfh-frost);
+}
+
+.dfh-num {
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.02em;
+}
+
+.dfh-overline {
+  color: var(--dfh-edge);
+  font-size: 0.7em;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  text-shadow: var(--dfh-shadow);
+}
+
+/* Team shapes are filled, glyphs are line drawings. */
+.dfh-shape,
+.dfh-glyph {
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+
+.dfh-shape {
+  fill: currentColor;
+}
+
+.dfh-glyph {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+[data-team='ember'] > .dfh-shape {
+  color: var(--dfh-ember);
+}
+
+[data-team='frost'] > .dfh-shape {
+  color: var(--dfh-frost);
+}
+
+/* --- Full-screen veils -------------------------------------------------------------------------- */
+
+.dfh-lowhp,
+.dfh-blind {
+  position: absolute;
+  inset: 0;
+}
+
+.dfh-lowhp::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgb(150 20 24 / 0%) 44%,
+    rgb(150 20 24 / 40%) 76%,
+    rgb(120 12 20 / 80%) 100%
+  );
+}
+
+/* Night terror: the dark closes in and leaves a dim well in the middle. */
+.dfh-blind {
+  background: radial-gradient(
+    circle at center,
+    rgb(8 8 14 / 62%) 0,
+    rgb(8 8 14 / 90%) 14%,
+    rgb(8 8 14 / 98%) 34%,
+    #08080e 60%
+  );
+}
+
+/* --- Centre ------------------------------------------------------------------------------------- */
+
+.dfh-centre {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+}
+
+.dfh-ring {
+  position: absolute;
+  left: calc(var(--dfh-ring) * -1);
+  top: calc(var(--dfh-ring) * -1);
+  width: calc(var(--dfh-ring) * 2);
+  height: calc(var(--dfh-ring) * 2);
+  border: 1px solid rgb(255 246 232 / 15%);
+  border-radius: 50%;
+}
+
+.dfh-aim {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform: translate(var(--dfh-rx, 0px), var(--dfh-ry, 0px));
+  will-change: transform;
+}
+
+.dfh-dot {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgb(255 246 232 / 92%);
+  border-radius: 50%;
+  box-shadow: 0 0 3px rgb(20 24 36 / 80%);
+}
+
+/* Hit marker: four short ticks round the dot. No words. */
+.dfh-hit {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+}
+
+.dfh-hit > i {
+  position: absolute;
+  left: -1px;
+  top: -17px;
+  width: 2px;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--dfh-text);
+  box-shadow: 0 0 2px rgb(20 24 36 / 90%);
+  transform-origin: 1px 17px;
+}
+
+.dfh-hit > i:nth-child(1) {
+  transform: rotate(45deg);
+}
+
+.dfh-hit > i:nth-child(2) {
+  transform: rotate(135deg);
+}
+
+.dfh-hit > i:nth-child(3) {
+  transform: rotate(225deg);
+}
+
+.dfh-hit > i:nth-child(4) {
+  transform: rotate(315deg);
+}
+
+.dfh-hit[data-pulse='hit-a'] {
+  animation: dfh-hit-a 0.24s ease-out;
+}
+
+.dfh-hit[data-pulse='hit-b'] {
+  animation: dfh-hit-b 0.24s ease-out;
+}
+
+.dfh-hit[data-pulse='down-a'] {
+  animation: dfh-down-a 0.6s ease-out;
+}
+
+.dfh-hit[data-pulse='down-b'] {
+  animation: dfh-down-b 0.6s ease-out;
+}
+
+/* A takedown: longer, heavier ticks that open outward. */
+.dfh-hit[data-pulse^='down'] > i {
+  left: -1.5px;
+  top: -24px;
+  width: 3px;
+  height: 13px;
+  transform-origin: 1.5px 24px;
+}
+
+@keyframes dfh-hit-a {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dfh-hit-b {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dfh-down-a {
+  0% {
+    opacity: 1;
+    transform: scale(0.8);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes dfh-down-b {
+  0% {
+    opacity: 1;
+    transform: scale(0.8);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.2);
+  }
+}
+
+/* Damage direction: an arc on a circle outside the steering ring, turned toward the source. */
+.dfh-arc {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform: rotate(var(--dfh-a, 0deg));
+}
+
+.dfh-arc > svg {
+  position: absolute;
+  overflow: visible;
+}
+
+.dfh-arc path {
+  fill: none;
+  stroke: var(--dfh-harm);
+  stroke-width: 5;
+  stroke-linecap: round;
+  paint-order: stroke;
+  filter: none;
+}
+
+.dfh-prompt {
+  position: absolute;
+  left: 0;
+  top: 7.5em;
+  padding: 0.5em 1.3em;
+  border: 1px solid var(--dfh-line);
+  border-radius: 2em;
+  background: var(--dfh-panel);
+  font-size: 0.95em;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* --- Top: score, clock, compass ----------------------------------------------------------------- */
+
+.dfh-top {
+  position: absolute;
+  left: 50%;
+  top: 0.9em;
+  width: 30em;
+  margin-left: -15em;
+}
+
+.dfh-score {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.dfh-side {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 0.5em;
+  min-width: 0;
+  padding-bottom: 0.4em;
+  text-shadow: var(--dfh-shadow);
+}
+
+.dfh-side-ember {
+  justify-content: flex-end;
+}
+
+.dfh-side-frost {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+}
+
+.dfh-side > .dfh-shape {
+  width: 0.85em;
+  height: 0.85em;
+}
+
+.dfh-side-num {
+  min-width: 1.3em;
+  font-size: 1.55em;
+  font-weight: 300;
+  line-height: 1.1;
+  text-align: center;
+}
+
+/* Progress to the score limit: a hairline under each side that fills toward the clock. */
+.dfh-side-line {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--dfh-line);
+}
+
+.dfh-side-line > i {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(var(--dfh-v, 0));
+}
+
+.dfh-side-ember .dfh-side-line > i {
+  background: var(--dfh-ember);
+  transform-origin: right center;
+}
+
+.dfh-side-frost .dfh-side-line > i {
+  background: var(--dfh-frost);
+  transform-origin: left center;
+}
+
+/* Duel: round pips instead of a number and a line. */
+.dfh-pips {
+  display: flex;
+  gap: 0.34em;
+  padding-top: 0.5em;
+}
+
+.dfh-pips > i {
+  width: 0.85em;
+  height: 0.85em;
+  border: 1px solid var(--dfh-line-strong);
+  background: rgb(20 24 36 / 45%);
+}
+
+.dfh-side-ember .dfh-pips {
+  flex-direction: row-reverse;
+}
+
+/* The pip shape is the team's shape. */
+.dfh-side-ember .dfh-pips > i {
+  clip-path: polygon(50% 4%, 100% 96%, 0 96%);
+  background: rgb(20 24 36 / 50%);
+  border: 0;
+}
+
+.dfh-side-frost .dfh-pips > i {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  background: rgb(20 24 36 / 50%);
+  border: 0;
+}
+
+.dfh-side-ember .dfh-pips > i[data-on='1'] {
+  background: var(--dfh-ember);
+}
+
+.dfh-side-frost .dfh-pips > i[data-on='1'] {
+  background: var(--dfh-frost);
+}
+
+.dfh-score[data-mode='rounds'] .dfh-side > .dfh-shape,
+.dfh-score[data-mode='rounds'] .dfh-side-num,
+.dfh-score[data-mode='rounds'] .dfh-side-line,
+.dfh-score[data-mode='score'] .dfh-pips {
+  display: none;
+}
+
+.dfh-clock {
+  flex: none;
+  width: 7.4em;
+  text-align: center;
+  text-shadow: var(--dfh-shadow);
+}
+
+.dfh-clock-time {
+  font-size: 1.2em;
+  font-weight: 300;
+  line-height: 1.3;
+  letter-spacing: 0.06em;
+}
+
+.dfh-clock-sep {
+  margin: 0 0.08em;
+  color: var(--dfh-muted);
+}
+
+.dfh-clock-note {
+  color: var(--dfh-muted);
+  font-size: 0.66em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* The compass: a hairline with a centre notch; markers hang under it. */
+.dfh-compass {
+  position: relative;
+  height: 2.4em;
+  margin: 0.5em -4em 0;
+  border-top: 1px solid var(--dfh-line-strong);
+}
+
+.dfh-compass-notch {
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  width: 1px;
+  height: 0.5em;
+  background: var(--dfh-line-strong);
+}
+
+.dfh-mark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  /* --dfh-p is 0..1 along the strip; the marker box is the strip's width, so % of itself. */
+  transform: translateX(calc((var(--dfh-p, 0.5) - 0.5) * 100%));
+  will-change: transform;
+}
+
+.dfh-mark-in {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1em;
+  width: 3em;
+  margin: 0.3em auto 0;
+  text-shadow: var(--dfh-shadow);
+}
+
+.dfh-mark .dfh-shape {
+  width: 0.9em;
+  height: 0.9em;
+  /* A dark edge so the shape holds against a bright sky. */
+  stroke: rgb(20 24 36 / 70%);
+  stroke-width: 1;
+  paint-order: stroke;
+}
+
+.dfh-mark[data-team='ember'] .dfh-shape {
+  color: var(--dfh-ember);
+}
+
+.dfh-mark[data-team='frost'] .dfh-shape {
+  color: var(--dfh-frost);
+}
+
+.dfh-mark[data-team='objective'] .dfh-shape {
+  color: var(--dfh-objective);
+}
+
+.dfh-mark-dist {
+  font-size: 0.7em;
+  white-space: nowrap;
+}
+
+.dfh-mark-dist::after {
+  content: ' m';
+}
+
+/* Behind you: pinned to the end and faded. A downed teammate is hollowed out. */
+.dfh-mark[data-pinned='1'] {
+  opacity: 0.5;
+}
+
+.dfh-mark[data-down='1'] .dfh-shape {
+  opacity: 0.35;
+}
+
+/* --- Killfeed ----------------------------------------------------------------------------------- */
+
+.dfh-feed {
+  position: absolute;
+  top: 3.5em;
+  right: 1.3em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.22em;
+  font-size: 0.86em;
+}
+
+.dfh-feed-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.22em 0.7em 0.26em;
+  border-right: 2px solid transparent;
+  background: var(--dfh-panel-soft);
+}
+
+.dfh-feed-row[data-own='1'] {
+  border-right-color: var(--dfh-text);
+  background: var(--dfh-panel);
+}
+
+.dfh-feed-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  min-width: 0;
+}
+
+.dfh-feed-who > .dfh-shape {
+  width: 0.72em;
+  height: 0.72em;
+}
+
+.dfh-feed-name {
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfh-feed-glyph {
+  width: 1.15em;
+  height: 1.15em;
+  color: var(--dfh-edge);
+}
+
+/* --- Vitals (bottom left) ----------------------------------------------------------------------- */
+
+.dfh-vitals {
+  position: absolute;
+  bottom: 1.5em;
+  left: 1.7em;
+  width: 17em;
+}
+
+.dfh-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+  min-height: 1.6em;
+  margin-bottom: 0.5em;
+}
+
+.dfh-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36em;
+  padding: 0.14em 0.6em 0.16em 0.44em;
+  border: 1px solid var(--dfh-line);
+  background: var(--dfh-panel);
+  font-size: 0.7em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dfh-chip > .dfh-glyph {
+  width: 1.15em;
+  height: 1.15em;
+}
+
+.dfh-chip-harm {
+  border-color: rgb(255 106 92 / 55%);
+}
+
+.dfh-chip-harm > .dfh-glyph {
+  color: var(--dfh-harm);
+}
+
+.dfh-vitals-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45em;
+  margin-bottom: 0.3em;
+  text-shadow: var(--dfh-shadow);
+}
+
+.dfh-vitals-head > .dfh-shape {
+  align-self: center;
+  width: 0.78em;
+  height: 0.78em;
+  color: var(--dfh-own);
+}
+
+.dfh-class {
+  font-family: var(--dfh-serif);
+  font-size: 1.05em;
+  letter-spacing: 0.1em;
+}
+
+.dfh-hp {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.dfh-hp-now {
+  font-size: 1.5em;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.dfh-hp-max {
+  margin-left: 0.3em;
+  color: var(--dfh-muted);
+  font-size: 0.74em;
+}
+
+.dfh-hp-max::before {
+  content: '/ ';
+}
+
+.dfh-bar {
+  position: relative;
+  overflow: hidden;
+  background: rgb(20 24 36 / 62%);
+  box-shadow: 0 0 0 1px var(--dfh-line);
+}
+
+.dfh-bar-hp {
+  height: 0.5em;
+}
+
+.dfh-bar-st {
+  height: 0.2em;
+  margin-top: 0.3em;
+}
+
+.dfh-bar > i {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(var(--dfh-v, 1));
+  transform-origin: left center;
+}
+
+.dfh-bar-fill {
+  background: var(--dfh-text);
+}
+
+/* What was just lost lingers a moment in a dimmer tone, then follows the bar down. */
+.dfh-bar-ghost {
+  background: rgb(255 246 232 / 42%);
+  transition: transform 0.5s ease-out 0.25s;
+}
+
+.dfh-bar-hp[data-low='1'] > .dfh-bar-fill {
+  background: var(--dfh-harm);
+}
+
+.dfh-bar-st > .dfh-bar-fill {
+  background: var(--dfh-edge);
+}
+
+.dfh-bar-st[data-low='1'] > .dfh-bar-fill {
+  background: var(--dfh-faint);
+}
+
+/* --- Ability slots (bottom right) --------------------------------------------------------------- */
+
+.dfh-abilities {
+  position: absolute;
+  right: 1.7em;
+  bottom: 1.5em;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6em;
+}
+
+.dfh-root[data-down='1'] .dfh-abilities,
+.dfh-root[data-down='1'] .dfh-vitals {
+  opacity: 0.4;
+}
+
+.dfh-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 3em;
+}
+
+.dfh-slot-face {
+  position: relative;
+  width: 3em;
+  height: 3em;
+  overflow: hidden;
+  border: 1px solid var(--dfh-line-strong);
+  background: var(--dfh-panel);
+}
+
+.dfh-slot-glyph {
+  position: absolute;
+  left: 0.5em;
+  top: 0.5em;
+  width: 2em;
+  height: 2em;
+  stroke-width: 1.15;
+}
+
+.dfh-slot[data-state='cooling'] .dfh-slot-glyph {
+  opacity: 0.2;
+}
+
+.dfh-slot[data-state='locked'] .dfh-slot-glyph {
+  opacity: 0.5;
+}
+
+/* Cooldown: the dark part is what is still to run and it shrinks clockwise. */
+.dfh-slot-sweep {
+  position: absolute;
+  inset: 0;
+  background: conic-gradient(
+    transparent calc(100% - var(--dfh-cd, 0%)),
+    rgb(8 10 18 / 70%) calc(100% - var(--dfh-cd, 0%))
+  );
+}
+
+/* A charge is in store while the next one loads: the sweep stays, but light. */
+.dfh-slot[data-state='ready'] .dfh-slot-sweep {
+  opacity: 0.4;
+}
+
+.dfh-slot-secs {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2em;
+  font-weight: 300;
+  text-shadow: var(--dfh-shadow);
+}
+
+/* Wind-up: the face fills from the bottom. */
+.dfh-slot-cast {
+  position: absolute;
+  inset: 0;
+  background: rgb(255 246 232 / 30%);
+  transform: scaleY(var(--dfh-v, 0));
+  transform-origin: center bottom;
+}
+
+.dfh-slot[data-state='active'] .dfh-slot-face {
+  border-color: var(--dfh-text);
+  background: rgb(255 246 232 / 20%);
+}
+
+.dfh-slot[data-state='charging'] .dfh-slot-face {
+  border-color: var(--dfh-text);
+}
+
+.dfh-slot[data-held='1'] .dfh-slot-face {
+  border-color: var(--dfh-text);
+}
+
+/* Pressed while not ready: one short wash, no shake. */
+.dfh-slot-flash {
+  position: absolute;
+  inset: 0;
+  background: var(--dfh-harm);
+  opacity: 0;
+}
+
+.dfh-slot-flash[data-pulse='no-a'] {
+  animation: dfh-no-a 0.28s ease-out;
+}
+
+.dfh-slot-flash[data-pulse='no-b'] {
+  animation: dfh-no-b 0.28s ease-out;
+}
+
+@keyframes dfh-no-a {
+  from {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dfh-no-b {
+  from {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.dfh-slot-key {
+  margin-top: 0.34em;
+  /* One line whatever the binding is called: a caption must not push into the next slot. */
+  max-width: 4.8em;
+  overflow: hidden;
+  color: var(--dfh-muted);
+  font-size: 0.62em;
+  letter-spacing: 0.14em;
+  text-overflow: ellipsis;
+  text-shadow: var(--dfh-shadow);
+  white-space: nowrap;
+}
+
+.dfh-slot-pips {
+  position: absolute;
+  top: -0.6em;
+  display: flex;
+  gap: 0.22em;
+}
+
+.dfh-slot-pips > i {
+  width: 0.7em;
+  height: 0.22em;
+  background: rgb(255 246 232 / 26%);
+  box-shadow: 0 0 0 1px rgb(20 24 36 / 50%);
+}
+
+.dfh-slot-pips > i[data-on='1'] {
+  background: var(--dfh-text);
+}
+
+/* The ultimate: round, a little larger, and its rim is the charge. */
+.dfh-ult {
+  width: 3.7em;
+  margin-left: 0.3em;
+}
+
+.dfh-ult > .dfh-slot-face {
+  width: 3.7em;
+  height: 3.7em;
+  border: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--dfh-text) var(--dfh-cd, 0%),
+    rgb(255 246 232 / 20%) var(--dfh-cd, 0%)
+  );
+}
+
+.dfh-ult > .dfh-slot-face::before {
+  content: '';
+  position: absolute;
+  inset: 0.2em;
+  border-radius: 50%;
+  background: #171c2b;
+}
+
+.dfh-ult .dfh-slot-glyph {
+  left: 0.95em;
+  top: 0.5em;
+  width: 1.8em;
+  height: 1.8em;
+}
+
+.dfh-ult .dfh-slot-secs {
+  top: auto;
+  bottom: 0.42em;
+  height: auto;
+  color: var(--dfh-muted);
+  font-size: 0.68em;
+  font-weight: 400;
+}
+
+.dfh-ult .dfh-slot-secs::after {
+  content: '%';
+  margin-left: 0.1em;
+}
+
+.dfh-ult .dfh-slot-cast,
+.dfh-ult .dfh-slot-flash {
+  inset: 0.2em;
+  border-radius: 50%;
+}
+
+.dfh-ult[data-state='ready'] .dfh-slot-glyph,
+.dfh-ult[data-state='active'] .dfh-slot-glyph,
+.dfh-ult[data-state='charging'] .dfh-slot-glyph {
+  left: 0.75em;
+  top: 0.75em;
+  width: 2.2em;
+  height: 2.2em;
+}
+
+/* Ready: a second rim outside the first, breathing slowly. */
+.dfh-ult[data-state='ready'] > .dfh-slot-face {
+  overflow: visible;
+}
+
+.dfh-ult[data-state='ready'] > .dfh-slot-face::after {
+  content: '';
+  position: absolute;
+  inset: -0.32em;
+  border: 1px solid var(--dfh-text);
+  border-radius: 50%;
+  opacity: 0.7;
+}
+
+.dfh-ult[data-state='ready'] .dfh-slot-key {
+  color: var(--dfh-text);
+}
+
+/* --- Respawn panel, spectating label ------------------------------------------------------------ */
+
+.dfh-respawn {
+  position: absolute;
+  left: 50%;
+  top: 63%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3em;
+  min-width: 15em;
+  padding: 0.9em 1.8em 1em;
+  border-top: 1px solid var(--dfh-line-strong);
+  border-bottom: 1px solid var(--dfh-line);
+  background: var(--dfh-panel);
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.dfh-killer {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+}
+
+.dfh-killer > .dfh-shape {
+  align-self: center;
+  width: 0.85em;
+  height: 0.85em;
+}
+
+.dfh-killer-name {
+  max-width: 12em;
+  overflow: hidden;
+  font-family: var(--dfh-serif);
+  font-size: 1.4em;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfh-killer-class {
+  color: var(--dfh-muted);
+  font-size: 0.8em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.dfh-respawn-count {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7em;
+  margin-top: 0.2em;
+}
+
+.dfh-respawn-label {
+  color: var(--dfh-muted);
+  font-size: 0.8em;
+  letter-spacing: 0.1em;
+}
+
+.dfh-respawn-num {
+  min-width: 1.2em;
+  font-size: 1.7em;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.dfh-spectate {
+  position: absolute;
+  bottom: 1.6em;
+  left: 50%;
+  padding: 0.5em 1.6em 0.6em;
+  border-top: 1px solid var(--dfh-line-strong);
+  background: var(--dfh-panel);
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.dfh-spectate-name {
+  max-width: 14em;
+  overflow: hidden;
+  font-family: var(--dfh-serif);
+  font-size: 1.2em;
+  letter-spacing: 0.05em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfh-spectate-name:empty {
+  display: none;
+}
+
+/* --- Banner: countdown, round and match results -------------------------------------------------- */
+
+.dfh-banner {
+  position: absolute;
+  left: 50%;
+  top: 21%;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.dfh-banner > .dfh-overline {
+  color: var(--dfh-text);
+  font-size: 0.82em;
+  text-shadow:
+    0 1px 2px rgb(20 24 36 / 90%),
+    0 0 0.8em rgb(20 24 36 / 60%);
+}
+
+.dfh-banner-title {
+  font-family: var(--dfh-serif);
+  font-size: 3.4em;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: 0.14em;
+  /* Letter-spacing trails the last glyph: pull the box back so the word sits centred. */
+  margin-right: -0.14em;
+  text-shadow:
+    0 1px 3px rgb(20 24 36 / 85%),
+    0 0 1.2em rgb(20 24 36 / 45%);
+  white-space: nowrap;
+}
+
+.dfh-banner[data-kind='count'] .dfh-banner-title {
+  font-size: 5em;
+  letter-spacing: 0;
+  margin-right: 0;
+}
+
+.dfh-banner[data-kind='lost'] .dfh-banner-title {
+  color: var(--dfh-muted);
+}
+
+/* --- Scoreboard (hold Tab) ---------------------------------------------------------------------- */
+
+.dfh-board {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(62em, 94vw);
+  padding: 1.2em 1.5em 1.3em;
+  border-top: 1px solid var(--dfh-line-strong);
+  border-bottom: 1px solid var(--dfh-line);
+  background: rgb(20 24 36 / 88%);
+  transform: translate(-50%, -50%);
+}
+
+.dfh-board-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1em;
+  margin-bottom: 0.9em;
+}
+
+.dfh-board-title {
+  font-family: var(--dfh-serif);
+  font-size: 1.5em;
+  letter-spacing: 0.1em;
+}
+
+.dfh-board-note {
+  color: var(--dfh-muted);
+  font-size: 0.76em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.dfh-board-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.8em;
+}
+
+.dfh-team {
+  min-width: 0;
+  /* Five rows whether or not they are filled, so the panel does not jump as riders join. */
+  min-height: 12.4em;
+}
+
+.dfh-team-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  padding-bottom: 0.4em;
+  border-bottom: 2px solid var(--dfh-line-strong);
+}
+
+.dfh-team[data-team='ember'] > .dfh-team-head {
+  border-bottom-color: var(--dfh-ember);
+}
+
+.dfh-team[data-team='frost'] > .dfh-team-head {
+  border-bottom-color: var(--dfh-frost);
+}
+
+.dfh-team-head > .dfh-shape {
+  width: 0.9em;
+  height: 0.9em;
+}
+
+.dfh-team[data-team='ember'] .dfh-team-head > .dfh-shape {
+  color: var(--dfh-ember);
+}
+
+.dfh-team[data-team='frost'] .dfh-team-head > .dfh-shape {
+  color: var(--dfh-frost);
+}
+
+.dfh-team-name {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.dfh-team-score {
+  margin-left: auto;
+  font-size: 1.3em;
+  font-weight: 300;
+}
+
+.dfh-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.6em 2.4em 2.4em 2.4em 3.4em 2.6em;
+  align-items: baseline;
+  gap: 0.3em;
+  padding: 0.3em 0.5em 0.34em;
+  border-bottom: 1px solid rgb(255 246 232 / 8%);
+  border-left: 2px solid transparent;
+  font-size: 0.9em;
+}
+
+/* Column captions: the row keeps the rows' font size so its em columns line up with theirs. */
+.dfh-row-head {
+  border-bottom-color: transparent;
+  color: var(--dfh-faint);
+}
+
+.dfh-row-head > span {
+  font-size: 0.7em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.dfh-row[data-own='1'] {
+  border-left-color: var(--dfh-text);
+  background: rgb(255 246 232 / 10%);
+}
+
+.dfh-row[data-down='1'] > .dfh-cell-name,
+.dfh-row[data-down='1'] > .dfh-cell-class {
+  opacity: 0.45;
+}
+
+.dfh-cell-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfh-cell-class {
+  color: var(--dfh-muted);
+  font-size: 0.86em;
+}
+
+.dfh-row-head > .dfh-cell-class {
+  color: inherit;
+}
+
+.dfh-cell-n {
+  text-align: right;
+}
+
+.dfh-cell-key {
+  font-weight: 600;
+}
+
+.dfh-cell-ping {
+  color: var(--dfh-muted);
+}
+
+.dfh-board-watch {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9em;
+  margin-top: 0.9em;
+}
+
+.dfh-board-watch-names {
+  overflow: hidden;
+  color: var(--dfh-muted);
+  font-size: 0.84em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  .dfh-board-teams {
+    grid-template-columns: 1fr;
+    gap: 0.8em;
+  }
+
+  .dfh-team {
+    min-height: 0;
+  }
+}
+
+/* --- Motion (decorative only) ------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .dfh-lowhp::before {
+    animation: dfh-breathe 1.5s ease-in-out infinite alternate;
+  }
+
+  .dfh-ult[data-state='ready'] > .dfh-slot-face::after {
+    animation: dfh-rim 1.8s ease-in-out infinite alternate;
+  }
+
+  .dfh-banner-title[data-pulse='beat-a'] {
+    animation: dfh-beat-a 0.9s ease-out;
+  }
+
+  .dfh-banner-title[data-pulse='beat-b'] {
+    animation: dfh-beat-b 0.9s ease-out;
+  }
+}
+
+@keyframes dfh-breathe {
+  from {
+    opacity: 0.72;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dfh-rim {
+  from {
+    opacity: 0.25;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 0.8;
+    transform: scale(1.03);
+  }
+}
+
+@keyframes dfh-beat-a {
+  from {
+    opacity: 0.4;
+    transform: scale(1.18);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes dfh-beat-b {
+  from {
+    opacity: 0.4;
+    transform: scale(1.18);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dfh-bar-ghost {
+    transition: none;
+  }
+
+  .dfh-hit[data-pulse^='down'] {
+    animation-name: dfh-hit-a;
+  }
+
+  .dfh-hit[data-pulse='down-b'] {
+    animation-name: dfh-hit-b;
+  }
+}
+
+/*
+ * The same, forced by Settings for players whose system does not ask for reduced motion:
+ * put the class `df-reduce-motion` on any ancestor (e.g. `#ui`).
+ */
+.df-reduce-motion .dfh-lowhp::before,
+.df-reduce-motion .dfh-ult[data-state='ready'] > .dfh-slot-face::after,
+.df-reduce-motion .dfh-banner-title {
+  animation: none;
+}
+
+.df-reduce-motion .dfh-bar-ghost {
+  transition: none;
+}

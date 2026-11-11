@@ -86,6 +86,7 @@ const PAUSE_LEAVE_LABEL: Readonly<Record<PauseRole, string>> = {
 export class PauseMenu {
   readonly root: HTMLElement;
   private readonly resumeButton: HTMLButtonElement;
+  private readonly settingsButton: HTMLButtonElement;
   private readonly endButton: HTMLButtonElement;
   private readonly leaveButton: HTMLButtonElement;
   private readonly hint: HTMLElement;
@@ -102,11 +103,20 @@ export class PauseMenu {
     const title = el('h2', 'dfu-heading', 'Flight menu');
     title.id = 'dfu-pause-title';
     this.resumeButton = button('dfu-btn dfu-btn-primary dfu-btn-large', 'Resume', 'resume');
+    this.settingsButton = button('dfu-btn dfu-btn-large', 'Settings', 'settings');
     this.endButton = button('dfu-btn dfu-btn-large', 'End match · back to lobby', 'endMatch');
     this.endButton.hidden = true;
     this.leaveButton = button('dfu-btn dfu-btn-large', PAUSE_LEAVE_LABEL.guest, 'leaveMatch');
     this.hint = el('p', 'dfu-hint', PAUSE_HINT.guest);
-    append(card, title, this.hint, this.resumeButton, this.endButton, this.leaveButton);
+    append(
+      card,
+      title,
+      this.hint,
+      this.resumeButton,
+      this.settingsButton,
+      this.endButton,
+      this.leaveButton,
+    );
     this.root.appendChild(card);
     this.root.addEventListener('click', this.onClick);
   }
@@ -133,6 +143,7 @@ export class PauseMenu {
     if (target === null) return;
     const act = target.dataset['act'];
     if (act === 'resume') this.onIntent({ type: 'match.resume' });
+    else if (act === 'settings') this.onIntent({ type: 'settings.open' });
     else if (act === 'endMatch') this.onIntent({ type: 'match.end' });
     else if (act === 'leaveMatch') this.onIntent({ type: 'match.leave' });
   };

@@ -11,8 +11,13 @@ import type { DragonClassId } from '../../shared/classes';
 import { DRAGON_CLASSES, DRAGON_CLASS_IDS, isDragonClassId } from '../../shared/classes';
 import type { LobbySide, PlayerId, TeamId } from '../../shared/constants';
 import { MAX_TEAM_SIZE, NO_PLAYER, TEAMS, TEAM_EMBER, TEAM_FROST } from '../../shared/constants';
-import type { HostSettings, LobbyPhase, LobbyState } from '../../shared/lobby';
-import { HOST_SETTING_LIMITS } from '../../shared/lobby';
+import type { BotDifficulty, HostSettings, LobbyPhase, LobbyState } from '../../shared/lobby';
+import {
+  BOT_DIFFICULTIES,
+  HOST_SETTING_LIMITS,
+  isBotDifficulty,
+  isBotSide,
+} from '../../shared/lobby';
 import type { MapId, ModeId } from '../../shared/match';
 import { MAPS, MODES } from '../../shared/match';
 import type { UiIntentHandler, UiStartBlocker, UiState } from '../../shared/ui';
@@ -39,6 +44,11 @@ const TEAM_ICON: Readonly<Record<TeamId, IconName>> = {
   [TEAM_FROST]: TEAMS[TEAM_FROST].icon,
 };
 const COPY_FEEDBACK_MS = 1600;
+const BOT_LEVEL_LABELS: Readonly<Record<BotDifficulty, string>> = {
+  easy: 'Easy',
+  normal: 'Normal',
+  hard: 'Hard',
+};
 const PHASE_TEXT: Readonly<Record<LobbyPhase, string>> = {
   lobby: 'Gathering riders',
   starting: 'Riders launching…',
@@ -320,6 +330,12 @@ export class LobbyScreen {
   private readonly hostTools: HTMLElement;
   private readonly balanceButton: HTMLButtonElement;
   private readonly shuffleButton: HTMLButtonElement;
+  private readonly botLevelButtons: HTMLButtonElement[] = [];
+  private readonly botTools: HTMLElement;
+  private readonly addEmberBot: HTMLButtonElement;
+  private readonly addFrostBot: HTMLButtonElement;
+  private readonly fillBotsButton: HTMLButtonElement;
+  private readonly clearBotsButton: HTMLButtonElement;
   private readonly startButton: HTMLButtonElement;
   private readonly startNote: HTMLElement;
 
@@ -505,6 +521,32 @@ export class LobbyScreen {
     this.shuffleButton = button('dfu-btn dfu-btn-small', 'Shuffle', 'shuffle');
     append(this.hostTools, this.balanceButton, this.shuffleButton);
 
+    // Bot riders (T-3.10): the host seats them, everyone sees their skill.
+    const botLevelGroup = el('div', 'dfu-segment');
+    botLevelGroup.setAttribute('role', 'group');
+    botLevelGroup.setAttribute('aria-label', 'Bot skill');
+    for (const level of BOT_DIFFICULTIES) {
+      const node = button('dfu-segment-btn', BOT_LEVEL_LABELS[level], 'botLevel');
+      node.dataset['level'] = level;
+      node.setAttribute('aria-pressed', 'false');
+      this.botLevelButtons.push(node);
+      botLevelGroup.appendChild(node);
+    }
+    this.botTools = el('div', 'dfu-row dfu-host-tools dfu-bot-tools');
+    this.addEmberBot = button('dfu-btn dfu-btn-small', '+ Ember bot', 'addBot');
+    this.addEmberBot.dataset['side'] = String(TEAM_EMBER);
+    this.addFrostBot = button('dfu-btn dfu-btn-small', '+ Frost bot', 'addBot');
+    this.addFrostBot.dataset['side'] = String(TEAM_FROST);
+    this.fillBotsButton = button('dfu-btn dfu-btn-small', 'Fill with bots', 'fillBots');
+    this.clearBotsButton = button('dfu-btn dfu-btn-small', 'Clear bots', 'clearBots');
+    append(
+      this.botTools,
+      this.addEmberBot,
+      this.addFrostBot,
+      this.fillBotsButton,
+      this.clearBotsButton,
+    );
+
     const startBox = el('div', 'dfu-start');
     this.startButton = button('dfu-btn dfu-btn-primary dfu-btn-large', 'Start match', 'start');
     this.startNote = el('p', 'dfu-hint dfu-start-note');
@@ -525,8 +567,9 @@ export class LobbyScreen {
       ruleRow('Time limit', this.timeSelect),
       ruleRow('Friendly fire', this.fireSwitch),
       ruleRow('Dragons', allowGroup),
+      ruleRow('Bot skill', botLevelGroup),
     );
-    append(rules, rulesHead, ruleList, this.hostTools, startBox);
+    append(rules, rulesHead, ruleList, this.hostTools, this.botTools, startBox);
 
     append(this.root, main, rules);
 
@@ -663,6 +706,24 @@ export class LobbyScreen {
     const canArrange = canEdit && !settings.teamsLocked;
     setDisabled(this.balanceButton, !canArrange);
     setDisabled(this.shuffleButton, !canArrange);
+    for (const node of this.botLevelButtons) {
+      setPressed(node, 'aria-pressed', node.dataset['level'] === settings.botDifficulty);
+      setDisabled(node, !canEdit);
+    }
+    if (this.botTools.hidden === view.localIsHost) this.botTools.hidden = !view.localIsHost;
+    let ember = 0;
+    let frost = 0;
+    let bots = 0;
+    for (const player of lobby.players) {
+      if (player.side === TEAM_EMBER) ember++;
+      else if (player.side === TEAM_FROST) frost++;
+      if (player.isBot) bots++;
+    }
+    const size = settings.teamSize;
+    setDisabled(this.addEmberBot, !canEdit || ember >= size);
+    setDisabled(this.addFrostBot, !canEdit || frost >= size);
+    setDisabled(this.fillBotsButton, !canEdit || (ember >= size && frost >= size));
+    setDisabled(this.clearBotsButton, !canEdit || bots === 0);
     if (this.startButton.hidden === view.localIsHost) this.startButton.hidden = !view.localIsHost;
     setDisabled(this.startButton, !canEdit || (blocker !== null && blocker !== undefined));
     setText(
@@ -805,9 +866,34 @@ export class LobbyScreen {
         break;
       case 'kick': {
         const playerId = this.playerIdOf(target);
-        if (playerId !== null) this.onIntent({ type: 'host.kick', playerId });
+        if (playerId === null) break;
+        const player = this.lastLobby?.players.find((other) => other.id === playerId);
+        // A bot the host seated has no connection to kick: it is simply taken out. (An in-page
+        // `?bots=N` client refuses that and is kicked like anyone else.)
+        if (player !== undefined && player.isBot) {
+          this.onIntent({ type: 'host.removeBot', playerId });
+        }
+        this.onIntent({ type: 'host.kick', playerId });
         break;
       }
+      case 'botLevel': {
+        const level = target.dataset['level'];
+        if (isBotDifficulty(level)) {
+          this.onIntent({ type: 'host.setBotDifficulty', difficulty: level });
+        }
+        break;
+      }
+      case 'addBot': {
+        const side = Number(target.dataset['side']);
+        if (isBotSide(side)) this.onIntent({ type: 'host.addBot', side });
+        break;
+      }
+      case 'fillBots':
+        this.onIntent({ type: 'host.fillBots' });
+        break;
+      case 'clearBots':
+        this.onIntent({ type: 'host.clearBots' });
+        break;
       case 'teamSize': {
         const teamSize = Number(target.dataset['size']);
         if (Number.isInteger(teamSize)) this.onIntent({ type: 'host.setTeamSize', teamSize });

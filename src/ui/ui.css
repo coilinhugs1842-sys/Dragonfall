@@ -30,8 +30,11 @@
   inset: 0;
   color: var(--dfu-text);
   font-family: var(--dfu-sans);
-  /* One scale for 1280×720 up to large displays: every size below is in em. */
-  font-size: clamp(13.5px, 0.45vw + 0.5vh + 5px, 24px);
+  /*
+   * One scale for 1280×720 up to large displays: every size below is in em. `--df-ui-scale` is
+   * the interface-size setting (set on <html> by src/game; 1 when absent).
+   */
+  font-size: calc(clamp(13.5px, 0.45vw + 0.5vh + 5px, 24px) * var(--df-ui-scale, 1));
   line-height: 1.4;
 }
 
@@ -1391,4 +1394,126 @@
   .dfu-signaling {
     padding-top: 0.7em;
   }
+}
+
+/* --- Title: settings ------------------------------------------------------------------------------ */
+
+.dfu-title-settings {
+  align-self: flex-start;
+}
+
+/* --- Lobby: bot riders ---------------------------------------------------------------------------- */
+
+.dfu-bot-tools {
+  flex-wrap: wrap;
+}
+
+/* --- Match result (T-3.4) ------------------------------------------------------------------------- */
+
+.dfu-results {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.5em;
+  background: rgb(9 11 20 / 46%);
+  pointer-events: none;
+}
+
+.dfu-results-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  width: min(46em, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  padding: 1.6em 2em 1.4em;
+  background: var(--dfu-panel-solid);
+  text-align: center;
+}
+
+.dfu-results-title {
+  font-size: 2.2em;
+}
+
+.dfu-results[data-winner='ember'] .dfu-results-title {
+  border-bottom: 2px solid var(--dfu-ember);
+}
+
+.dfu-results[data-winner='frost'] .dfu-results-title {
+  border-bottom: 2px solid var(--dfu-frost);
+}
+
+.dfu-results-score {
+  color: var(--dfu-muted);
+  font-size: 1.15em;
+  letter-spacing: 0.04em;
+}
+
+.dfu-results-tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18em, 1fr));
+  gap: 1em 1.6em;
+  text-align: left;
+}
+
+.dfu-results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86em;
+}
+
+.dfu-results-table th {
+  padding: 0.3em 0.4em;
+  color: var(--dfu-muted);
+  font-size: 0.82em;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.dfu-results-table th.dfu-results-team {
+  text-align: left;
+}
+
+.dfu-results-table[data-team='ember'] th.dfu-results-team {
+  color: var(--dfu-ember);
+}
+
+.dfu-results-table[data-team='frost'] th.dfu-results-team {
+  color: var(--dfu-frost);
+}
+
+.dfu-results-table td {
+  padding: 0.32em 0.4em;
+  border-top: 1px solid var(--dfu-line);
+  text-align: right;
+}
+
+.dfu-results-table td:first-child {
+  text-align: left;
+}
+
+.dfu-results-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.6em;
+  align-items: baseline;
+}
+
+.dfu-results-class {
+  color: var(--dfu-faint);
+  font-size: 0.85em;
+}
+
+.dfu-results-award {
+  color: var(--dfu-edge);
+  font-size: 0.8em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dfu-results-me td {
+  background: var(--dfu-wash);
 }
