@@ -406,6 +406,33 @@ export interface HudState {
   readonly scoreboardOpen?: boolean;
   /** Key captions per slot index (rebinding). Absent = LMB / RMB / F / R. */
   readonly keyLabels?: readonly string[];
+  /** Match intro (T-5.4): the map / mode title card. Absent or null = no card. */
+  readonly introCard?: IntroCardState | null;
+}
+
+/** The title card of the match intro flyby. `src/game` may mutate one object in place. */
+export interface IntroCardState {
+  /** Display names, e.g. "Shattered Spires" and "Skirmish". */
+  readonly mapName: string;
+  readonly modeName: string;
+  /** 0..1: the cinematic fades the card in and out. 0 = do not draw. */
+  readonly opacity: number;
+}
+
+/**
+ * A name card floating over a dragon's perch in the aerie lobby (T-5.2). The 3D scene projects
+ * each occupied perch to the screen; the UI draws the rider's name and class there (it looks
+ * both up in `UiState.lobby` by `playerId`). A fixed pool: read `lobbyPlateCount` entries.
+ */
+export interface LobbyPlate {
+  readonly playerId: PlayerId;
+  /** Viewport fractions, 0..1 from the top-left corner: where the bottom centre of the card goes. */
+  readonly x: number;
+  readonly y: number;
+  /** 1 at the usual lobby camera distance; larger in a close-up. Clamp before use. */
+  readonly scale: number;
+  /** False when the perch is behind the camera or off screen. */
+  readonly visible: boolean;
 }
 
 /** Pool sizes the HUD draws; `src/game` sizes its arrays to match. */
@@ -452,6 +479,23 @@ export interface UiState {
   readonly settingsTab?: SettingsTab;
   /** Key bindings for the Controls tab. Absent = the tab shows no rebind list. */
   readonly controls?: ControlsUiState;
+
+  // --- Cinematics (Phase 5). All optional and additive. ------------------------------------------
+  /**
+   * Lobby: the 3D aerie is on screen behind the UI, so the lobby must leave the middle of the
+   * screen clear (docked panels, no full-screen card). Absent / false = the flat lobby panel.
+   */
+  readonly aerie?: boolean;
+  /** Lobby: name cards over the perches. `src/game` reuses one array: read `lobbyPlateCount`. */
+  readonly lobbyPlates?: readonly LobbyPlate[];
+  readonly lobbyPlateCount?: number;
+  /** Lobby: the rider the close-up camera frames (`lobby.focusPlayer`), or NO_PLAYER. */
+  readonly lobbyFocusId?: PlayerId;
+  /**
+   * 0..1: a full-screen fade to the sky's cream colour for scene cuts (aerie launch into the
+   * match intro, results back to the aerie). 0 / absent = none. The UI only draws it.
+   */
+  readonly fade?: number;
 }
 
 // --- Intents ------------------------------------------------------------------------------------
