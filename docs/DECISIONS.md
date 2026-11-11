@@ -53,3 +53,16 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
     confusing to coordinate. The Cursor worktree, branch, rules and lane task files were removed. There is one
     task list (`docs/TASKS.md`) and one progress log (`docs/PROGRESS.md`). Any editor (Cursor, VS Code) can
     still be used to view or edit the code by hand.
+
+## 2026-11-10: Phase 0 follow-ups (user delegated these to Claude)
+
+14. **Dragon snapshot flags are `u16`, not `u8`.** Phase 0 already used all 8 bits. Widening costs 1 byte per
+    dragon per snapshot (about 200 B/s per client at 5v5), which is nothing next to the 7 KB/s budget, and leaves
+    8 bits for later statuses. Dropping `IN_STORM` would only have bought one bit. Revisit if the snapshot ever
+    needs trimming.
+15. **`PERFORMANCE.md` is the single source for on-screen budgets.** `ASSET_PIPELINE.md`'s "Map total" row was
+    stale (800k triangles / 400 MB, from before the U-series retarget) and now reads 450k / 300 MB at Medium.
+16. **No automatic re-test when the display refresh rate drops mid-session.** A periodic probe at minimum scale
+    would cause a visible dip for a rare case. The scaler's `reset()` already re-detects; the Settings menu
+    (T-3.9) will call it when the player changes quality or presses a "re-detect display" control. Revisit if
+    playtests on battery show the scale stuck at minimum.

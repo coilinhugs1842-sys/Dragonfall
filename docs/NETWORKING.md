@@ -86,10 +86,10 @@ The Phase 2 spike must confirm that PeerJS 1.5 gives us an unreliable channel (`
 - `ArrayBuffer` messages with a `DataView` codec in `net/codec.ts`. JSON is used only for rare `ctrl` messages
   such as lobby settings.
 - Message header: `u8 type`, `u16 tick`.
-- **Dragon state in a snapshot (~22 bytes):** `u8 id`, position as 3 × `i16` (map space quantized to about
+- **Dragon state in a snapshot (~23 bytes):** `u8 id`, position as 3 × `i16` (map space quantized to about
   6 cm), orientation as a smallest-three quaternion packed into `u32`, velocity as 3 × `i8` scaled, `u8`
-  health, `u8` stamina, `u8` flags, `u8` animation state.
-- **Budget:** 10 dragons × 22 B + projectiles + header ≈ 350 B × 20 Hz ≈ **7 KB/s per client**. The host
+  health, `u8` stamina, `u16` flags, `u8` animation state.
+- **Budget:** 10 dragons × 23 B + projectiles + header ≈ 360 B × 20 Hz ≈ **7 KB/s per client**. The host
   uploads about 63 KB/s to 9 clients (about 0.5 Mbps). Laptop Wi-Fi handles that easily.
 - Delta compression is optional (Phase 6) and only if measurements show it's needed.
 

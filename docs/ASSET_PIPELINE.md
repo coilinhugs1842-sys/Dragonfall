@@ -99,4 +99,4 @@ are always **real-time**, never video files, so they react to the actual players
 | Hero rock | 8k / 3k / 800 | shared tileables | ≤ 1 MB |
 | Prop | ≤ 3k | shared atlas | ≤ 300 KB |
 | Sky panorama | — | 4096×2048 KTX2 | ≤ 6 MB |
-| Map total | ≤ 800k on screen at Medium | ≤ 400 MB VRAM | ≤ 60 MB download |
+| Map total | ≤ 450k on screen at Medium (per preset: `PERFORMANCE.md`) | ≤ 300 MB VRAM at Medium | ≤ 60 MB download |

@@ -269,7 +269,7 @@ describe('classes and tuning', () => {
     expect(FLIGHT_TUNING.dodgeCooldownS).toBe(4);
   });
 
-  it('fits the dragon flags in the snapshot u8, one bit each', () => {
+  it('fits the dragon flags in the snapshot u16, one bit each', () => {
     const flags = [
       DRAGON_FLAG_ALIVE,
       DRAGON_FLAG_BOOSTING,
@@ -287,7 +287,7 @@ describe('classes and tuning', () => {
       expect(mask & flag).toBe(0);
       mask |= flag;
     }
-    expect(mask).toBeLessThanOrEqual(0xff);
+    expect(mask).toBeLessThanOrEqual(0xffff);
   });
 
   it('has a u8 wire table without duplicates for every kind that crosses the network', () => {

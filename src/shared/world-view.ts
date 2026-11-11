@@ -18,11 +18,10 @@ import type { MatchPhase } from './match';
 import type { MutableQuat, MutableVec3, Quat, Vec3 } from './math-types';
 import { createQuat, createVec3 } from './math-types';
 
-// --- Dragon flags (a `u8` in the snapshot) ----------------------------------------------------------
+// --- Dragon flags (a `u16` in the snapshot) ---------------------------------------------------------
 //
-// All 8 bits are taken. The next replicated status needs either the snapshot field widened to
-// `u16` (docs/NETWORKING.md) or a bit freed here; IN_STORM is the candidate, since a client can
-// derive it from the dragon's position and the `stormWall` zone. Never renumber a shipped bit.
+// Bits 0-7 are taken; bits 8-15 are free for later statuses (DECISIONS 14 widened the field from
+// `u8` rather than dropping IN_STORM). Never renumber a shipped bit.
 
 export const DRAGON_FLAG_ALIVE = 1 << 0;
 export const DRAGON_FLAG_BOOSTING = 1 << 1;

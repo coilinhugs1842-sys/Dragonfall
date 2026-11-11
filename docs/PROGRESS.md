@@ -7,7 +7,7 @@ up where the last one stopped.
 
 - **Phase:** 0 (Scaffold) built, **waiting for the user's gate check** on a U-series laptop.
 - **Next:** T-1.1 (flight model) once the Phase 0 gate passes.
-- **Open issues:** see "Open questions" in the 2026-11-10 Phase 0 entry.
+- **Open issues:** `three-mesh-bvh` vs the sim import rule (T-1.7).
 
 ## Log
 
@@ -34,15 +34,10 @@ up where the last one stopped.
 - **Perf HUD:** no "before" (first runnable build). Only checked in headless Edge on the dev machine (scene, HUD
   and debug panel render, console clean, 1 draw call, 20 triangles); headless timings mean nothing. **Real
   numbers come from the user's gate check on a U-series laptop.**
-- **Open questions for the user:**
-  1. Dragon flags use all 8 bits of the `u8` in NETWORKING.md. Drop `IN_STORM` (clients can derive it) or widen
-     to `u16`? Decide before the codec (T-2.2).
-  2. ASSET_PIPELINE.md "Map total" says 800k triangles / 400 MB VRAM at Medium; PERFORMANCE.md says 450k / 300 MB.
-     The code follows PERFORMANCE.md. Correct ASSET_PIPELINE.md?
-  3. Dynamic resolution: if the display refresh rate drops mid-session (60 to 48 Hz on unplugging) the scale can
-     stay pinned at minimum. A fix needs a periodic re-test or a manual "re-detect" hook.
-  4. `three-mesh-bvh` needs `BufferGeometry`, which the sim boundary test rejects (math-only three imports).
-     Settle in T-1.7.
+- **Follow-ups decided (DECISIONS 14-16):** dragon flags widened to `u16`; ASSET_PIPELINE.md map budget corrected
+  to 450k / 300 MB; no automatic refresh-rate re-test (Settings will call the scaler's `reset()`, T-3.9).
+- **Still open:** `three-mesh-bvh` needs `BufferGeometry`, which the sim boundary test rejects (math-only three
+  imports). Settle in T-1.7.
 
 ### 2026-11-10: setup finished
 - Planning docs, config, folder skeleton, git + LFS on `main`. No game code yet.

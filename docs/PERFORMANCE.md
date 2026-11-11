@@ -52,7 +52,7 @@ lights, full-resolution bloom, or a transparent full-screen effect stacked on an
 ## Techniques we rely on
 
 - **Dynamic resolution.** The renderer measures frame time and adjusts the render scale within the preset's
-  bounds to hold 60 fps. Fullscreen effects scale with it.
+  bounds to hold 60 fps (or the display's own rate when that is slower, e.g. a 48 Hz battery mode). Fullscreen effects scale with it.
 - **Cheap stylized lighting.** One sun plus hemisphere ambient, lighting baked into textures (AO, painted
   highlights) and fog to hide the far plane. The painterly style in `ART_DIRECTION.md` was chosen partly because
   it looks great without expensive lighting.
