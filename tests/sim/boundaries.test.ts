@@ -1,7 +1,8 @@
 /**
  * Golden rule 3 as a test: `src/sim` and `src/net` never import a view module, never use
  * three.js scene objects and never touch the DOM, so they stay runnable in node and in a Web
- * Worker. `src/shared` is held to the same rules, because sim and net import it freely.
+ * Worker. `src/shared` is held to the same rules, because sim and net import it freely, and it
+ * may not import three.js at all (its vector shapes are plain interfaces).
  *
  * Imports are checked against an ALLOW-list: a new module or package is rejected until it is
  * added here on purpose. This scans the source text; it does not execute anything, so it will
@@ -21,18 +22,11 @@ const OTHER_FORBIDDEN_MODULES = ['dev', 'game', 'input'];
 interface Boundary {
   /** Top-level `src/` directories a relative import may land in. */
   readonly modules: ReadonlySet<string>;
-  /** Bare packages besides the math subset of 'three'. */
+  /** Bare packages besides the allowed subset of 'three'. */
   readonly packages: ReadonlySet<string>;
+  /** Named exports of 'three' its files may import. Empty = no three.js at all. */
+  readonly three: ReadonlySet<string>;
 }
-
-/** Guarded `src/` directory -> what its files may import. Everything else is a violation. */
-const BOUNDARIES: Readonly<Record<string, Boundary>> = {
-  shared: { modules: new Set(['shared']), packages: new Set() },
-  // three-mesh-bvh: terrain raycasts (docs/ARCHITECTURE.md, "Physics").
-  sim: { modules: new Set(['sim', 'shared']), packages: new Set(['three-mesh-bvh']) },
-  net: { modules: new Set(['net', 'sim', 'shared']), packages: new Set(['peerjs']) },
-};
-const GUARDED_DIRS = Object.keys(BOUNDARIES);
 
 /**
  * three.js exports that are plain math with no scene graph or GPU state behind them. Anything
@@ -54,6 +48,32 @@ const THREE_MATH_ALLOWLIST = new Set([
   'Vector3',
   'Vector4',
 ]);
+
+/**
+ * Plain geometry data containers (typed arrays plus bookkeeping, no GPU state until a renderer
+ * touches them, so they are worker-safe). Only the sim may use them: three-mesh-bvh builds its
+ * terrain collision BVH from a BufferGeometry (Phase 1 decision).
+ */
+const THREE_DATA_ALLOWLIST = new Set(['BufferAttribute', 'BufferGeometry']);
+
+const NO_THREE: ReadonlySet<string> = new Set();
+
+/** Guarded `src/` directory -> what its files may import. Everything else is a violation. */
+const BOUNDARIES: Readonly<Record<string, Boundary>> = {
+  shared: { modules: new Set(['shared']), packages: new Set(), three: NO_THREE },
+  // three-mesh-bvh: terrain raycasts (docs/ARCHITECTURE.md, "Physics").
+  sim: {
+    modules: new Set(['sim', 'shared']),
+    packages: new Set(['three-mesh-bvh']),
+    three: new Set([...THREE_MATH_ALLOWLIST, ...THREE_DATA_ALLOWLIST]),
+  },
+  net: {
+    modules: new Set(['net', 'sim', 'shared']),
+    packages: new Set(['peerjs']),
+    three: THREE_MATH_ALLOWLIST,
+  },
+};
+const GUARDED_DIRS = Object.keys(BOUNDARIES);
 
 /**
  * Browser-only globals. The lookbehind skips property names (`zone.window`), and the words that
@@ -127,7 +147,8 @@ function packageName(specifier: string): string {
   return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : (parts[0] ?? specifier);
 }
 
-function checkThreeImport(ref: ImportRef): string | null {
+function checkThreeImport(ref: ImportRef, allowed: ReadonlySet<string>): string | null {
+  if (allowed.size === 0) return `may not import three.js at all ('${ref.specifier}')`;
   if (ref.specifier !== 'three') {
     return `imports '${ref.specifier}' (three.js addons are view code)`;
   }
@@ -145,8 +166,8 @@ function checkThreeImport(ref: ImportRef): string | null {
           .split(/\s+as\s+/)[0] ?? '',
     )
     .filter((name) => name.length > 0);
-  const bad = names.filter((name) => !THREE_MATH_ALLOWLIST.has(name));
-  return bad.length > 0 ? `imports non-math three.js exports: ${bad.join(', ')}` : null;
+  const bad = names.filter((name) => !allowed.has(name));
+  return bad.length > 0 ? `imports three.js exports that are not allowed: ${bad.join(', ')}` : null;
 }
 
 /** Returns one message per violation in `source`, as if it were the file at `file`. */
@@ -166,7 +187,7 @@ function findViolations(file: string, source: string): string[] {
         );
       }
     } else if (ref.specifier === 'three' || ref.specifier.startsWith('three/')) {
-      const problem = checkThreeImport(ref);
+      const problem = checkThreeImport(ref, boundary.three);
       if (problem !== null) problems.push(problem);
     } else if (!boundary.packages.has(packageName(ref.specifier))) {
       problems.push(`${guarded} may not import the package '${ref.specifier}'`);
@@ -279,6 +300,18 @@ describe('boundary scanner', () => {
       1,
     );
     expect(checkIn('shared', `import { Mesh } from 'three';`)).toHaveLength(1);
+  });
+
+  it('lets only the sim use the geometry data containers, and keeps shared free of three', () => {
+    const data = `import { BufferAttribute, BufferGeometry, Vector3 } from 'three';`;
+    expect(check(data)).toEqual([]);
+    expect(check(`import type { BufferGeometry } from 'three';`)).toEqual([]);
+    expect(checkIn('net', data)).toHaveLength(1);
+    expect(checkIn('net', `import { Vector3 } from 'three';`)).toEqual([]);
+    expect(check(`import { BufferGeometry, Mesh } from 'three';`)).toHaveLength(1);
+    expect(check(`import { Float32BufferAttribute } from 'three';`)).toHaveLength(1);
+    expect(checkIn('shared', `import { Vector3 } from 'three';`)).toHaveLength(1);
+    expect(checkIn('shared', `import type { Quaternion } from 'three';`)).toHaveLength(1);
   });
 
   it('flags DOM globals in code but not in comments', () => {
