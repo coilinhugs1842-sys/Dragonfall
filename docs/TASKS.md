@@ -5,12 +5,12 @@ Ids are `T-<phase>.<n>`. Work top to bottom unless the user says otherwise. Each
 `ROADMAP.md`.
 
 ## Phase 0: Scaffold
-- [ ] T-0.1 `vite.config.ts` (copy meshopt decoder + KTX2 transcoder files to `public/`), `index.html`, `src/main.ts`. (`npm install` already done)
-- [ ] T-0.2 `src/shared` contracts: `InputFrame`, `WorldView`, `GameEvents`, `UiState`/`UiIntent`, `QualityPreset` table, manifests, constants, tuning tables
-- [ ] T-0.3 Fixed 30 Hz sim loop + render interpolation alpha; App state machine skeleton (title/lobby/match/results)
-- [ ] T-0.4 `src/render` base: WebGL2 renderer, quality presets, dynamic resolution scaler
-- [ ] T-0.5 `src/dev`: perf HUD (`?perf`: stats-gl + renderer.info + heap), lil-gui (`?debug`)
-- [ ] T-0.6 Vitest setup + first sim-loop tests; `npm run build` green; tell the user what to check for the Phase 0 gate
+- [x] T-0.1 `vite.config.ts` (copy meshopt decoder + KTX2 transcoder files to `public/`), `index.html`, `src/main.ts`. (`npm install` already done)
+- [x] T-0.2 `src/shared` contracts: `InputFrame`, `WorldView`, `GameEvents`, `UiState`/`UiIntent`, `QualityPreset` table, manifests, constants, tuning tables
+- [x] T-0.3 Fixed 30 Hz sim loop + render interpolation alpha; App state machine skeleton (title/lobby/match/results)
+- [x] T-0.4 `src/render` base: WebGL2 renderer, quality presets, dynamic resolution scaler
+- [x] T-0.5 `src/dev`: perf HUD (`?perf`: stats-gl + renderer.info + heap), lil-gui (`?debug`)
+- [x] T-0.6 Vitest setup + first sim-loop tests; `npm run build` green; tell the user what to check for the Phase 0 gate
 
 ## Phase 1: Flight sandbox
 - [ ] T-1.1 Flight model in `src/sim` (energy, stall, boost/stamina, flap, dive, roll-dodge) with a tuning table
