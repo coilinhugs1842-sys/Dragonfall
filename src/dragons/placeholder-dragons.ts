@@ -31,6 +31,8 @@ import {
   CLASS_TUNING,
   DRAGON_CLASS_IDS,
   DRAGON_FLAG_ALIVE,
+  DRAGON_FLAG_PHASING,
+  DRAGON_FLAG_SHIELDED,
   DRAGON_FLAG_SPAWN_PROTECTED,
   DRAGON_FLAG_VEILED,
   FLIGHT_TUNING,
@@ -70,6 +72,12 @@ const TAIL_LIFT_PER_AMPLITUDE = 0.9;
 const SPAWN_PULSE_RATE = 14;
 /** Accent multiplier for a veiled dragon the local player is still allowed to see. */
 const VEILED_ACCENT = 0.2;
+/** Fraction of its pixels a veiled dragon keeps for the players who may still see it. */
+const VEILED_FADE = 0.38;
+/** The same for a dragon passing through terrain (phase dive): ghostly for everyone. */
+const PHASING_FADE = 0.55;
+/** Accent multiplier while the wing shield is up. */
+const SHIELDED_ACCENT = 1.7;
 /** A longer frame than this (tab switch, hitch) is animated as this long, seconds. */
 const MAX_ANIMATION_DT_S = 0.1;
 const NO_TEAM = -1;
@@ -111,6 +119,7 @@ interface ClassBatch {
   readonly geometry: BufferGeometry;
   readonly pose: InstancedBufferAttribute;
   readonly accent: InstancedBufferAttribute;
+  readonly fade: InstancedBufferAttribute;
   readonly triangles: number;
   count: number;
 }
@@ -167,6 +176,9 @@ export function createPlaceholderDragons(
     const accent = new InstancedBufferAttribute(new Float32Array(MAX_PLAYERS * 3), 3);
     accent.setUsage(DynamicDrawUsage);
     geometry.setAttribute('aAccent', accent);
+    const fade = new InstancedBufferAttribute(new Float32Array(MAX_PLAYERS).fill(1), 1);
+    fade.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('aFade', fade);
 
     const mesh = new InstancedMesh(geometry, material, MAX_PLAYERS);
     mesh.name = `dragons-${classId}`;
@@ -179,7 +191,7 @@ export function createPlaceholderDragons(
     // drawing an off-screen dragon does.
     mesh.frustumCulled = false;
     object.add(mesh);
-    batches.push({ mesh, geometry, pose, accent, triangles: data.triangleCount, count: 0 });
+    batches.push({ mesh, geometry, pose, accent, fade, triangles: data.triangleCount, count: 0 });
   }
 
   // Linear RGB per team id.
@@ -271,6 +283,13 @@ export function createPlaceholderDragons(
       let glow = ACCENT_STRENGTH * (poses[p + POSE_GLOW] ?? 0);
       if ((flags & DRAGON_FLAG_SPAWN_PROTECTED) !== 0) glow *= spawnPulse;
       if (veiled) glow *= VEILED_ACCENT;
+      else if ((flags & DRAGON_FLAG_SHIELDED) !== 0) glow *= SHIELDED_ACCENT;
+      // Seen through: a veiled dragon by its own team (and by spectators), anyone mid-phase.
+      batch.fade.array[slot] = veiled
+        ? VEILED_FADE
+        : (flags & DRAGON_FLAG_PHASING) !== 0
+          ? PHASING_FADE
+          : 1;
       const accentArray = batch.accent.array;
       const a = slot * 3;
       const t = dragon.team * 3;
@@ -299,6 +318,7 @@ export function createPlaceholderDragons(
       mesh.instanceMatrix.needsUpdate = true;
       batch.pose.needsUpdate = true;
       batch.accent.needsUpdate = true;
+      batch.fade.needsUpdate = true;
       drawCalls++;
       triangles += batch.triangles * batch.count;
     }

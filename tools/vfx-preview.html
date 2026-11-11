@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Dragonfall VFX preview (dev)</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b1020;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #label {
+        position: fixed;
+        left: 12px;
+        bottom: 10px;
+        font:
+          12px/1.4 ui-monospace,
+          Consolas,
+          monospace;
+        color: #fff6e8;
+        background: #141824cc;
+        padding: 4px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Dev only: /tools/vfx-preview.html?scene=talon|bastion|tempest|wraith|misc|stress&quality=medium&t=1.5&scale=0.7 -->
+    <canvas></canvas>
+    <div id="label"></div>
+    <script type="module" src="/src/vfx/dev-preview.ts"></script>
+  </body>
+</html>

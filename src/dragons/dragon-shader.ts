@@ -8,6 +8,10 @@
  *                                         membrane mask
  *   attribute vec4 aPose    per instance: flap, extra tip flap, sweep (radians), tail lift (m)
  *   attribute vec3 aAccent  per instance: linear RGB emissive of the team accent (lit pass only)
+ *   attribute float aFade   per instance: 1 = solid; below 1 the dragon is drawn as a screen-door
+ *                                         pattern covering that fraction of its pixels (veil seen
+ *                                         by its own team, phase dive). Lit pass only. No
+ *                                         blending and no sorting: the same cost on every preset.
  *
  * A wing vertex is turned about its shoulder hinge: first SWEEP about the up axis (+Y), then
  * FLAP about the forward axis (+Z). In dragon space +X is the left wing, so the left wing uses
@@ -19,7 +23,7 @@
 import { WING_HINGE_Y, WING_HINGE_Z } from './dragon-geometry';
 
 /** Changes whenever the patch text does: three.js caches compiled programs under this key. */
-export const DRAGON_SHADER_CACHE_KEY = 'dragonfall-placeholder-dragon-2';
+export const DRAGON_SHADER_CACHE_KEY = 'dragonfall-placeholder-dragon-3';
 
 export type DragonShaderVariant = 'lit' | 'depth';
 
@@ -45,7 +49,9 @@ vec3 dfTurnWing( vec3 v, vec2 sweep, vec2 flap ) {
 
 const ACCENT_VERTEX_PARS = /* glsl */ `
 attribute vec3 aAccent;
+attribute float aFade;
 varying vec3 vDfAccent;
+varying float vDfFade;
 `;
 
 const POSE_SETUP = /* glsl */ `
@@ -68,14 +74,21 @@ transformed.y += aWing.z * aWing.z * aPose.w;
 
 const ACCENT_VERTEX = /* glsl */ `
 vDfAccent = aAccent * aWing.w;
+vDfFade = aFade;
 `;
 
 const ACCENT_FRAGMENT_PARS = /* glsl */ `
 varying vec3 vDfAccent;
+varying float vDfFade;
 `;
 
 const ACCENT_FRAGMENT = /* glsl */ `
 totalEmissiveRadiance += vDfAccent;
+if ( vDfFade < 0.999 ) {
+	// Interleaved gradient noise: a stable, evenly spread screen-door pattern.
+	float dfDither = fract( 52.9829189 * fract( dot( floor( gl_FragCoord.xy ), vec2( 0.06711056, 0.00583715 ) ) ) );
+	if ( dfDither > vDfFade ) discard;
+}
 `;
 
 function insertAfter(source: string, token: string, addition: string): string {
