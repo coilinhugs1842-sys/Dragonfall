@@ -11,7 +11,14 @@
  * replaced (the room's state lived in it): the room closes with an error, like a lost host.
  */
 
-import type { LobbyState, MatchPhase, PlayerId, UiIntent } from '../../shared';
+import type {
+  LobbyState,
+  MatchPhase,
+  MatchPlayerStats,
+  MatchWinner,
+  PlayerId,
+  UiIntent,
+} from '../../shared';
 import type { StartBlocker } from '../../sim/lobby';
 import type { HostSessionState } from '../session';
 import type { TransportError } from '../transport';
@@ -65,6 +72,10 @@ function workerConfig(options: CreateHostOptions): HostWorkerConfig {
     skipTicks: options.skipTicks,
     measure: options.profileClock !== undefined,
     autopilot: options.autopilot ?? null,
+    localBot: options.localBot === true,
+    lagCompensation: options.lagCompensation !== false,
+    wantEvents: options.events !== undefined && options.events !== null,
+    autoSettings: options.autoSettings ?? null,
     ...(options.botSeed !== undefined ? { botSeed: options.botSeed } : {}),
     ...(options.mapSeed !== undefined ? { mapSeed: options.mapSeed } : {}),
     ...(session?.roomCode !== undefined ? { roomCode: session.roomCode } : {}),
@@ -109,6 +120,7 @@ class SwitchingHost implements HostHandle {
       now,
       epochNow: options.epochNow ?? now,
       localInput: options.localInput ?? null,
+      events: options.events ?? null,
       onState: options.onState ?? null,
       onStartFailed: fallBack,
       ...(options.profileClock !== undefined ? { profileClock: options.profileClock } : {}),
@@ -157,6 +169,34 @@ class SwitchingHost implements HostHandle {
 
   get phaseTimeS(): number {
     return this.inner.phaseTimeS;
+  }
+
+  get matchRound(): number {
+    return this.inner.matchRound;
+  }
+
+  get matchWinner(): MatchWinner | null {
+    return this.inner.matchWinner;
+  }
+
+  get timeRemainingS(): number {
+    return this.inner.timeRemainingS;
+  }
+
+  get scoreEmber(): number {
+    return this.inner.scoreEmber;
+  }
+
+  get scoreFrost(): number {
+    return this.inner.scoreFrost;
+  }
+
+  get matchStats(): readonly Readonly<MatchPlayerStats>[] {
+    return this.inner.matchStats;
+  }
+
+  get matchStatsCount(): number {
+    return this.inner.matchStatsCount;
   }
 
   get localIsRider(): boolean {

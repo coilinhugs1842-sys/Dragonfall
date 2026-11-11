@@ -44,13 +44,29 @@ import {
   RECONCILE_SMOOTH_MS,
   TICK_DT_S,
   TICK_MS,
+  ZONE_DEFS,
+  ZONE_KINDS,
   createQuat,
   createVec3,
 } from '../../shared';
 import type { DragonAnimState, MatchPhase, MutableQuat, MutableVec3, PlayerId } from '../../shared';
 import { expandTick } from '../codec/quantize';
-import { SNAPSHOT_MAX_DRAGONS, WIRE_VELOCITY_MAX_MPS, createSnapshotDragon } from '../protocol';
-import type { SnapshotDragon, SnapshotMessage } from '../protocol';
+import {
+  SNAPSHOT_MAX_DRAGONS,
+  SNAPSHOT_MAX_PROJECTILES,
+  SNAPSHOT_MAX_ZONES,
+  WIRE_VELOCITY_MAX_MPS,
+  createSnapshotDragon,
+  createSnapshotProjectile,
+  createSnapshotZone,
+  staticZoneDue,
+} from '../protocol';
+import type {
+  SnapshotDragon,
+  SnapshotMessage,
+  SnapshotProjectile,
+  SnapshotZone,
+} from '../protocol';
 import { PlaybackClock } from './playback-clock';
 
 /** Default ring size: 1.6 s at 20 Hz, far more than the 150 ms the playhead trails by. */
@@ -87,12 +103,34 @@ interface StoredSnapshot {
   scoreFrost: number;
   dragonCount: number;
   dragons: SnapshotDragon[];
+  stormRadius: number;
+  projectileCount: number;
+  projectiles: SnapshotProjectile[];
+  zoneCount: number;
+  zones: SnapshotZone[];
+}
+
+function createProjectilePool(): SnapshotProjectile[] {
+  const pool: SnapshotProjectile[] = [];
+  for (let i = 0; i < SNAPSHOT_MAX_PROJECTILES; i++) pool.push(createSnapshotProjectile());
+  return pool;
+}
+
+function createZonePool(): SnapshotZone[] {
+  const pool: SnapshotZone[] = [];
+  for (let i = 0; i < SNAPSHOT_MAX_ZONES; i++) pool.push(createSnapshotZone());
+  return pool;
 }
 
 function createStoredSnapshot(): StoredSnapshot {
   const dragons: SnapshotDragon[] = [];
   for (let i = 0; i < SNAPSHOT_MAX_DRAGONS; i++) dragons.push(createSnapshotDragon());
   return {
+    stormRadius: -1,
+    projectileCount: 0,
+    projectiles: createProjectilePool(),
+    zoneCount: 0,
+    zones: createZonePool(),
     tick: -1,
     phase: 'lobby',
     round: 1,
@@ -138,6 +176,16 @@ export interface SnapshotSample {
   starved: boolean;
   /** How far past the newest snapshot the dragons were extrapolated (0..MAX_EXTRAPOLATION_MS). */
   extrapolatedMs: number;
+  /** Storm wall radius a mode set, or negative for the map's own. */
+  stormRadius: number;
+  /**
+   * The slow projectiles (the ones snapshots carry) and the ability zones at the play tick.
+   * Entries at index >= the matching count are stale. Fast bolts are not here: see `ClientBolts`.
+   */
+  projectileCount: number;
+  projectiles: SnapshotProjectile[];
+  zoneCount: number;
+  zones: SnapshotZone[];
 }
 
 export function createSnapshotSample(): SnapshotSample {
@@ -168,6 +216,11 @@ export function createSnapshotSample(): SnapshotSample {
     scoreFrost: 0,
     starved: false,
     extrapolatedMs: 0,
+    stormRadius: -1,
+    projectileCount: 0,
+    projectiles: createProjectilePool(),
+    zoneCount: 0,
+    zones: createZonePool(),
   };
 }
 
@@ -218,6 +271,7 @@ export class SnapshotBuffer {
   private samplePlayTick = 0;
   /** Tick of the snapshot the previous `sample` read from. */
   private lastSourceTick = -1;
+  private effectCarryS = 0;
 
   private received = 0;
   private duplicates = 0;
@@ -385,6 +439,45 @@ export class SnapshotBuffer {
     }
     slot.dragonCount = kept;
 
+    slot.stormRadius = msg.stormRadius;
+    const projectileCount =
+      msg.projectileCount < SNAPSHOT_MAX_PROJECTILES
+        ? msg.projectileCount
+        : SNAPSHOT_MAX_PROJECTILES;
+    for (let i = 0; i < projectileCount; i++) {
+      const from = msg.projectiles[i];
+      const to = slot.projectiles[i];
+      if (from === undefined || to === undefined) continue;
+      to.id = from.id;
+      to.kind = from.kind;
+      to.ownerId = from.ownerId;
+      to.team = from.team;
+      to.position.x = from.position.x;
+      to.position.y = from.position.y;
+      to.position.z = from.position.z;
+      to.velocity.x = from.velocity.x;
+      to.velocity.y = from.velocity.y;
+      to.velocity.z = from.velocity.z;
+    }
+    slot.projectileCount = projectileCount;
+    const zoneCount = msg.zoneCount < SNAPSHOT_MAX_ZONES ? msg.zoneCount : SNAPSHOT_MAX_ZONES;
+    for (let i = 0; i < zoneCount; i++) {
+      const from = msg.zones[i];
+      const to = slot.zones[i];
+      if (from === undefined || to === undefined) continue;
+      to.id = from.id;
+      to.kind = from.kind;
+      to.ownerId = from.ownerId;
+      to.team = from.team;
+      to.position.x = from.position.x;
+      to.position.y = from.position.y;
+      to.position.z = from.position.z;
+      to.radius = from.radius;
+      to.remainingS = from.remainingS;
+    }
+    slot.zoneCount = zoneCount;
+    if (at > 0) this.carryStaticZones(slot, this.order[at - 1]);
+
     this.received++;
     this.clock.onSnapshot(tick, recvMs);
     return tick;
@@ -431,6 +524,8 @@ export class SnapshotBuffer {
     const playTick = this.samplePlayTick;
     out.playTick = playTick;
     out.dragonCount = 0;
+    out.projectileCount = 0;
+    out.zoneCount = 0;
     out.starved = false;
     out.extrapolatedMs = 0;
     if (this.stored === 0) {
@@ -465,6 +560,9 @@ export class SnapshotBuffer {
     const carryS = carryMs / 1000;
     out.starved = starved;
     if (starved) out.extrapolatedMs = carryMs;
+
+    this.effectCarryS = carryS;
+    this.sampleEffects(out, a, b);
 
     // Whole ticks between A and B (0 without a B, where `t` is not used).
     const gapTicks = b !== undefined ? b.tick - a.tick : 0;
@@ -651,5 +749,138 @@ export class SnapshotBuffer {
     }
     out.dragonCount = written;
     return out;
+  }
+
+  /**
+   * Standing zones are not in every snapshot (SNAPSHOT_ZONE_REFRESH): the ones `before` (the
+   * snapshot stored just ahead of `slot`) holds and `slot` was not sent are copied over with
+   * their time counted down, so every stored snapshot lists every zone and sampling needs to
+   * know nothing about it. A zone missing although it was due in `slot` has ended.
+   */
+  private carryStaticZones(slot: StoredSnapshot, before: StoredSnapshot | undefined): void {
+    if (before === undefined || before.zoneCount === 0) return;
+    const elapsedS = (slot.tick - before.tick) * TICK_DT_S;
+    const sent = slot.zoneCount;
+    // A full list was cut short by the host: "missing" then says nothing.
+    const complete = sent < SNAPSHOT_MAX_ZONES;
+    for (let i = 0; i < before.zoneCount && slot.zoneCount < SNAPSHOT_MAX_ZONES; i++) {
+      const from = before.zones[i];
+      const to = slot.zones[slot.zoneCount];
+      if (from === undefined || to === undefined) continue;
+      const kind = ZONE_KINDS[from.kind];
+      if (kind === undefined || ZONE_DEFS[kind].follow) continue;
+      if (!(from.remainingS > elapsedS)) continue;
+      if (complete && staticZoneDue(slot.tick, from.id)) continue;
+      let listed = false;
+      for (let j = 0; j < sent; j++) {
+        if (slot.zones[j]?.id === from.id) {
+          listed = true;
+          break;
+        }
+      }
+      if (listed) continue;
+      to.id = from.id;
+      to.kind = from.kind;
+      to.ownerId = from.ownerId;
+      to.team = from.team;
+      to.position.x = from.position.x;
+      to.position.y = from.position.y;
+      to.position.z = from.position.z;
+      to.radius = from.radius;
+      to.remainingS = from.remainingS - elapsedS;
+      slot.zoneCount++;
+    }
+  }
+
+  /**
+   * Projectiles and zones at the play tick, from snapshot A: a record that B also has (same id)
+   * is lerped to it, anything else is carried along its velocity for `carryS` (capped by the
+   * caller like every extrapolation). A record that only B has appears when the playhead gets
+   * there. Reads `this.samplePlayTick` and `this.effectCarryS` (fields, not float arguments).
+   */
+  private sampleEffects(
+    out: SnapshotSample,
+    a: StoredSnapshot,
+    b: StoredSnapshot | undefined,
+  ): void {
+    const carryS = this.effectCarryS;
+    const gap = b !== undefined ? b.tick - a.tick : 0;
+    const t = gap > 0 ? Math.max(0, Math.min(1, (this.samplePlayTick - a.tick) / gap)) : 0;
+    out.stormRadius = a.stormRadius;
+
+    let count = 0;
+    for (let i = 0; i < a.projectileCount; i++) {
+      const from = a.projectiles[i];
+      const to = out.projectiles[count];
+      if (from === undefined || to === undefined) continue;
+      let next: SnapshotProjectile | undefined;
+      if (b !== undefined) {
+        for (let j = 0; j < b.projectileCount; j++) {
+          const candidate = b.projectiles[j];
+          if (candidate !== undefined && candidate.id === from.id && candidate.kind === from.kind) {
+            next = candidate;
+            break;
+          }
+        }
+      }
+      to.id = from.id;
+      to.kind = from.kind;
+      to.ownerId = from.ownerId;
+      to.team = from.team;
+      if (next !== undefined) {
+        to.position.x = from.position.x + (next.position.x - from.position.x) * t;
+        to.position.y = from.position.y + (next.position.y - from.position.y) * t;
+        to.position.z = from.position.z + (next.position.z - from.position.z) * t;
+        to.velocity.x = from.velocity.x + (next.velocity.x - from.velocity.x) * t;
+        to.velocity.y = from.velocity.y + (next.velocity.y - from.velocity.y) * t;
+        to.velocity.z = from.velocity.z + (next.velocity.z - from.velocity.z) * t;
+      } else {
+        to.position.x = from.position.x + from.velocity.x * carryS;
+        to.position.y = from.position.y + from.velocity.y * carryS;
+        to.position.z = from.position.z + from.velocity.z * carryS;
+        to.velocity.x = from.velocity.x;
+        to.velocity.y = from.velocity.y;
+        to.velocity.z = from.velocity.z;
+      }
+      count++;
+    }
+    out.projectileCount = count;
+
+    count = 0;
+    const elapsedS = Math.max(0, this.samplePlayTick - a.tick) * TICK_DT_S;
+    for (let i = 0; i < a.zoneCount; i++) {
+      const from = a.zones[i];
+      const to = out.zones[count];
+      if (from === undefined || to === undefined) continue;
+      let next: SnapshotZone | undefined;
+      if (b !== undefined) {
+        for (let j = 0; j < b.zoneCount; j++) {
+          const candidate = b.zones[j];
+          if (candidate !== undefined && candidate.id === from.id && candidate.kind === from.kind) {
+            next = candidate;
+            break;
+          }
+        }
+      }
+      to.id = from.id;
+      to.kind = from.kind;
+      to.ownerId = from.ownerId;
+      to.team = from.team;
+      to.radius = from.radius;
+      const remaining = from.remainingS - elapsedS;
+      to.remainingS = remaining > 0 ? remaining : 0;
+      if (next !== undefined) {
+        // A zone that follows its owner moves; the others stand still and this is a no-op.
+        to.position.x = from.position.x + (next.position.x - from.position.x) * t;
+        to.position.y = from.position.y + (next.position.y - from.position.y) * t;
+        to.position.z = from.position.z + (next.position.z - from.position.z) * t;
+      } else {
+        to.position.x = from.position.x;
+        to.position.y = from.position.y;
+        to.position.z = from.position.z;
+      }
+      count++;
+    }
+    out.zoneCount = count;
   }
 }

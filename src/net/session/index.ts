@@ -64,6 +64,14 @@ export {
   encodePlayerPings,
 } from './pings';
 export type { PlayerPingsMessage } from './pings';
+export {
+  SCOREBOARD_MAX_BYTES,
+  SCOREBOARD_MAX_ROWS,
+  createScoreTable,
+  decodeScoreboard,
+  encodeScoreboard,
+} from './scores';
+export type { ScoreTable } from './scores';
 export { steerToCourse } from './pilot';
 export type { PilotCourse, PilotSubject } from './pilot';
 export {

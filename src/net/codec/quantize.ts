@@ -8,9 +8,10 @@
  * tests/net/codec-fast.test.ts compare them).
  */
 
-import { BUTTON_MASK, TICK_DT_S, TICK_HZ } from '../../shared';
+import { BUTTON_MASK, TICK_DT_S, TICK_HZ, clampAimYaw } from '../../shared';
 import type { InputFrame, MutableQuat, Quat } from '../../shared';
 import {
+  WIRE_AIM_UNITS,
   WIRE_POSITION_CENTER_Y_M,
   WIRE_POSITION_STEP_M,
   WIRE_TIME_INFINITE,
@@ -123,7 +124,41 @@ export function snapInputFrame(frame: InputFrame): InputFrame {
   frame.steerX = snapSteer(frame.steerX);
   frame.steerY = snapSteer(frame.steerY);
   frame.buttons &= BUTTON_MASK;
+  frame.aimYaw = snapAimYaw(frame.aimYaw);
+  frame.aimPitch = snapAimPitch(frame.aimPitch);
   return frame;
+}
+
+// --- Aim -----------------------------------------------------------------------------------------
+
+const AIM_YAW_UNITS = WIRE_AIM_UNITS / Math.PI;
+const AIM_PITCH_UNITS = WIRE_AIM_UNITS / (Math.PI / 2);
+
+/** Aim heading in [-PI, PI] -> `i16`. Clamps (wrap it first: `clampAimYaw`); NaN becomes 0. */
+export function quantizeAimYaw(radians: number): number {
+  return Math.max(-32767, Math.min(32767, Math.round(radians * AIM_YAW_UNITS))) | 0;
+}
+
+export function dequantizeAimYaw(quantized: number): number {
+  return Math.max(-Math.PI, quantized / AIM_YAW_UNITS);
+}
+
+/** Aim pitch in [-PI/2, PI/2] -> `i16`. Clamps; NaN becomes 0. */
+export function quantizeAimPitch(radians: number): number {
+  return Math.max(-32767, Math.min(32767, Math.round(radians * AIM_PITCH_UNITS))) | 0;
+}
+
+export function dequantizeAimPitch(quantized: number): number {
+  return Math.max(-Math.PI / 2, quantized / AIM_PITCH_UNITS);
+}
+
+/** The values the host will see for this aim (about 0.1 mrad steps). */
+export function snapAimYaw(radians: number): number {
+  return dequantizeAimYaw(quantizeAimYaw(clampAimYaw(radians)));
+}
+
+export function snapAimPitch(radians: number): number {
+  return dequantizeAimPitch(quantizeAimPitch(radians));
 }
 
 // --- Fractions and clock -------------------------------------------------------------------------

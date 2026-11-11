@@ -13,7 +13,14 @@
  * owns the clock) and `viewAlpha()` to blend `prev` -> `current`.
  */
 
-import type { LobbyState, MatchPhase, PlayerId, UiIntent } from '../../shared';
+import type {
+  LobbyState,
+  MatchPhase,
+  MatchPlayerStats,
+  MatchWinner,
+  PlayerId,
+  UiIntent,
+} from '../../shared';
 import type { StartBlocker } from '../../sim/lobby';
 import type { HostSessionState } from '../session';
 import type {
@@ -135,6 +142,21 @@ export interface HostHandle {
   /** `lobby` outside a match. */
   readonly matchPhase: MatchPhase;
   readonly phaseTimeS: number;
+  /** 1-based round (1 outside a match and outside Duel). */
+  readonly matchRound: number;
+  /** Who won the round (`roundEnd`) or the match (`results`); null otherwise. */
+  readonly matchWinner: MatchWinner | null;
+  /** Seconds left in the round or match; Infinity with no limit. */
+  readonly timeRemainingS: number;
+  /** Takedowns in Skirmish, rounds won in Duel. */
+  readonly scoreEmber: number;
+  readonly scoreFrost: number;
+  /**
+   * Per-rider totals for the scoreboard and the results: the first `matchStatsCount` rows are
+   * live. Mutated in place; do not keep rows. (A worker host's copy is up to 250 ms old.)
+   */
+  readonly matchStats: readonly Readonly<MatchPlayerStats>[];
+  readonly matchStatsCount: number;
   /** The host's own player has a dragon. */
   readonly localIsRider: boolean;
   /** The two newest authoritative states; null outside a match or before the first one. */
@@ -311,6 +333,34 @@ export class DirectHost implements HostHandle {
 
   get phaseTimeS(): number {
     return this.core.session.matchClock.phaseTimeS;
+  }
+
+  get matchRound(): number {
+    return this.core.session.matchRound;
+  }
+
+  get matchWinner(): MatchWinner | null {
+    return this.core.session.matchWinner;
+  }
+
+  get timeRemainingS(): number {
+    return this.core.session.matchClock.timeRemainingS;
+  }
+
+  get scoreEmber(): number {
+    return this.core.session.matchClock.scoreEmber;
+  }
+
+  get scoreFrost(): number {
+    return this.core.session.matchClock.scoreFrost;
+  }
+
+  get matchStats(): readonly Readonly<MatchPlayerStats>[] {
+    return this.core.session.matchStats;
+  }
+
+  get matchStatsCount(): number {
+    return this.core.session.matchStatsCount;
   }
 
   get localIsRider(): boolean {

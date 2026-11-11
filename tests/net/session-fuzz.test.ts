@@ -34,7 +34,7 @@ import {
 import type { NetIntent } from '../../src/net/protocol';
 import { NOOP_CLIENT_HANDLERS } from '../../src/net/transport';
 import type { Channel, LoopbackClientTransport } from '../../src/net/transport';
-import { PROTOCOL_VERSION, createSeededRandom } from '../../src/shared';
+import { BUTTON_MASK, PROTOCOL_VERSION, createSeededRandom } from '../../src/shared';
 import type { LobbyState } from '../../src/shared';
 import { createRoom, startMatch } from './session-harness';
 import type { Rig } from './session-harness';
@@ -365,7 +365,7 @@ describe('fuzz: a hostile client', () => {
         applied++;
         expect(Math.abs(frame.steerX)).toBeLessThanOrEqual(1);
         expect(Math.abs(frame.steerY)).toBeLessThanOrEqual(1);
-        expect(frame.buttons & ~0x7ff).toBe(0);
+        expect(frame.buttons & ~BUTTON_MASK).toBe(0);
         expect(frame.tick).toBe(tick);
       }
       return frame;

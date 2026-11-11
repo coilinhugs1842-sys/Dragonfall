@@ -134,7 +134,7 @@ describe('message table', () => {
   });
 
   it('uses the protocol version of the shared constants', () => {
-    expect(PROTOCOL_VERSION).toBe(1);
+    expect(PROTOCOL_VERSION).toBe(2);
   });
 });
 
@@ -651,6 +651,25 @@ describe('GAME_EVENTS', () => {
     { type: 'matchPhase', tick: 70_300, phase: 'roundEnd', round: 3, winner: 'draw' },
     { type: 'matchPhase', tick: 70_301, phase: 'countdown', round: 4, winner: null },
     { type: 'matchPhase', tick: 4_000_000_000, phase: 'results', round: 5, winner: TEAM_FROST },
+    { type: 'assist', tick: 70_302, assisterId: 4, killerId: 2, victimId: 7 },
+    { type: 'assist', tick: 70_303, assisterId: 4, killerId: NO_PLAYER, victimId: 7 },
+    {
+      type: 'statusApplied',
+      tick: 70_304,
+      targetId: 7,
+      sourceId: 2,
+      status: 'blind',
+      durationS: 3.5,
+      position: { x: -310, y: 280, z: 44 },
+    },
+    {
+      type: 'impact',
+      tick: 70_305,
+      projectile: 'meteorBomb',
+      ownerId: 1,
+      targetId: NO_PLAYER,
+      position: { x: 12, y: 96, z: -700 },
+    },
   ];
 
   /** Deep copy, because the decoder reuses its scratch objects. */
@@ -699,8 +718,9 @@ describe('GAME_EVENTS', () => {
     for (const event of events) expect(writeGameEvent(w, event)).toBe(true);
     expect(gameEventCount(w)).toBe(events.length);
     const length = endGameEvents(w);
-    // header 3 + count 1 + 18 + 18 + 14 + 14 + 20 + 14 + 8 + 8 + 8
-    expect(length).toBe(126);
+    // header 3 + count 1 + 18 + 18 + 14 + 14 + 20 + 14 + 8 + 8 + 8, then assist 8 + 8,
+    // statusApplied 16, impact 14
+    expect(length).toBe(172);
     expect(new Reader().reset(viewOf(w, length)).peekType()).toBe(MSG_GAME_EVENTS);
 
     const got = collect(viewOf(w, length));
@@ -770,8 +790,8 @@ describe('GAME_EVENTS', () => {
     let emitted = 0;
     const sink = { emit: () => void emitted++ };
 
-    // The kind byte of the LAST event.
-    bytes[length - 8] = 99;
+    // The kind byte of the LAST event (an impact: 14 bytes).
+    bytes[length - 14] = 99;
     expect(decodeGameEvents(r.reset(viewOf(w, length)), sink)).toBe(false);
     expect(r.error).toBe(DECODE_BAD_VALUE);
     bytes.set(pristine);

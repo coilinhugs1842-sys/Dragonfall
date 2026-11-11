@@ -20,6 +20,11 @@ import {
   MAX_PLAYER_NAME_LENGTH,
   NO_PLAYER,
   PROTOCOL_VERSION,
+  SNAPSHOT_HZ,
+  SNAPSHOT_MAX_PROJECTILES,
+  SNAPSHOT_MAX_ZONES,
+  TEAM_EMBER,
+  TICK_HZ,
   createInputFrame,
   createQuat,
   createVec3,
@@ -36,6 +41,7 @@ import type {
   MutableVec3,
   PlayerId,
   RejectReason,
+  TeamId,
 } from '../shared';
 import type { DragonState } from '../sim';
 import { MAX_RECONNECT_TOKEN_LENGTH } from '../sim/lobby';
@@ -67,6 +73,11 @@ export const MSG_HOST_LEFT = 27;
  * lives with the sessions (`./session/pings`). An older client drops it as an unknown type.
  */
 export const MSG_PLAYER_PINGS = 29;
+/**
+ * `ctrl`, H->C, at most once a second while a match runs and with every round / match result:
+ * every rider's takedowns, deaths, assists, damage and healing. Codec in `./session/scores`.
+ */
+export const MSG_SCOREBOARD = 30;
 
 /** What `Reader.peekType` returns for an empty buffer or an id that is not in the table. */
 export const MSG_INVALID = -1;
@@ -86,14 +97,16 @@ export type MessageType =
   | typeof MSG_GAME_EVENTS
   | typeof MSG_KICK
   | typeof MSG_HOST_LEFT
-  | typeof MSG_PLAYER_PINGS;
+  | typeof MSG_PLAYER_PINGS
+  | typeof MSG_SCOREBOARD;
 
 export function isMessageType(value: number): value is MessageType {
   return (
     value === MSG_INPUT ||
     value === MSG_SNAPSHOT ||
     (value >= MSG_HELLO && value <= MSG_HOST_LEFT) ||
-    value === MSG_PLAYER_PINGS
+    value === MSG_PLAYER_PINGS ||
+    value === MSG_SCOREBOARD
   );
 }
 
@@ -150,8 +163,8 @@ export const HEADER_BYTES = 3;
 
 /** Newest frame + the repeats (docs/NETWORKING.md: "repeats the previous 2 inputs"). */
 export const INPUT_FRAMES_PER_PACKET = 1 + INPUT_REDUNDANCY;
-/** steer 2 x i16, buttons u16. */
-export const INPUT_FRAME_BYTES = 6;
+/** steer 2 x i16, buttons u16, aim yaw and pitch 2 x i16. */
+export const INPUT_FRAME_BYTES = 10;
 /** header, u16 ackSnapshotTick, u8 count|flags. */
 export const INPUT_FIXED_BYTES = HEADER_BYTES + 3;
 export const INPUT_MAX_BYTES = INPUT_FIXED_BYTES + INPUT_FRAMES_PER_PACKET * INPUT_FRAME_BYTES;
@@ -161,18 +174,56 @@ export const SNAPSHOT_MAX_DRAGONS = MAX_PLAYERS;
 /** u8 id, 3 x i16 position, u32 orientation, 3 x i8 velocity, u8 health, u8 stamina, u16 flags, u8 anim. */
 export const SNAPSHOT_DRAGON_BYTES = 19;
 /**
- * The recipient's own dragon at full precision: u8 id, 15 x f32, u16 flags, u16 prevButtons,
- * u8 packed (boostLocked, dodgeDir), 9 x u16 timers.
+ * The recipient's own dragon at full precision. Flight (84 bytes): u8 id, 15 x f32, u16 flags,
+ * u16 prevButtons, u8 packed (boostLocked, dodgeDir), 9 x u16 timers. Combat (56 bytes): 3 x f32
+ * (ultCharge, slowScale, hasteScale), 4 x u16 cooldowns, 4 x u16 active timers, 4 x u8 charges
+ * used, u8 castSlot + 1, u16 castTicks, 10 x u16 timers, u8 lastDamagerId.
  */
-export const SNAPSHOT_OWNER_BYTES = 1 + 15 * 4 + 2 + 2 + 1 + 9 * 2;
+export const SNAPSHOT_OWNER_FLIGHT_BYTES = 1 + 15 * 4 + 2 + 2 + 1 + 9 * 2;
+export const SNAPSHOT_OWNER_COMBAT_BYTES = 3 * 4 + 4 * 2 + 4 * 2 + 4 + 1 + 2 + 10 * 2 + 1;
+export const SNAPSHOT_OWNER_BYTES = SNAPSHOT_OWNER_FLIGHT_BYTES + SNAPSHOT_OWNER_COMBAT_BYTES;
+/**
+ * On the wire the owner block is packed: a bitmask with one bit per byte of the 140-byte image
+ * (bit set = that byte follows), then only the bytes that are not zero. Most of the image is
+ * zero most of the time (idle timers, the high byte of small counts, an empty burst), so the
+ * block is about half its size in flight; it is lossless, and each snapshot stands on its own.
+ */
+export const SNAPSHOT_OWNER_MASK_BYTES = Math.ceil(SNAPSHOT_OWNER_BYTES / 8);
+/** The packed owner block at its worst: no byte of the image is zero. */
+export const SNAPSHOT_OWNER_MAX_WIRE_BYTES = SNAPSHOT_OWNER_MASK_BYTES + SNAPSHOT_OWNER_BYTES;
+/** u16 id, u8 kind | team << 4, u8 ownerId, 3 x i16 position, 3 x i8 velocity. */
+export const SNAPSHOT_PROJECTILE_BYTES = 13;
+/** u8 id, u8 kind | team << 4, u8 ownerId, 3 x i16 position, u8 radius, u8 remaining. */
+export const SNAPSHOT_ZONE_BYTES = 11;
+export { SNAPSHOT_MAX_PROJECTILES, SNAPSHOT_MAX_ZONES };
+/**
+ * A zone that stands where it was placed (`ZoneDef.follow` false) is not in every snapshot:
+ * it is in the snapshots of its first SNAPSHOT_ZONE_FRESH_TICKS ticks, and after that only in
+ * every SNAPSHOT_ZONE_REFRESH-th one (`staticZoneDue`). In between, the client carries it from
+ * the snapshot before (`SnapshotBuffer.push`), counting its remaining time down. A zone missing
+ * from a snapshot in which it was due has ended. Each snapshot still stands on its own: a lost
+ * one costs nothing, and a client that joins late has every zone within a quarter second.
+ */
+export const SNAPSHOT_ZONE_FRESH_TICKS = 6;
+export const SNAPSHOT_ZONE_REFRESH = 5;
+
+/** Is the standing zone `zoneId` listed in the snapshot of `tick`? Same answer on both ends. */
+export function staticZoneDue(tick: number, zoneId: number): boolean {
+  const index = Math.floor((tick * SNAPSHOT_HZ) / TICK_HZ);
+  return (index + zoneId) % SNAPSHOT_ZONE_REFRESH === 0;
+}
 /**
  * header, u16 ackInputTick, u8 flags, clock (u8 phase, u8 round, u16 phaseTicks,
- * u16 remainingTicks, u8 scoreEmber, u8 scoreFrost), u8 dragonCount, u8 projectileCount,
- * u8 zoneCount.
+ * u16 remainingTicks, u8 scoreEmber, u8 scoreFrost), u16 stormRadius, u8 dragonCount,
+ * u8 projectileCount, u8 zoneCount.
  */
-export const SNAPSHOT_FIXED_BYTES = HEADER_BYTES + 3 + 8 + 3;
+export const SNAPSHOT_FIXED_BYTES = HEADER_BYTES + 3 + 8 + 2 + 3;
 export const SNAPSHOT_MAX_BYTES =
-  SNAPSHOT_FIXED_BYTES + SNAPSHOT_OWNER_BYTES + SNAPSHOT_MAX_DRAGONS * SNAPSHOT_DRAGON_BYTES;
+  SNAPSHOT_FIXED_BYTES +
+  SNAPSHOT_OWNER_MAX_WIRE_BYTES +
+  SNAPSHOT_MAX_DRAGONS * SNAPSHOT_DRAGON_BYTES +
+  SNAPSHOT_MAX_PROJECTILES * SNAPSHOT_PROJECTILE_BYTES +
+  SNAPSHOT_MAX_ZONES * SNAPSHOT_ZONE_BYTES;
 
 /** Buffer size that holds any `fast` message. */
 export const FAST_MAX_BYTES = SNAPSHOT_MAX_BYTES;
@@ -219,9 +270,19 @@ export const WIRE_POSITION_CENTER_Y_M = (GREYBOX_FLOOR_Y + GREYBOX_CEILING_Y) / 
 /**
  * Velocity is `i8` per axis. The range covers the fastest dive of any class plus a full burst
  * (tests/net/codec-quantize.test.ts checks it against the tuning tables); the step is 1.5 m/s.
- * Remote velocity only feeds extrapolation and effects, so that is plenty.
+ * Remote velocity only feeds extrapolation and effects, so that is plenty. A hasted dragon at
+ * full burst can exceed it by a few m/s on one axis and is clamped.
  */
 export const WIRE_VELOCITY_MAX_MPS = 190;
+/** Storm radius on the wire: `u16` in these steps; this value means "the map's own radius". */
+export const WIRE_STORM_RADIUS_STEP_M = 0.1;
+export const WIRE_STORM_RADIUS_DEFAULT = 0xffff;
+/** Zone radius: `u8` in these steps (up to 127.5 m). */
+export const WIRE_ZONE_RADIUS_STEP_M = 0.5;
+/** Zone time left: `u8` in these steps (up to 25.4 s; 255 = longer or permanent). */
+export const WIRE_ZONE_TIME_STEP_S = 0.1;
+/** Aim angles: `i16` over [-PI, PI] (yaw) and [-PI/2, PI/2] (pitch). */
+export const WIRE_AIM_UNITS = 32767;
 export const WIRE_VELOCITY_STEP_MPS = WIRE_VELOCITY_MAX_MPS / 127;
 
 /** Clock values are whole sim ticks in a `u16`; this value means "no time limit" (Infinity). */
@@ -310,6 +371,9 @@ export const GAME_EVENT_TYPES = [
   'abilityCast',
   'objective',
   'matchPhase',
+  'assist',
+  'statusApplied',
+  'impact',
 ] as const;
 
 // --- Message structs -----------------------------------------------------------------------------
@@ -401,6 +465,26 @@ export type SnapshotOwner = Pick<
   | 'spawnProtectTicks'
   | 'hitTicks'
   | 'terrainGraceTicks'
+  // Combat: what the caster's side of abilities (`stepAbilities`) and the flight model read.
+  | 'ultCharge'
+  | 'slowScale'
+  | 'hasteScale'
+  | 'abilityCooldownTicks'
+  | 'abilityActiveTicks'
+  | 'abilityChargesUsed'
+  | 'castSlot'
+  | 'castTicks'
+  | 'firingTicks'
+  | 'slowTicks'
+  | 'hasteTicks'
+  | 'burnTicks'
+  | 'regenTicks'
+  | 'blindTicks'
+  | 'veilTicks'
+  | 'phaseTicks'
+  | 'shieldTicks'
+  | 'deadTicks'
+  | 'lastDamagerId'
 >;
 
 export function createSnapshotOwner(): SnapshotOwner {
@@ -430,6 +514,75 @@ export function createSnapshotOwner(): SnapshotOwner {
     spawnProtectTicks: 0,
     hitTicks: 0,
     terrainGraceTicks: 0,
+    ultCharge: 0,
+    slowScale: 1,
+    hasteScale: 1,
+    abilityCooldownTicks: [0, 0, 0, 0],
+    abilityActiveTicks: [0, 0, 0, 0],
+    abilityChargesUsed: [0, 0, 0, 0],
+    castSlot: -1,
+    castTicks: 0,
+    firingTicks: 0,
+    slowTicks: 0,
+    hasteTicks: 0,
+    burnTicks: 0,
+    regenTicks: 0,
+    blindTicks: 0,
+    veilTicks: 0,
+    phaseTicks: 0,
+    shieldTicks: 0,
+    deadTicks: 0,
+    lastDamagerId: NO_PLAYER,
+  };
+}
+
+/** A projectile as a snapshot carries it (only kinds with `replication: 'snapshot'`). */
+export interface SnapshotProjectile {
+  /** 0..65535. */
+  id: number;
+  /** Index into PROJECTILE_KINDS. */
+  kind: number;
+  ownerId: PlayerId;
+  team: TeamId;
+  position: MutableVec3;
+  velocity: MutableVec3;
+}
+
+export function createSnapshotProjectile(): SnapshotProjectile {
+  return {
+    id: 0,
+    kind: 0,
+    ownerId: NO_PLAYER,
+    team: TEAM_EMBER,
+    position: createVec3(),
+    velocity: createVec3(),
+  };
+}
+
+/** An ability zone as a snapshot carries it. */
+export interface SnapshotZone {
+  /** 1..255. */
+  id: number;
+  /** Index into ZONE_KINDS. */
+  kind: number;
+  ownerId: PlayerId;
+  team: TeamId;
+  position: MutableVec3;
+  /** Metres, in WIRE_ZONE_RADIUS_STEP_M steps. */
+  radius: number;
+  /** Seconds left, in WIRE_ZONE_TIME_STEP_S steps; Infinity when beyond the wire range. */
+  remainingS: number;
+}
+
+export function createSnapshotZone(): SnapshotZone {
+  return {
+    id: 0,
+    kind: 0,
+    ownerId: NO_PLAYER,
+    team: TEAM_EMBER,
+    position: createVec3(),
+    radius: 0,
+    remainingS: 0,
   };
 }
 
@@ -458,6 +611,11 @@ export interface SnapshotMessage {
   /** 0..255 each. */
   scoreEmber: number;
   scoreFrost: number;
+  /**
+   * Storm wall radius in metres when a mode moved it, or a negative number for "the map's own"
+   * (`SimState.stormRadius`). The client steps its predicted dragon against the same wall.
+   */
+  stormRadius: number;
 
   /** False for spectators and whenever the recipient has no dragon. */
   hasOwner: boolean;
@@ -468,14 +626,21 @@ export interface SnapshotMessage {
   dragonCount: number;
   /** Pool of SNAPSHOT_MAX_DRAGONS slots; entries at index >= dragonCount are stale. */
   dragons: SnapshotDragon[];
-  /** Reserved (Phase 3): always 0 in this protocol version. */
+  /** Live entries in `projectiles` (0..SNAPSHOT_MAX_PROJECTILES). */
   projectileCount: number;
+  projectiles: SnapshotProjectile[];
+  /** Live entries in `zones` (0..SNAPSHOT_MAX_ZONES). */
   zoneCount: number;
+  zones: SnapshotZone[];
 }
 
 export function createSnapshotMessage(): SnapshotMessage {
   const dragons: SnapshotDragon[] = [];
   for (let i = 0; i < SNAPSHOT_MAX_DRAGONS; i++) dragons.push(createSnapshotDragon());
+  const projectiles: SnapshotProjectile[] = [];
+  for (let i = 0; i < SNAPSHOT_MAX_PROJECTILES; i++) projectiles.push(createSnapshotProjectile());
+  const zones: SnapshotZone[] = [];
+  for (let i = 0; i < SNAPSHOT_MAX_ZONES; i++) zones.push(createSnapshotZone());
   return {
     tick: 0,
     hasAck: false,
@@ -486,12 +651,15 @@ export function createSnapshotMessage(): SnapshotMessage {
     timeRemainingS: Infinity,
     scoreEmber: 0,
     scoreFrost: 0,
+    stormRadius: -1,
     hasOwner: false,
     owner: createSnapshotOwner(),
     dragonCount: 0,
     dragons,
     projectileCount: 0,
+    projectiles,
     zoneCount: 0,
+    zones,
   };
 }
 

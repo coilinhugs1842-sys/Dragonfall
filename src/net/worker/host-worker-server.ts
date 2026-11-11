@@ -19,7 +19,11 @@
  */
 
 import { TICK_MS, createInputFrame } from '../../shared';
-import type { InputFrame, LobbyState } from '../../shared';
+import type { GameEvent, GameEventSink, InputFrame, LobbyState } from '../../shared';
+import { beginGameEvents, endGameEvents, writeGameEvent } from '../codec/events';
+import { Writer } from '../codec/io';
+import { CTRL_MAX_BYTES } from '../protocol';
+import { SCOREBOARD_MAX_BYTES, encodeScoreboard } from '../session/scores';
 import type { MatchWorldFactory } from '../session';
 import {
   AUX_FAST,
@@ -29,11 +33,13 @@ import {
   BatchWriter,
   BufferPool,
   ExactBuffers,
+  REC_EVENTS,
   REC_INPUT,
   REC_KEEPALIVE,
   REC_PACKET,
   REC_PEER_GONE,
   REC_PEER_OPEN,
+  REC_SCORES,
   REC_STATE,
   REC_STATS,
   REC_TEXT,
@@ -107,6 +113,7 @@ export class HostWorkerServer {
   private port: PortHostTransport | null = null;
   private stopped = false;
   private hasPilot = false;
+  private localBot = false;
   private measure = false;
   private epochOffsetMs = 0;
 
@@ -129,6 +136,25 @@ export class HostWorkerServer {
   private mailStaleTicks = 0;
 
   private readonly info: HostTickInfo = createHostTickInfo();
+  // The match's GameEvents for the page's own views: one GAME_EVENTS message per batch.
+  private readonly eventWriter = new Writer(CTRL_MAX_BYTES);
+  private eventsOpen = false;
+  private readonly eventSink: GameEventSink = {
+    emit: (event: GameEvent): void => {
+      const writer = this.eventWriter;
+      if (!this.eventsOpen) {
+        beginGameEvents(writer, this.core?.session.hostTick ?? 0);
+        this.eventsOpen = true;
+      }
+      if (!writeGameEvent(writer, event)) {
+        this.flushEvents();
+        beginGameEvents(writer, this.core?.session.hostTick ?? 0);
+        this.eventsOpen = true;
+        writeGameEvent(writer, event);
+      }
+    },
+  };
+  private readonly scoreWriter = new Writer(SCOREBOARD_MAX_BYTES);
   private meta: HostMeta | null = null;
   private metaLobby: LobbyState | null = null;
   private metaBlocker: HostMeta['startBlocker'] = null;
@@ -262,6 +288,7 @@ export class HostWorkerServer {
         ? env.createPilot(config.autopilot)
         : null;
     this.hasPilot = pilot !== null;
+    this.localBot = config.localBot;
     const port = config.hasTransport
       ? new PortHostTransport(this.writer, {
           open: (roomCode: string): void => {
@@ -287,6 +314,10 @@ export class HostWorkerServer {
         // Packets are delivered from per-size scratch buffers: cache their DataViews.
         recycledBuffers: true,
         localInput: pilot,
+        events: config.wantEvents ? this.eventSink : null,
+        localBot: config.localBot,
+        lagCompensation: config.lagCompensation,
+        autoSettings: config.autoSettings,
         ...(config.botSeed !== undefined ? { botSeed: config.botSeed } : {}),
         ...(config.mapSeed !== undefined ? { mapSeed: config.mapSeed } : {}),
         ...(env.createMatchWorld !== undefined ? { createMatchWorld: env.createMatchWorld } : {}),
@@ -383,6 +414,8 @@ export class HostWorkerServer {
     this.mailOrButtons |= buttons;
     this.mailLastButtons = buttons;
     this.mailSampledAtMs = view.getFloat64(at + 12, true);
+    frame.aimYaw = view.getFloat32(at + 20, true);
+    frame.aimPitch = view.getFloat32(at + 24, true);
     this.mailFresh = true;
     this.mailEver = true;
   }
@@ -396,7 +429,7 @@ export class HostWorkerServer {
     let input: InputFrame | undefined;
     let away = false;
     info.inputAgeMs = -1;
-    if (session.inMatch && !this.hasPilot) {
+    if (session.inMatch && !this.hasPilot && !this.localBot) {
       const frame = this.mailFrame;
       if (this.mailFresh) {
         this.mailFresh = false;
@@ -444,13 +477,29 @@ export class HostWorkerServer {
       info.simUs = timing.lastSimUs;
       info.snapshotUs = timing.lastSnapshotUs;
       info.pulseUs = this.lastPulseUs;
+      const clock = session.matchClock;
+      info.round = clock.round;
+      info.winner = session.matchWinner;
+      info.timeRemainingS = clock.timeRemainingS;
+      info.scoreEmber = clock.scoreEmber;
+      info.scoreFrost = clock.scoreFrost;
       const prev = sim.prev;
       const current = sim.current;
       const at = this.writer.begin(REC_STATE, 0, 0, hostStateBytes(prev, current));
       if (at >= 0) encodeHostState(this.writer.view, at, info, prev, current);
     }
-    // One post per tick: this tick's packets and its state together.
+    // One post per tick: this tick's packets, its events and its state together.
+    this.flushEvents();
     this.flush();
+  }
+
+  /** Moves the events gathered so far into the pending batch. */
+  private flushEvents(): void {
+    if (!this.eventsOpen) return;
+    this.eventsOpen = false;
+    const writer = this.eventWriter;
+    const length = endGameEvents(writer);
+    if (length > 0) this.writer.copy(REC_EVENTS, 0, 0, writer.packet(length));
   }
 
   private writeStats(core: HostCore): void {
@@ -470,12 +519,23 @@ export class HostWorkerServer {
     const lobby = session.lobby;
     const at = this.writer.begin(REC_STATS, 0, 0, hostStatsBytes(lobby));
     if (at >= 0) encodeHostStats(this.writer.view, at, stats, lobby, session.playerPings);
+    if (session.inMatch) {
+      const scores = this.scoreWriter;
+      const length = encodeScoreboard(
+        scores,
+        session.hostTick,
+        session.matchStats,
+        session.matchStatsCount,
+      );
+      if (length > 0) this.writer.copy(REC_SCORES, 0, 0, scores.packet(length));
+    }
   }
 
   // --- Worker -> page ----------------------------------------------------------------------------
 
   /** Posts what the work just done produced, then the room's slow state if it changed. */
   private afterWork(): void {
+    this.flushEvents();
     this.flush();
     const core = this.core;
     if (core === null) return;

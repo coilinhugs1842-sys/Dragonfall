@@ -25,20 +25,44 @@
  * MATCH (Phase 2: everyone flies together). `host.start` -> roster -> `MatchWorld` -> dragons
  * spawned at their gate slots and held there for `countdownTicks` -> `playing`. MATCH_START
  * carries the first simulated tick, so clients know in advance when control is handed over and
- * their input timing has settled by then. A dragon killed by terrain or the storm respawns at
- * its gate after `respawnTicks`. Combat, scoring and round flow are Phase 3: they hook into
- * `stepMatch` (after `sim.step`), `emitEvent` and `setMatchPhase`.
+ * their input timing has settled by then.
+ *
+ * COMBAT (T-3.1 / T-3.2) is inside the sim: abilities, the damage pipeline, takedowns, assists
+ * and respawns at the gate slot. The session only wires it: the sim's GameEvents go out through
+ * `emitEvent` (to the host's own bus and, reliably, to every client), the lobby's friendly-fire
+ * setting becomes `sim.rules.friendlyFire`, and snapshots carry the projectiles, zones and the
+ * storm radius. The match modes build on the seams of `Sim` (`session.sim`): `respawnPolicy`,
+ * `rules`, `setStormRadius`, `current.scores` / `current.teamTakedowns`, and the `takedown`
+ * events. Lag compensation plugs into `sim.setTargetPositions`.
+ *
+ * MODES (T-3.4) are the `MatchDirector`'s (`sim/match`): the phase timeline (countdown ->
+ * playing -> roundEnd -> next round or results -> lobby), Skirmish and Duel, the score, the
+ * per-rider stats (`matchStats`) and the storm schedule. The session drives it once per tick
+ * around `sim.step`, tells it who is connected, and turns its phase changes into MATCH_PHASE
+ * messages, `matchPhase` events and the snapshot clock. The sim does not step during a
+ * countdown (dragons are held at their gates, controls locked) and steps with live controls in
+ * every other phase.
+ *
+ * LAG COMPENSATION (T-3.3) is the `LagCompensator`'s (`sim/lagcomp`): the session records
+ * `sim.current` after every step and feeds it each client's latency (the tick of its newest
+ * input minus the snapshot tick that input acknowledged). The host's own player and bots are
+ * never fed, so their shots are not rewound.
  */
 
 import {
+  ABILITY_TABLE,
   DRAGON_FLAG_ALIVE,
-  DRAGON_FLAG_IN_STORM,
+  MATCH_TUNING,
+  MODE_TUNING,
   NO_PLAYER,
   PROTOCOL_VERSION,
+  TEAM_EMBER,
+  TEAM_FROST,
   TICK_DT_S,
   TICK_HZ,
   createInputFrame,
   createVec3,
+  isLobbyBotIntent,
 } from '../../shared';
 import type {
   DragonClassId,
@@ -49,16 +73,20 @@ import type {
   LobbyState,
   MatchPhase,
   MatchPhaseEvent,
+  MatchPlayerStats,
   MatchRoster,
+  MatchTuning,
+  MatchWinner,
+  ModeTuning,
   MutableVec3,
   PlayerId,
   SpawnEvent,
-  TakedownEvent,
   TeamId,
   UiIntent,
 } from '../../shared';
 import { createSim } from '../../sim';
 import type { Sim } from '../../sim';
+import { LagCompensator } from '../../sim/lagcomp';
 import {
   applyLobbyIntent,
   canStart,
@@ -81,6 +109,9 @@ import type {
   PlayerRemovalCause,
   StartBlocker,
 } from '../../sim/lobby';
+import { MatchDirector, createModeConfig } from '../../sim/match';
+import { HostBots } from '../bots/host-bots';
+import type { MatchArena, MatchDirectorListener, ModeConfig } from '../../sim/match';
 import {
   decodeHello,
   decodeIntent,
@@ -98,6 +129,7 @@ import {
 import { beginGameEvents, endGameEvents, writeGameEvent } from '../codec/events';
 import { decodeInput, encodeSnapshot } from '../codec/fast';
 import { Reader, Writer } from '../codec/io';
+import { expandTick } from '../codec/quantize';
 import { HostInputBuffer } from '../prediction/host-input-buffer';
 import {
   CTRL_MAX_BYTES,
@@ -143,6 +175,7 @@ import {
 import type { MatchWorld, MatchWorldFactory } from './match-world';
 import { NetRate } from './net-rate';
 import { addPlayerPing, createPlayerPingsMessage, encodePlayerPings } from './pings';
+import { encodeScoreboard } from './scores';
 import { steerToCourse } from './pilot';
 import type { PilotCourse } from './pilot';
 import { ViewCache, createReconnectToken, rttFromWire } from './wire';
@@ -168,8 +201,8 @@ export const HOST_CLOSE_GRACE_MS = 250;
 export const HOST_ROOM_CODE_ATTEMPTS = 6;
 /** Dragons are held at their gates this long after Start (3 s). */
 export const DEFAULT_COUNTDOWN_TICKS = 3 * TICK_HZ;
-/** A dead dragon keeps falling this long before it is back at its gate (sandbox rule, 2 s). */
-export const DEFAULT_RESPAWN_TICKS = 2 * TICK_HZ;
+/** A dead dragon is back at its gate after MATCH_TUNING.respawnDelayS (5 s) unless told otherwise. */
+export const DEFAULT_RESPAWN_TICKS = Math.round(MATCH_TUNING.respawnDelayS * TICK_HZ);
 /**
  * A gap this long between two `update` calls means the host page was not running (hidden tab,
  * debugger, a long stall). Messages that arrived meanwhile were stamped with the time of the
@@ -186,6 +219,13 @@ const HOLD_RADIUS_FRACTION = 0.4;
 const HOLD_ALTITUDE_FRACTION = 0.55;
 
 const PLAYER_SLOTS = 256;
+/** Index of the event batch for peers without a dragon (spectators): nothing is hidden. */
+const EVENTS_FOR_ALL = 2;
+
+interface EventBatch {
+  readonly writer: Writer;
+  open: boolean;
+}
 
 // --- Public types --------------------------------------------------------------------------------
 
@@ -247,6 +287,15 @@ export interface HostSessionOptions {
   readonly recycledBuffers?: boolean;
   readonly countdownTicks?: number;
   readonly respawnTicks?: number;
+  /** The mode table the match rules read (tests shorten it). Default: MODE_TUNING, live. */
+  readonly modeTuning?: ModeTuning;
+  /** False: hits are tested against current positions (A/B tests, a debug switch). */
+  readonly lagCompensation?: boolean;
+  /**
+   * `?autopilot=bot`: the host's own dragon is flown by a bot brain instead of `tick`'s input
+   * (headless match tests, soak runs). The host still occupies its seat and sees its view.
+   */
+  readonly localBot?: boolean;
   readonly helloTimeoutMs?: number;
   readonly linkTimeoutMs?: number;
   readonly staleLinkMs?: number;
@@ -295,6 +344,8 @@ class HostPeer {
   pingsThisSecond = 0;
   pingWindowMs: number;
   readonly inputs = new HostInputBuffer();
+  /** `inputs.packetCount` when this link's latency was last fed to lag compensation. */
+  lagPackets = -1;
 
   constructor(
     readonly link: LinkId,
@@ -310,8 +361,8 @@ interface MatchRider {
   team: TeamId;
   classId: DragonClassId;
   gateSlot: number;
-  wasAlive: boolean;
-  deadTicks: number;
+  /** A net-bot: no rewind for its shots. */
+  isBot: boolean;
 }
 
 interface HostMatch {
@@ -356,6 +407,15 @@ export class HostSession {
   readonly playerPings: number[] = [];
   /** The match clock as snapshots carry it; valid while `inMatch`. */
   readonly matchClock: SnapshotClock = createSnapshotClock();
+  /**
+   * The match rules: phase, round, score, winner, per-rider stats. Read-only for callers (the
+   * session drives it); valid while `inMatch`.
+   */
+  readonly director: MatchDirector;
+  /** Host lag compensation: per-shooter rewind and the dragon history. Read-only for callers. */
+  readonly lagComp = new LagCompensator();
+  /** The riders the host flies itself: slot-fill bots (`host.addBot`) and `localBot`. */
+  readonly hostBots = new HostBots();
 
   private readonly transport: HostTransport;
   private readonly listener: HostSessionListener;
@@ -367,7 +427,28 @@ export class HostSession {
   private readonly profileClock: (() => number) | null;
   private readonly clockNow: (() => number) | null;
   private readonly countdownTicks: number;
-  private readonly respawnTicks: number;
+  private readonly localBot: boolean;
+  private scoresDirty = false;
+  private readonly simMatchTuning: MatchTuning;
+  /** The sim's events leave through `emitEvent`, like the session's own. */
+  private readonly simEvents: GameEventSink = {
+    emit: (event: GameEvent): void => {
+      this.director.onEvent(event);
+      if (event.type !== 'abilityCast') this.scoresDirty = true;
+      this.emitEvent(event);
+    },
+  };
+  /** The director's phase changes become MATCH_PHASE messages and `matchPhase` events. */
+  private readonly directorListener: MatchDirectorListener = {
+    onPhase: (phase: MatchPhase, tick: number): void => {
+      const match = this.match;
+      if (match !== null) this.setMatchPhase(match, phase, tick);
+    },
+    onRoundReset: (): void => {
+      // Everyone was moved to the gates: nothing recorded before applies to where they are.
+      this.lagComp.reset();
+    },
+  };
   private readonly helloTimeoutMs: number;
   private readonly linkTimeoutMs: number;
   private readonly staleLinkMs: number;
@@ -410,8 +491,12 @@ export class HostSession {
   private readonly reader = new Reader();
   private readonly fastWriter = new Writer(FAST_MAX_BYTES);
   private readonly ctrlWriter = new Writer(CTRL_MAX_BYTES);
-  private readonly eventWriter = new Writer(CTRL_MAX_BYTES);
-  private eventsOpen = false;
+  /** This tick's events per audience: index = team, EVENTS_FOR_ALL = everyone without a dragon. */
+  private readonly eventBatches: EventBatch[] = [
+    { writer: new Writer(CTRL_MAX_BYTES), open: false },
+    { writer: new Writer(CTRL_MAX_BYTES), open: false },
+    { writer: new Writer(CTRL_MAX_BYTES), open: false },
+  ];
   private readonly inputIn = createInputMessage();
   private readonly helloIn = createHelloMessage();
   private readonly intentIn = createIntentMessage();
@@ -428,7 +513,6 @@ export class HostSession {
   // Event scratch (the sink copies on emit).
   private readonly eventPosition: MutableVec3 = createVec3();
   private readonly spawnEvent: Mutable<SpawnEvent>;
-  private readonly takedownEvent: Mutable<TakedownEvent>;
   private readonly phaseEvent: Mutable<MatchPhaseEvent> = {
     type: 'matchPhase',
     tick: 0,
@@ -453,12 +537,26 @@ export class HostSession {
       0,
       Math.floor(options.countdownTicks ?? DEFAULT_COUNTDOWN_TICKS),
     );
-    this.respawnTicks = Math.max(1, Math.floor(options.respawnTicks ?? DEFAULT_RESPAWN_TICKS));
+    // Without the option the sim reads the shared table live (the dev GUI can tune it).
+    this.simMatchTuning =
+      options.respawnTicks === undefined
+        ? MATCH_TUNING
+        : {
+            ...MATCH_TUNING,
+            respawnDelayS: Math.max(1, Math.floor(options.respawnTicks)) / TICK_HZ,
+          };
     this.helloTimeoutMs = options.helloTimeoutMs ?? HOST_HELLO_TIMEOUT_MS;
     this.linkTimeoutMs = options.linkTimeoutMs ?? HOST_LINK_TIMEOUT_MS;
     this.staleLinkMs = options.staleLinkMs ?? HOST_STALE_LINK_MS;
     this.closeGraceMs = options.closeGraceMs ?? HOST_CLOSE_GRACE_MS;
     this.views = new ViewCache(options.recycledBuffers === true);
+    this.director = new MatchDirector({
+      modeTuning: options.modeTuning ?? MODE_TUNING,
+      matchTuning: this.simMatchTuning,
+      listener: this.directorListener,
+    });
+    this.lagComp.enabled = options.lagCompensation !== false;
+    this.localBot = options.localBot === true;
 
     this.hostLobby = createLobby(
       options.settings !== undefined
@@ -478,14 +576,6 @@ export class HostSession {
       dragonId: NO_PLAYER,
       team: 0,
       classId: 'talon',
-      position: this.eventPosition,
-    };
-    this.takedownEvent = {
-      type: 'takedown',
-      tick: 0,
-      killerId: NO_PLAYER,
-      victimId: NO_PLAYER,
-      source: 'terrain',
       position: this.eventPosition,
     };
 
@@ -547,8 +637,36 @@ export class HostSession {
     return this.match?.phase ?? 'lobby';
   }
 
+  /** First tick of play of the current round (the countdown's end); a later round moves it. */
   get matchStartTick(): number {
     return this.match?.startTick ?? -1;
+  }
+
+  /** The rules of the running match (validated lobby settings), or null outside one. */
+  get modeConfig(): ModeConfig | null {
+    return this.match !== null ? this.director.config : null;
+  }
+
+  /** 1-based round of the running match (1 outside one). */
+  get matchRound(): number {
+    return this.match !== null ? this.director.round : 1;
+  }
+
+  /** Who won: the round during `roundEnd`, the match during `results`; null otherwise. */
+  get matchWinner(): MatchWinner | null {
+    return this.match !== null ? this.director.winner : null;
+  }
+
+  /**
+   * Per-rider totals for the scoreboard and the results (takedowns, deaths, assists, damage,
+   * healing): the first `matchStatsCount` rows are live. Mutated in place; do not keep rows.
+   */
+  get matchStats(): readonly Readonly<MatchPlayerStats>[] {
+    return this.director.stats;
+  }
+
+  get matchStatsCount(): number {
+    return this.match !== null ? this.director.statsCount : 0;
   }
 
   /** Links that completed the handshake. */
@@ -641,7 +759,9 @@ export class HostSession {
    * settings, match menu) is not the session's business and returns false.
    */
   applyIntent(intent: UiIntent): boolean {
-    if (this.sessionState === 'closed' || !isNetIntent(intent)) return false;
+    if (this.sessionState === 'closed') return false;
+    // The bot controls are host-only and never cross the wire: they come from this page alone.
+    if (!isNetIntent(intent) && !isLobbyBotIntent(intent)) return false;
     const result = applyLobbyIntent(this.hostLobby, this.hostLobby.state.hostId, intent, {
       tick: this.tickNow,
       seed: this.nextSeed(),
@@ -672,6 +792,7 @@ export class HostSession {
     this.setMatchPhase(match, 'lobby', this.tickNow + 1);
     this.flushEvents();
     this.match = null;
+    this.hostBots.end();
     this.simInstance?.reset();
     this.simInstance?.setCollisionWorld(null);
     this.handleResult(returnToLobby(this.hostLobby));
@@ -703,6 +824,7 @@ export class HostSession {
     if (newSecond) {
       this.rateMarkMs = nowMs;
       this.broadcastPings();
+      if (this.scoresDirty) this.broadcastScores();
     }
 
     // Backwards: closing a link removes its peer from the list (swap with the last one).
@@ -751,14 +873,28 @@ export class HostSession {
     const world = this.createMatchWorld(roster.settings, seed);
     let sim = this.simInstance;
     if (sim === null) {
-      sim = createSim({ collisionWorld: world.collisionWorld });
+      sim = createSim({
+        collisionWorld: world.collisionWorld,
+        matchTuning: this.simMatchTuning,
+        events: this.simEvents,
+      });
       this.simInstance = sim;
     } else {
       sim.reset();
       sim.setCollisionWorld(world.collisionWorld);
     }
-
     const firstTick = this.tickNow + 1;
+    this.lagComp.resetAll();
+    sim.setTargetPositions(this.lagComp);
+    // Friendly fire, respawns and the storm are the mode's: the director sets them on the sim.
+    this.director.begin(
+      sim,
+      createModeConfig(roster.settings, roster.solo, this.simMatchTuning),
+      this.arenaOf(world),
+      firstTick,
+      this.countdownTicks,
+    );
+
     const match: HostMatch = {
       roster,
       world,
@@ -769,13 +905,26 @@ export class HostSession {
       riders: [],
     };
     this.match = match;
+    // Riders with no link of their own are flown here; `?bots=N` clients fly themselves.
+    this.hostBots.beginRoster(
+      roster,
+      world,
+      seed,
+      (id: PlayerId): boolean => this.peerByPlayer[id] !== undefined,
+    );
+    if (this.localBot) this.hostBots.add(this.hostLobby.state.hostId);
     this.holdCourse.centerX = world.centerX;
     this.holdCourse.centerZ = world.centerZ;
     this.holdCourse.radius = world.radius * HOLD_RADIUS_FRACTION;
     this.holdCourse.altitude =
       world.floorY + (world.ceilingY - world.floorY) * HOLD_ALTITUDE_FRACTION;
 
-    for (let i = 0; i < this.peers.length; i++) this.peers[i]?.inputs.reset();
+    for (let i = 0; i < this.peers.length; i++) {
+      const peer = this.peers[i];
+      if (peer === undefined) continue;
+      peer.inputs.reset();
+      peer.lagPackets = -1;
+    }
     this.simInputs.fill(undefined);
 
     // Clients build their roster (teams, classes, their own dragon's class for prediction) from
@@ -794,16 +943,39 @@ export class HostSession {
         team: entry.team,
         classId: entry.classId,
         gateSlot: entry.gateSlot,
-        wasAlive: true,
-        deadTicks: 0,
+        isBot: entry.isBot,
       };
       match.riders.push(rider);
+      this.director.addRider(rider.playerId, rider.team, this.isRiderConnected(rider.playerId));
       this.spawnRider(match, sim, rider, firstTick);
     }
     this.emitPhaseEvent(match);
     this.updateMatchClock(match, this.tickNow);
     this.listener.onMatchStart?.({ roster, world, seed, startTick: match.startTick });
     this.listener.onMatchPhase?.(match.phase);
+  }
+
+  /** The map numbers the Duel storm schedule needs. */
+  private arenaOf(world: MatchWorld): MatchArena {
+    let gateRadius = 0;
+    for (const gate of world.spawnGates) {
+      for (const slot of gate.slots) {
+        const distance = Math.hypot(slot.x - world.centerX, slot.z - world.centerZ);
+        if (distance > gateRadius) gateRadius = distance;
+      }
+    }
+    // A world without a wall to move (open sky) keeps whatever it has.
+    const hasWall = world.collisionWorld.setStormRadius !== undefined;
+    return { stormRadius: hasWall ? world.radius : -1, gateRadius };
+  }
+
+  /** The host itself, or a player with a live link. A held seat is not connected. */
+  private isRiderConnected(playerId: PlayerId): boolean {
+    return (
+      playerId === this.hostLobby.state.hostId ||
+      this.peerByPlayer[playerId] !== undefined ||
+      this.hostBots.has(playerId)
+    );
   }
 
   private spawnRider(match: HostMatch, sim: Sim, rider: MatchRider, tick: number): void {
@@ -815,8 +987,6 @@ export class HostSession {
       point,
       spawnYawOf(match.world, rider.team),
     );
-    rider.wasAlive = dragon !== null;
-    rider.deadTicks = 0;
     if (dragon === null) return;
     const event = this.spawnEvent;
     event.tick = tick;
@@ -840,22 +1010,50 @@ export class HostSession {
     const clock = this.profileClock;
     const t0 = clock !== null ? clock() : 0;
 
-    if (match.phase === 'countdown' && tick >= match.startTick) {
-      this.setMatchPhase(match, 'playing', tick);
-      this.handleResult(enterMatch(this.hostLobby));
-    }
-    const playing = match.phase === 'playing';
-
-    // --- Inputs: exactly one per rider per tick ------------------------------------------------
+    // --- Match rules: who is here, then the phase for this tick ----------------------------------
+    const director = this.director;
+    const lagComp = this.lagComp;
     const hostId = this.hostLobby.state.hostId;
     const riders = match.riders;
     for (let i = 0; i < riders.length; i++) {
       const rider = riders[i];
       if (rider === undefined) continue;
       const id = rider.playerId;
+      const peer = id === hostId ? undefined : this.peerByPlayer[id];
+      // A bot the host flies itself is always at its controls: it has no link to lose.
+      director.setRiderConnected(id, id === hostId || peer !== undefined || this.hostBots.has(id));
+      // Lag compensation: one latency sample per new input packet. Never for the host (no
+      // link) or a bot, so their rewind stays 0.
+      if (peer === undefined || rider.isBot) continue;
+      const inputs = peer.inputs;
+      if (inputs.hasSnapshotAck && inputs.packetCount !== peer.lagPackets) {
+        peer.lagPackets = inputs.packetCount;
+        lagComp.observeLatency(id, inputs.ackTick - expandTick(inputs.ackSnapshotTick, tick));
+      }
+    }
+    director.beforeStep(tick, sim);
+    if (director.finished) {
+      // The results are over: back to the lobby (also sends MATCH_PHASE `lobby`).
+      this.endMatch();
+      return;
+    }
+    // Controls are live whenever the sim runs; during a countdown the dragons are held.
+    const playing = director.simRuns;
+    // Host-flown bots fight only while the round is live: they rest through `roundEnd` and
+    // `results` (BotContext.playing), like the net-bots do.
+    const botsFight = director.phase === 'playing';
+
+    // --- Inputs: exactly one per rider per tick ------------------------------------------------
+    for (let i = 0; i < riders.length; i++) {
+      const rider = riders[i];
+      if (rider === undefined) continue;
+      const id = rider.playerId;
       let input: Readonly<InputFrame> | undefined;
+      const hostBots = this.hostBots;
       if (id === hostId) {
-        input = localAway && playing ? this.holdingInput(sim, id, tick) : localInput;
+        if (hostBots.has(id))
+          input = playing ? hostBots.sample(sim.current, id, tick, botsFight) : undefined;
+        else input = localAway && playing ? this.holdingInput(sim, id, tick) : localInput;
       } else {
         const peer = this.peerByPlayer[id];
         if (peer !== undefined) {
@@ -863,7 +1061,9 @@ export class HostSession {
           // client's input timing has settled when control is handed over.
           input = peer.inputs.take(tick);
         } else if (playing) {
-          input = this.holdingInput(sim, id, tick);
+          input = hostBots.has(id)
+            ? hostBots.sample(sim.current, id, tick, botsFight)
+            : this.holdingInput(sim, id, tick);
         }
       }
       this.simInputs[id] = playing ? input : undefined;
@@ -874,7 +1074,8 @@ export class HostSession {
     if (playing) {
       sim.step(tick, this.simInputs);
       this.afterStep(match, sim, tick);
-      // Phase 3: projectiles, hits, lag compensation and scoring go here.
+      lagComp.record(sim.current);
+      director.afterStep(tick, sim);
     }
     this.updateMatchClock(match, tick);
     const t2 = clock !== null ? clock() : 0;
@@ -922,72 +1123,68 @@ export class HostSession {
     return steerToCourse(dragon, this.holdCourse, frame);
   }
 
-  /** Deaths and respawns. Phase 3 replaces this with the real takedown and respawn rules. */
+  /**
+   * A rider without a dragon gets one (a slot that was full at match start). Deaths, takedown
+   * credit and respawns are the sim's (`combat.ts`), announced through `simEvents`.
+   */
   private afterStep(match: HostMatch, sim: Sim, tick: number): void {
     const riders = match.riders;
     for (let i = 0; i < riders.length; i++) {
       const rider = riders[i];
       if (rider === undefined) continue;
-      const dragon = sim.getDragon(rider.playerId);
-      if (dragon === undefined) {
-        this.spawnRider(match, sim, rider, tick);
-        continue;
-      }
-      const alive = (dragon.flags & DRAGON_FLAG_ALIVE) !== 0;
-      if (alive) {
-        rider.wasAlive = true;
-        rider.deadTicks = 0;
-        continue;
-      }
-      if (rider.wasAlive) {
-        rider.wasAlive = false;
-        rider.deadTicks = 0;
-        const event = this.takedownEvent;
-        event.tick = tick;
-        event.killerId = NO_PLAYER;
-        event.victimId = rider.playerId;
-        event.source = (dragon.flags & DRAGON_FLAG_IN_STORM) !== 0 ? 'storm' : 'terrain';
-        this.eventPosition.x = dragon.position.x;
-        this.eventPosition.y = dragon.position.y;
-        this.eventPosition.z = dragon.position.z;
-        this.emitEvent(event);
-      }
-      if (++rider.deadTicks >= this.respawnTicks) this.spawnRider(match, sim, rider, tick);
+      if (sim.getDragon(rider.playerId) === undefined) this.spawnRider(match, sim, rider, tick);
     }
   }
 
   private updateMatchClock(match: HostMatch, tick: number): void {
     const clock = this.matchClock;
+    const director = this.director;
     clock.phase = match.phase;
-    clock.round = 1;
+    clock.round = director.round;
     const elapsed = tick - match.phaseStartTick + 1;
     clock.phaseTimeS = (elapsed > 0 ? elapsed : 0) * TICK_DT_S;
-    // Phase 3 owns the time limit and the scores.
-    clock.timeRemainingS = Infinity;
-    clock.scoreEmber = 0;
-    clock.scoreFrost = 0;
+    clock.timeRemainingS = director.timeRemainingS;
+    // Takedowns in Skirmish, rounds won in Duel.
+    clock.scoreEmber = director.scores[TEAM_EMBER] ?? 0;
+    clock.scoreFrost = director.scores[TEAM_FROST] ?? 0;
   }
 
+  /**
+   * A phase begins on `tick`: MATCH_PHASE to every client, the `matchPhase` event, the listener.
+   * Round and winner are the director's (`lobby` is the session's own: the match was ended).
+   */
   private setMatchPhase(match: HostMatch, phase: MatchPhase, tick: number): void {
     match.phase = phase;
     match.phaseStartTick = tick;
+    if (phase === 'countdown') {
+      // A new round: this is where the sim resumes (what MATCH_START tells a client that
+      // reconnects during the countdown).
+      match.startTick = tick + this.countdownTicks;
+    } else if (phase === 'playing') {
+      match.startTick = tick;
+      // The lobby goes from `starting` to `inMatch` on the first round; refused afterwards.
+      this.handleResult(enterMatch(this.hostLobby));
+    }
     const message = this.matchPhaseOut;
     message.tick = tick & 0xffff;
     message.phaseStartTick = tick;
     message.phase = phase;
-    message.round = 1;
-    message.winner = null;
+    message.round = this.director.round;
+    message.winner = phase === 'roundEnd' || phase === 'results' ? this.director.winner : null;
     this.broadcastCtrl(encodeMatchPhase(this.ctrlWriter, message));
+    // The totals behind a round or match result arrive with it, not up to a second later.
+    if (phase === 'roundEnd' || phase === 'results') this.broadcastScores();
     this.emitPhaseEvent(match);
     this.listener.onMatchPhase?.(phase);
   }
 
   private emitPhaseEvent(match: HostMatch): void {
     const event = this.phaseEvent;
+    const phase = match.phase;
     event.tick = match.phaseStartTick;
-    event.phase = match.phase;
-    event.round = 1;
-    event.winner = null;
+    event.phase = phase;
+    event.round = this.director.round;
+    event.winner = phase === 'roundEnd' || phase === 'results' ? this.director.winner : null;
     this.emitEvent(event);
   }
 
@@ -1002,9 +1199,21 @@ export class HostSession {
     phase.tick = this.tickNow & 0xffff;
     phase.phaseStartTick = match.phaseStartTick;
     phase.phase = match.phase;
-    phase.round = 1;
-    phase.winner = null;
+    phase.round = this.director.round;
+    phase.winner =
+      match.phase === 'roundEnd' || match.phase === 'results' ? this.director.winner : null;
     this.sendRaw(peer, 'ctrl', this.ctrlWriter, encodeMatchPhase(this.ctrlWriter, phase));
+    this.sendRaw(
+      peer,
+      'ctrl',
+      this.ctrlWriter,
+      encodeScoreboard(
+        this.ctrlWriter,
+        this.tickNow,
+        this.director.stats,
+        this.director.statsCount,
+      ),
+    );
   }
 
   private removeRider(playerId: PlayerId): void {
@@ -1018,39 +1227,97 @@ export class HostSession {
       }
     }
     this.simInstance?.despawnDragon(playerId);
+    this.hostBots.remove(playerId);
     this.simInputs[playerId] = undefined;
+    this.director.removeRider(playerId);
+    this.lagComp.setRewindTicks(playerId, 0);
   }
 
   // --- Events ------------------------------------------------------------------------------------
 
   /**
-   * Hands a GameEvent to the host's own bus and queues it for every client (reliable, sent at
+   * Hands a GameEvent to the host's own bus and queues it for the clients (reliable, sent at
    * the end of the tick). The event object may be reused by the caller straight away.
+   *
+   * Like a snapshot, an event is per audience: one that would give away a VEILED dragon (see
+   * `veilHiddenFrom`) is kept from the other team, the host's own page included.
    */
   emitEvent(event: GameEvent): void {
-    this.events?.emit(event);
-    if (!this.eventsOpen) {
-      beginGameEvents(this.eventWriter, this.tickNow);
-      this.eventsOpen = true;
+    const sim = this.simInstance;
+    const hidden = sim !== null ? this.veilHiddenFrom(sim, event) : -1;
+    if (hidden < 0 || hidden !== this.audienceOf(sim, this.hostLobby.state.hostId)) {
+      this.events?.emit(event);
     }
-    if (!writeGameEvent(this.eventWriter, event)) {
-      this.flushEvents();
-      beginGameEvents(this.eventWriter, this.tickNow);
-      this.eventsOpen = true;
-      writeGameEvent(this.eventWriter, event);
+    const batches = this.eventBatches;
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      if (batch === undefined || i === hidden) continue;
+      if (!batch.open) {
+        beginGameEvents(batch.writer, this.tickNow);
+        batch.open = true;
+      }
+      if (!writeGameEvent(batch.writer, event)) {
+        // Full: everything gathered so far goes out (all audiences), and this one starts anew.
+        this.flushEvents();
+        beginGameEvents(batch.writer, this.tickNow);
+        batch.open = true;
+        writeGameEvent(batch.writer, event);
+      }
     }
   }
 
+  /**
+   * The team that must not learn of `event`, or -1 (everyone may). An event is hidden from the
+   * enemies of a veiled dragon when it would show them where that dragon is: a hit or a status
+   * landing on it, or something it casts without breaking its veil (an attack ends the veil
+   * before its event is made). The veil itself is cast in plain sight, where the dragon was
+   * last seen. Takedowns, spawns and impacts are never hidden.
+   */
+  private veilHiddenFrom(sim: Sim, event: GameEvent): number {
+    let subjectId: PlayerId;
+    switch (event.type) {
+      case 'hit':
+        subjectId = event.targetId;
+        break;
+      case 'statusApplied':
+        if (event.status === 'veil') return -1;
+        subjectId = event.targetId;
+        break;
+      case 'abilityCast':
+        if (ABILITY_TABLE[event.classId][event.slot].selfStatus === 'veil') return -1;
+        subjectId = event.dragonId;
+        break;
+      default:
+        return -1;
+    }
+    const subject = sim.getDragon(subjectId);
+    // The timer, not the flag bit: the bits are only rewritten at the end of the tick.
+    if (subject === undefined || !(subject.veilTicks > 0)) return -1;
+    return subject.team === TEAM_EMBER ? TEAM_FROST : TEAM_EMBER;
+  }
+
+  /** Which event batch a player gets: its dragon's team, or EVENTS_FOR_ALL (no dragon). */
+  private audienceOf(sim: Sim | null, playerId: PlayerId): number {
+    const dragon = sim !== null && playerId !== NO_PLAYER ? sim.getDragon(playerId) : undefined;
+    return dragon !== undefined ? dragon.team : EVENTS_FOR_ALL;
+  }
+
   private flushEvents(): void {
-    if (!this.eventsOpen) return;
-    this.eventsOpen = false;
-    const length = endGameEvents(this.eventWriter);
-    if (length <= 0) return;
+    const batches = this.eventBatches;
     const peers = this.peers;
-    for (let i = 0; i < peers.length; i++) {
-      const peer = peers[i];
-      if (peer === undefined || peer.playerId === NO_PLAYER || peer.closeAtMs >= 0) continue;
-      this.sendRaw(peer, 'ctrl', this.eventWriter, length);
+    const sim = this.simInstance;
+    for (let b = 0; b < batches.length; b++) {
+      const batch = batches[b];
+      if (batch === undefined || !batch.open) continue;
+      batch.open = false;
+      const length = endGameEvents(batch.writer);
+      if (length <= 0) continue;
+      for (let i = 0; i < peers.length; i++) {
+        const peer = peers[i];
+        if (peer === undefined || peer.playerId === NO_PLAYER || peer.closeAtMs >= 0) continue;
+        if (this.audienceOf(sim, peer.playerId) !== b) continue;
+        this.sendRaw(peer, 'ctrl', batch.writer, length);
+      }
     }
   }
 
@@ -1112,6 +1379,16 @@ export class HostSession {
     message.tick = this.tickNow & 0xffff;
     message.lobbyState = this.hostLobby.state;
     this.broadcastCtrl(encodeLobbyState(this.ctrlWriter, message));
+  }
+
+  /** SCOREBOARD to every client: per-rider totals, at most once a second and at each result. */
+  private broadcastScores(): void {
+    this.scoresDirty = false;
+    if (this.match === null || this.peers.length === 0) return;
+    const director = this.director;
+    this.broadcastCtrl(
+      encodeScoreboard(this.ctrlWriter, this.tickNow, director.stats, director.statsCount),
+    );
   }
 
   /** Once a second: everybody's round trip, so clients can show the ping column too. */

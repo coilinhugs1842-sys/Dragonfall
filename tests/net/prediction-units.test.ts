@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUTTON_BOOST,
+  BUTTON_MASK,
   BUTTON_DODGE_LEFT,
   BUTTON_FLAP,
   DRAGON_FLAG_ALIVE,
@@ -329,7 +330,7 @@ describe('HostInputBuffer: which input the host applies on which tick', () => {
     const frame = buffer.take(10);
     expect(frame?.steerX).toBe(1);
     expect(frame?.steerY).toBe(0);
-    expect(frame?.buttons).toBe(0x7ff);
+    expect(frame?.buttons).toBe(BUTTON_MASK);
 
     // A frame that is already on the wire grid (everything the decoder produces) is unchanged.
     const onGrid = 12_345 / 32_767;

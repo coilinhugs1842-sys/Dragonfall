@@ -27,19 +27,23 @@
  */
 
 import {
+  MATCH_TUNING,
   NO_PLAYER,
   PING_HZ,
   PROTOCOL_VERSION,
   RECONNECT_GRACE_MS,
+  TICK_HZ,
   TICK_MS,
   createInputFrame,
 } from '../../shared';
 import type {
   ConnectFailureReason,
+  GameEvent,
   GameEventSink,
   InputFrame,
   LobbyState,
   MatchPhase,
+  MatchWinner,
   MutableWorldView,
   PlayerId,
   RejectReason,
@@ -79,6 +83,7 @@ import {
   MSG_MATCH_START,
   MSG_PLAYER_PINGS,
   MSG_PONG,
+  MSG_SCOREBOARD,
   MSG_REJECT,
   MSG_SNAPSHOT,
   MSG_WELCOME,
@@ -100,6 +105,7 @@ import {
 import type { SnapshotOwner } from '../protocol';
 import { isValidRoomCode, normalizeRoomCode } from '../room-code';
 import {
+  ClientBolts,
   ClientRoster,
   SnapshotBuffer,
   buildClientWorldView,
@@ -119,6 +125,8 @@ import { greyboxMatchWorldFactory } from './match-world';
 import type { MatchWorld, MatchWorldFactory } from './match-world';
 import { NetRate } from './net-rate';
 import { applyPlayerPings, createPlayerPingsMessage, decodePlayerPings } from './pings';
+import { createScoreTable, decodeScoreboard } from './scores';
+import type { ScoreTable } from './scores';
 import { ViewCache, createMemoryTokenStore, rttToWire } from './wire';
 import type { ReconnectTokenStore } from './wire';
 
@@ -267,7 +275,11 @@ interface MutableViewOptions {
   localDragonId: PlayerId;
   stormWall: ClientStormWallSource | null;
   phase: MatchPhase;
+  respawnDelayS: number;
 }
+
+/** A countdown longer than this (10 min) is not believed; the shared default is used instead. */
+const COUNTDOWN_MAX_TICKS = 600 * TICK_HZ;
 
 export class ClientSession {
   readonly stats = new NetRate();
@@ -286,6 +298,32 @@ export class ClientSession {
   readonly predictor: ClientPredictor;
   /** Team and class of every rider of the running match. */
   readonly roster = new ClientRoster();
+  /**
+   * Fast projectiles, flown here from `abilityCast` events and from the local rider's own
+   * predicted shots; `writeWorldView` appends them to the view's projectiles.
+   */
+  readonly bolts = new ClientBolts();
+  /**
+   * What the events of the reliable channel pass through on their way to `options.events`:
+   * a cast that launches a bolt starts one here. The local rider's own bolts were already
+   * drawn when they were predicted, so the host's echo of those is not drawn again.
+   */
+  private viewed = false;
+  private readonly eventTap: GameEventSink = {
+    emit: (event: GameEvent): void => {
+      // Only a session somebody draws from flies bolts (a net-bot never asks for a view).
+      if (event.type === 'abilityCast' && this.viewed) {
+        const predicting = this.predict && this.rider && this.predictor.active;
+        this.bolts.onAbilityCast(
+          event,
+          this.roster.teamOf(event.dragonId),
+          this.sample.playTick,
+          predicting ? this.playerId : NO_PLAYER,
+        );
+      }
+      if (this.events !== null) this.events.emit(event);
+    },
+  };
   /** The sample `writeWorldView` last took from the buffer. */
   readonly sample: SnapshotSample = createSnapshotSample();
   /**
@@ -293,6 +331,18 @@ export class ClientSession {
    * PlayerId; -1 = unknown. Mutated in place: hand it to `UiState.playerPings` as it is.
    */
   readonly playerPings: number[] = [];
+  /**
+   * Per-rider totals as the host last sent them (SCOREBOARD): the first `scores.count` rows are
+   * live. Rewritten in place; do not keep rows.
+   */
+  readonly scores: ScoreTable = createScoreTable();
+  /**
+   * Seconds a dead dragon waits to respawn, for `view.local.respawnInS`. `src/game` sets it to
+   * Infinity while the mode has respawns off (Duel).
+   */
+  respawnDelayS: number = MATCH_TUNING.respawnDelayS;
+  /** Ability slots the local rider's prediction fired since `takeLocalCasts` was last called. */
+  private localCasts = 0;
 
   private readonly transport: ClientTransport;
   private readonly tokenStore: ReconnectTokenStore;
@@ -339,8 +389,12 @@ export class ClientSession {
   // --- Match ---
   private matchActive = false;
   private matchPhaseNow: MatchPhase = 'lobby';
+  private matchRoundNow = 1;
+  private matchWinnerNow: MatchWinner | null = null;
   private matchSeedNow = 0;
   private matchStartTickNow = -1;
+  /** Length of the host's countdowns in ticks, learned from the first one; -1 = not yet. */
+  private countdownTicks = -1;
   private world: MatchWorld | null = null;
   private worldSeed = -1;
   private rider = false;
@@ -382,6 +436,7 @@ export class ClientSession {
     localDragonId: NO_PLAYER,
     stormWall: null,
     phase: 'lobby',
+    respawnDelayS: MATCH_TUNING.respawnDelayS,
   };
 
   private readonly handlers: ClientTransportHandlers;
@@ -462,8 +517,19 @@ export class ClientSession {
     return this.matchSeedNow;
   }
 
+  /** First tick of play of the current round (a later round's countdown moves it). */
   get matchStartTick(): number {
     return this.matchStartTickNow;
+  }
+
+  /** 1-based round, from the last MATCH_PHASE (1 outside a match). */
+  get matchRound(): number {
+    return this.matchActive ? this.matchRoundNow : 1;
+  }
+
+  /** Who won the round (`roundEnd`) or the match (`results`); null in every other phase. */
+  get matchWinner(): MatchWinner | null {
+    return this.matchActive ? this.matchWinnerNow : null;
   }
 
   /** The predictor's map; null outside a match and when `predict` is off. */
@@ -614,6 +680,8 @@ export class ClientSession {
         frame.steerX = 0;
         frame.steerY = 0;
         frame.buttons = 0;
+        frame.aimYaw = 0;
+        frame.aimPitch = 0;
         if (sampler !== null) sampler.sample(frame, this.ownDragon);
         this.tick(frame);
       }
@@ -730,6 +798,14 @@ export class ClientSession {
     if (!this.matchActive || !this.started || this.sessionStatus !== 'connected') return -1;
     const predictor = this.predictor;
     const tick = predictor.step(input);
+    // The rider's own shots are shown now; the host decides what they hit.
+    const pulse = this.predict ? predictor.castPulse : 0;
+    if (pulse !== 0) {
+      this.localCasts |= pulse;
+      for (let slot = 0; slot < 4; slot++) {
+        if ((pulse & (1 << slot)) !== 0) this.bolts.spawnLocal(predictor.dragon, slot);
+      }
+    }
     const have = this.lastSnapshotTick >= 0;
     const count = predictor.writeInputMessage(
       this.inputOut,
@@ -747,6 +823,17 @@ export class ClientSession {
   }
 
   /**
+   * Bit `i` set = the local rider's predicted dragon fired ABILITY_SLOTS[i] since the last
+   * call. The views show and sound those shots at once (`Vfx.spawnLocalShot`,
+   * `AudioEngine.playLocalCast`); the host's echo of them arrives a round trip later.
+   */
+  takeLocalCasts(): number {
+    const casts = this.localCasts;
+    this.localCasts = 0;
+    return casts;
+  }
+
+  /**
    * The frame's picture: advances snapshot playback to the time of the latest `advance` /
    * `update`, decays the reconciliation offset and rewrites `view` (own dragon predicted, the
    * others interpolated). Call once per rendered frame, after `advance`.
@@ -755,6 +842,7 @@ export class ClientSession {
     view: MutableWorldView,
     stormWall: ClientStormWallSource | null = null,
   ): MutableWorldView {
+    this.viewed = true;
     this.buffer.update(this.nowMs);
     this.buffer.sample(this.sample);
     const predicting = this.predict && this.matchActive && this.rider;
@@ -763,7 +851,8 @@ export class ClientSession {
     options.localDragonId = this.localDragonId;
     options.stormWall = stormWall;
     options.phase = this.matchPhase;
-    return buildClientWorldView(
+    options.respawnDelayS = this.respawnDelayS;
+    buildClientWorldView(
       view,
       this.sample,
       predicting ? this.predictor : null,
@@ -771,6 +860,18 @@ export class ClientSession {
       this.roster,
       options,
     );
+    const bolts = this.bolts;
+    if (bolts.count > 0) {
+      bolts.update(
+        this.lastDtMs,
+        this.world !== null ? this.world.collisionWorld : null,
+        this.sample,
+        this.roster,
+        predicting && this.predictor.active ? this.predictor.dragon : null,
+      );
+      bolts.writeView(view);
+    }
+    return view;
   }
 
   // --- Status ------------------------------------------------------------------------------------
@@ -906,8 +1007,11 @@ export class ClientSession {
         }
         applyPlayerPings(this.playerPings, this.pingsIn);
         return;
+      case MSG_SCOREBOARD:
+        if (!decodeScoreboard(reader, this.scores)) this.drop();
+        return;
       case MSG_GAME_EVENTS:
-        if (this.events !== null && !decodeGameEvents(reader, this.events)) this.drop();
+        if (!decodeGameEvents(reader, this.eventTap)) this.drop();
         return;
       case MSG_LOBBY_STATE:
         this.onLobbyState(reader);
@@ -1027,6 +1131,11 @@ export class ClientSession {
     this.matchSeedNow = message.seed;
     this.matchStartTickNow = message.startTick;
     this.matchPhaseNow = 'countdown';
+    this.matchRoundNow = 1;
+    this.matchWinnerNow = null;
+    this.countdownTicks = -1;
+    this.scores.count = 0;
+    this.localCasts = 0;
     this.matchActive = true;
     this.rider = me !== undefined;
     this.started = false;
@@ -1037,6 +1146,7 @@ export class ClientSession {
     this.lossPercent = 0;
     this.buffer.reset();
     this.timing.reset();
+    this.bolts.reset();
 
     if (this.predict) {
       if (this.world === null || this.worldSeed !== message.seed) {
@@ -1069,6 +1179,29 @@ export class ClientSession {
     }
     if (!this.matchActive) return;
     this.matchPhaseNow = message.phase;
+    this.matchRoundNow = message.round;
+    this.matchWinnerNow = message.winner;
+    if (message.phase === 'countdown') {
+      // The host holds every dragon at its gate and does not step the sim until the countdown
+      // is over (every round has one). Prediction must stand still for the same ticks. The
+      // message does not say how long that is: the first countdown of a match tells
+      // (MATCH_START carries its end), and every later one has the same length.
+      if (this.countdownTicks < 0) {
+        const length = this.matchStartTickNow - message.phaseStartTick;
+        this.countdownTicks =
+          length >= 0 && length <= COUNTDOWN_MAX_TICKS
+            ? length
+            : Math.round(MATCH_TUNING.countdownS * TICK_HZ);
+      }
+      this.matchStartTickNow = message.phaseStartTick + this.countdownTicks;
+      this.predictor.setSimStartTick(this.matchStartTickNow);
+      // A new round: last round's bolts are gone on the host too.
+      this.bolts.reset();
+    } else if (message.phase === 'playing') {
+      // The authoritative end of the countdown.
+      this.matchStartTickNow = message.phaseStartTick;
+      this.predictor.setSimStartTick(message.phaseStartTick);
+    }
     this.listener.onMatchPhase?.(message.phase);
   }
 
@@ -1079,6 +1212,9 @@ export class ClientSession {
     this.rider = false;
     this.hasOwnState = false;
     this.matchPhaseNow = 'lobby';
+    this.matchRoundNow = 1;
+    this.matchWinnerNow = null;
+    this.countdownTicks = -1;
     this.lastSnapshotTick = -1;
     this.accumulatorMs = 0;
     this.lossPercent = 0;
@@ -1119,6 +1255,11 @@ export class ClientSession {
     }
     this.lossReceived++;
     this.lastSnapshotTick = tick;
+    // The storm wall a mode moved: prediction must step against the wall the host uses.
+    const world = this.world;
+    if (world !== null && world.collisionWorld.setStormRadius !== undefined) {
+      world.collisionWorld.setStormRadius(snapshot.stormRadius);
+    }
     if (!this.rider) return;
 
     if (snapshot.hasOwner && snapshot.owner.id === this.playerId) {

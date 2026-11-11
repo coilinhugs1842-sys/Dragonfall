@@ -22,12 +22,24 @@
  */
 
 import { TICK_MS, createInputFrame } from '../../shared';
-import type { InputFrame, LobbyState, MatchPhase, PlayerId, UiIntent } from '../../shared';
+import type {
+  GameEventSink,
+  InputFrame,
+  LobbyState,
+  MatchPhase,
+  MatchPlayerStats,
+  MatchWinner,
+  PlayerId,
+  UiIntent,
+} from '../../shared';
 import type { StartBlocker } from '../../sim/lobby';
 import { encodeHostLeft } from '../codec/ctrl';
-import { Writer } from '../codec/io';
+import { decodeGameEvents } from '../codec/events';
+import { Reader, Writer } from '../codec/io';
 import { HOST_LEFT_BYTES, createNoticeMessage } from '../protocol';
 import type { HostSessionState } from '../session';
+import { createScoreTable, decodeScoreboard } from '../session/scores';
+import { ViewCache } from '../session/wire';
 import type { HostTransport, LinkId, TransportError } from '../transport';
 import { NOOP_HOST_HANDLERS, transportError } from '../transport';
 import {
@@ -41,11 +53,13 @@ import {
   BufferPool,
   ExactBuffers,
   REC_CLOSE,
+  REC_EVENTS,
   REC_INPUT,
   REC_KEEPALIVE,
   REC_PACKET,
   REC_PEER_GONE,
   REC_PEER_OPEN,
+  REC_SCORES,
   REC_STATE,
   REC_STATS,
   REC_TEXT,
@@ -97,6 +111,8 @@ export interface WorkerHostOptions {
   readonly profileClock?: () => number;
   /** Samples the host player's input once per frame (unused when the worker has the autopilot). */
   readonly localInput?: LocalInputSource | null;
+  /** The match's GameEvents, decoded from the worker's batches (the host's own views). */
+  readonly events?: GameEventSink | null;
   /** Called for every state that arrives (debug probe). */
   readonly onState?: ((hostTick: number, current: Readonly<HostViewState>) => void) | null;
   /**
@@ -118,6 +134,10 @@ export class WorkerHost implements HostHandle {
   private readonly now: () => number;
   private readonly epochNow: () => number;
   private readonly localInput: LocalInputSource | null;
+  private readonly events: GameEventSink | null;
+  private readonly eventReader = new Reader();
+  private readonly eventViews = new ViewCache(true);
+  private readonly scores = createScoreTable();
   private readonly onState: WorkerHostOptions['onState'];
   private readonly onStartFailed: WorkerHostOptions['onStartFailed'];
   private readonly startTimeoutMs: number;
@@ -167,6 +187,7 @@ export class WorkerHost implements HostHandle {
     this.now = options.now;
     this.epochNow = options.epochNow;
     this.localInput = options.localInput ?? null;
+    this.events = options.events ?? null;
     this.onState = options.onState ?? null;
     this.onStartFailed = options.onStartFailed ?? null;
     this.startTimeoutMs = options.startTimeoutMs ?? WORKER_START_TIMEOUT_MS;
@@ -270,6 +291,34 @@ export class WorkerHost implements HostHandle {
     return this.info.phaseTimeS;
   }
 
+  get matchRound(): number {
+    return this.matchRunning && this.hasState ? this.info.round : 1;
+  }
+
+  get matchWinner(): MatchWinner | null {
+    return this.matchRunning && this.hasState ? this.info.winner : null;
+  }
+
+  get timeRemainingS(): number {
+    return this.matchRunning && this.hasState ? this.info.timeRemainingS : Infinity;
+  }
+
+  get scoreEmber(): number {
+    return this.matchRunning && this.hasState ? this.info.scoreEmber : 0;
+  }
+
+  get scoreFrost(): number {
+    return this.matchRunning && this.hasState ? this.info.scoreFrost : 0;
+  }
+
+  get matchStats(): readonly Readonly<MatchPlayerStats>[] {
+    return this.scores.rows;
+  }
+
+  get matchStatsCount(): number {
+    return this.matchRunning ? this.scores.count : 0;
+  }
+
   get localIsRider(): boolean {
     return this.matchRunning && this.hasState && this.info.localIsRider;
   }
@@ -360,7 +409,13 @@ export class WorkerHost implements HostHandle {
 
     if (!this.ended) {
       const source = this.localInput;
-      if (this.matchRunning && this.hasState && source !== null && this.config.autopilot === null) {
+      if (
+        this.matchRunning &&
+        this.hasState &&
+        source !== null &&
+        this.config.autopilot === null &&
+        !this.config.localBot
+      ) {
         const frame = this.frame;
         const dtS = gapMs > 100 ? 0.1 : gapMs / 1000;
         source.sample(
@@ -380,6 +435,8 @@ export class WorkerHost implements HostHandle {
           view.setUint16(at + 8, frame.buttons & 0xffff, true);
           view.setUint16(at + 10, 0, true);
           view.setFloat64(at + 12, this.epochNow(), true);
+          view.setFloat32(at + 20, frame.aimYaw, true);
+          view.setFloat32(at + 24, frame.aimPitch, true);
         }
       }
       if (this.inbound.empty && nowMs - this.lastPostMs >= PAGE_KEEPALIVE_MS) {
@@ -456,6 +513,7 @@ export class WorkerHost implements HostHandle {
     if (!meta.inMatch) {
       // The next match must not start from the last picture of this one.
       this.hasState = false;
+      this.scores.count = 0;
       this.steerX = 0;
       this.steerY = 0;
     }
@@ -496,6 +554,23 @@ export class WorkerHost implements HostHandle {
           case REC_STATS:
             this.onStatsRecord(reader.view, reader.offset, reader.length);
             break;
+          case REC_EVENTS:
+            if (this.events !== null) {
+              const packet = this.exact.filled(reader.bytes, reader.offset, reader.length);
+              decodeGameEvents(
+                this.eventReader.reset(this.eventViews.viewOf(packet.buffer)),
+                this.events,
+              );
+            }
+            break;
+          case REC_SCORES: {
+            const packet = this.exact.filled(reader.bytes, reader.offset, reader.length);
+            decodeScoreboard(
+              this.eventReader.reset(this.eventViews.viewOf(packet.buffer)),
+              this.scores,
+            );
+            break;
+          }
           default:
             break;
         }

@@ -63,9 +63,11 @@ export const INPUT_REWIND_TICKS = INPUT_RESYNC_TICKS - 2;
 
 const SLOT_MASK = HOST_INPUT_WINDOW_TICKS - 1;
 
+const HALF_PI = Math.PI / 2;
+
 /**
  * Copies a received frame, forced into the legal range: steer onto the wire's `i16` grid in
- * [-1, 1] (NaN becomes 0), known buttons only. Same result as `sanitizeInputFrame` for anything
+ * [-1, 1] (NaN becomes 0), known buttons only, the aim inside its range. Same result as `sanitizeInputFrame` for anything
  * the decoder produces, but written as integer maths so no float crosses a call or a branch
  * (either would be boxed; this runs for every frame of every packet).
  */
@@ -78,6 +80,12 @@ function writeClamped(out: InputFrame, from: Readonly<InputFrame>, tick: number)
     (Math.max(-STEER_UNITS, Math.min(STEER_UNITS, Math.round(from.steerY * STEER_UNITS))) | 0) /
     STEER_UNITS;
   out.buttons = from.buttons & BUTTON_MASK;
+  // The aim: the decoder already keeps it in range; anything else (NaN included) aims level
+  // along +Z, and the sim only reads it while BUTTON_AIM is set.
+  const aimYaw = from.aimYaw;
+  const aimPitch = from.aimPitch;
+  out.aimYaw = aimYaw >= -Math.PI && aimYaw <= Math.PI ? aimYaw : 0;
+  out.aimPitch = aimPitch >= -HALF_PI && aimPitch <= HALF_PI ? aimPitch : 0;
 }
 
 export class HostInputBuffer {

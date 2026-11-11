@@ -11,6 +11,9 @@
  *   abilityCast  u8 dragonId, u8 classId, u8 slot, pos, dir (3 x i16)          20 bytes
  *   objective    u8 kind, u8 team, u8 dragonId, pos                            14 bytes
  *   matchPhase   u8 phase, u8 round, u8 winner                                  8 bytes
+ *   assist       u8 assisterId, u8 killerId, u8 victimId                        8 bytes
+ *   statusApplied u8 targetId, u8 sourceId, u8 status, u16 duration ticks, pos 16 bytes
+ *   impact       u8 projectile kind, u8 ownerId, u8 targetId, pos              14 bytes
  * `pos` is 3 x i16 with the snapshot's position quantization (within 3 cm per axis).
  */
 
@@ -21,20 +24,27 @@ import {
   MATCH_PHASES,
   NO_PLAYER,
   OBJECTIVE_KINDS,
+  PROJECTILE_KINDS,
+  STATUS_KINDS,
   TEAM_EMBER,
   TEAM_FROST,
+  TICK_DT_S,
+  TICK_HZ,
   createVec3,
 } from '../../shared';
 import type {
   AbilityCastEvent,
+  AssistEvent,
   GameEvent,
   GameEventSink,
   HitEvent,
+  ImpactEvent,
   MatchPhaseEvent,
   MatchWinner,
   MutableVec3,
   ObjectiveEvent,
   SpawnEvent,
+  StatusAppliedEvent,
   TakedownEvent,
   Vec3,
 } from '../../shared';
@@ -61,6 +71,9 @@ const KIND_SPAWN = 2;
 const KIND_ABILITY_CAST = 3;
 const KIND_OBJECTIVE = 4;
 const KIND_MATCH_PHASE = 5;
+const KIND_ASSIST = 6;
+const KIND_STATUS_APPLIED = 7;
+const KIND_IMPACT = 8;
 
 const COUNT_OFFSET = HEADER_BYTES;
 
@@ -119,6 +132,30 @@ const matchPhase: Scratch<MatchPhaseEvent> = {
   phase: 'lobby',
   round: 1,
   winner: null,
+};
+const assist: Scratch<AssistEvent> = {
+  type: 'assist',
+  tick: 0,
+  assisterId: NO_PLAYER,
+  killerId: NO_PLAYER,
+  victimId: NO_PLAYER,
+};
+const statusApplied: Scratch<StatusAppliedEvent> = {
+  type: 'statusApplied',
+  tick: 0,
+  targetId: NO_PLAYER,
+  sourceId: NO_PLAYER,
+  status: 'slow',
+  durationS: 0,
+  position: createVec3(),
+};
+const impact: Scratch<ImpactEvent> = {
+  type: 'impact',
+  tick: 0,
+  projectile: 'fireBolt',
+  ownerId: NO_PLAYER,
+  targetId: NO_PLAYER,
+  position: createVec3(),
 };
 
 // --- Shared with MATCH_PHASE ---------------------------------------------------------------------
@@ -224,6 +261,33 @@ export function writeGameEvent(w: Writer, event: GameEvent): boolean {
       w.u8(indexOrZero(MATCH_PHASES.indexOf(event.phase)));
       w.u8(event.round < 0 ? 0 : event.round > 255 ? 255 : event.round);
       w.u8(winnerToWire(event.winner));
+      break;
+    case 'assist':
+      w.u8(KIND_ASSIST);
+      w.u32(event.tick >>> 0);
+      w.u8(event.assisterId);
+      w.u8(event.killerId);
+      w.u8(event.victimId);
+      break;
+    case 'statusApplied': {
+      w.u8(KIND_STATUS_APPLIED);
+      w.u32(event.tick >>> 0);
+      w.u8(event.targetId);
+      w.u8(event.sourceId);
+      w.u8(indexOrZero(STATUS_KINDS.indexOf(event.status)));
+      const ticks = Math.round(event.durationS * TICK_HZ);
+      // `!(> 0)` also catches NaN.
+      w.u16(!(ticks > 0) ? 0 : ticks > 0xffff ? 0xffff : ticks);
+      writePosition(w, event.position);
+      break;
+    }
+    case 'impact':
+      w.u8(KIND_IMPACT);
+      w.u32(event.tick >>> 0);
+      w.u8(indexOrZero(PROJECTILE_KINDS.indexOf(event.projectile)));
+      w.u8(event.ownerId);
+      w.u8(event.targetId);
+      writePosition(w, event.position);
       break;
   }
 
@@ -343,6 +407,35 @@ function readEvent(r: Reader): GameEvent | null {
       matchPhase.phase = phase;
       matchPhase.winner = winner;
       return matchPhase;
+    }
+    case KIND_ASSIST: {
+      assist.tick = tick;
+      assist.assisterId = r.u8();
+      assist.killerId = r.u8();
+      assist.victimId = r.u8();
+      if (assist.assisterId === NO_PLAYER || assist.victimId === NO_PLAYER) return null;
+      return assist;
+    }
+    case KIND_STATUS_APPLIED: {
+      statusApplied.tick = tick;
+      statusApplied.targetId = r.u8();
+      statusApplied.sourceId = r.u8();
+      const status = STATUS_KINDS[r.u8()];
+      statusApplied.durationS = r.u16() * TICK_DT_S;
+      readPosition(r, statusApplied.position);
+      if (status === undefined || statusApplied.targetId === NO_PLAYER) return null;
+      statusApplied.status = status;
+      return statusApplied;
+    }
+    case KIND_IMPACT: {
+      impact.tick = tick;
+      const projectile = PROJECTILE_KINDS[r.u8()];
+      impact.ownerId = r.u8();
+      impact.targetId = r.u8();
+      readPosition(r, impact.position);
+      if (projectile === undefined) return null;
+      impact.projectile = projectile;
+      return impact;
     }
     default:
       return null;

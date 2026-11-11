@@ -41,6 +41,13 @@ export const REC_STATE = 7;
 export const REC_STATS = 8;
 /** Either way: "I am alive" when there is nothing else to say. */
 export const REC_KEEPALIVE = 9;
+/**
+ * worker -> main: the tick's GameEvents for the host's own views, as one GAME_EVENTS message
+ * (the bytes the clients get; `codec/events.ts`).
+ */
+export const REC_EVENTS = 10;
+/** worker -> main: the per-rider totals, as one SCOREBOARD message (`session/scores.ts`). */
+export const REC_SCORES = 11;
 
 /** `aux` of a packet record. */
 export const AUX_CTRL = 0;

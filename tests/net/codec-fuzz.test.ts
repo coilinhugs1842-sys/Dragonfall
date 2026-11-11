@@ -7,10 +7,18 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  BUTTON_AIM,
   BUTTON_MASK,
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  BUTTON_ULTIMATE,
+  BUTTON_UTILITY,
   DRAGON_ANIM_CLIPS,
   DRAGON_CLASS_IDS,
   MATCH_PHASES,
+  PROJECTILE_KINDS,
+  STATUS_KINDS,
+  ZONE_KINDS,
   MAX_PLAYERS,
   MAX_PLAYER_NAME_LENGTH,
   NO_PLAYER,
@@ -54,6 +62,7 @@ import {
   encodeWelcome,
   endGameEvents,
   fillSnapshotDragons,
+  fillSnapshotEffects,
   isReconnectToken,
   setSnapshotOwner,
   writeGameEvent,
@@ -79,6 +88,8 @@ import {
   NET_INTENT_TYPES,
   REJECT_REASONS,
   SNAPSHOT_MAX_DRAGONS,
+  SNAPSHOT_MAX_PROJECTILES,
+  SNAPSHOT_MAX_ZONES,
   createHelloMessage,
   createInputMessage,
   createIntentMessage,
@@ -152,6 +163,20 @@ function checkEvent(event: GameEvent): void {
     case 'matchPhase':
       if (!MATCH_PHASES.includes(event.phase)) throw new Error('bad phase');
       break;
+    case 'assist':
+      playerId(event.assisterId);
+      playerId(event.victimId);
+      break;
+    case 'statusApplied':
+      playerId(event.targetId);
+      if (!STATUS_KINDS.includes(event.status)) throw new Error('bad status');
+      finite(event.durationS, event.position.x, event.position.y, event.position.z);
+      if (event.durationS < 0) throw new Error('negative duration');
+      break;
+    case 'impact':
+      if (!PROJECTILE_KINDS.includes(event.projectile)) throw new Error('bad projectile');
+      finite(event.position.x, event.position.y, event.position.z);
+      break;
   }
 }
 
@@ -179,6 +204,8 @@ function decodeAll(view: DataView): number {
       if (!(frame.steerX >= -1 && frame.steerX <= 1)) throw new Error(`steerX ${frame.steerX}`);
       if (!(frame.steerY >= -1 && frame.steerY <= 1)) throw new Error(`steerY ${frame.steerY}`);
       if ((frame.buttons & ~BUTTON_MASK) !== 0) throw new Error('unknown button bits');
+      if (!(frame.aimYaw >= -Math.PI && frame.aimYaw <= Math.PI)) throw new Error('bad aimYaw');
+      if (!(Math.abs(frame.aimPitch) <= Math.PI / 2)) throw new Error('bad aimPitch');
     }
   } else if (reader.error === DECODE_OK) throw new Error('failed without an error code');
 
@@ -192,7 +219,27 @@ function decodeAll(view: DataView): number {
       throw new Error('bad time remaining');
     }
     if (snapshot.dragonCount > SNAPSHOT_MAX_DRAGONS) throw new Error('too many dragons');
-    if (snapshot.projectileCount !== 0 || snapshot.zoneCount !== 0) throw new Error('reserved');
+    if (Number.isNaN(snapshot.stormRadius)) throw new Error('bad storm radius');
+    if (snapshot.projectileCount > SNAPSHOT_MAX_PROJECTILES)
+      throw new Error('too many projectiles');
+    if (snapshot.zoneCount > SNAPSHOT_MAX_ZONES) throw new Error('too many zones');
+    for (let i = 0; i < snapshot.projectileCount; i++) {
+      const projectile = snapshot.projectiles[i];
+      if (projectile === undefined) throw new Error('missing projectile');
+      if (projectile.kind < 0 || projectile.kind >= PROJECTILE_KINDS.length)
+        throw new Error('kind');
+      if (projectile.team !== TEAM_EMBER && projectile.team !== TEAM_FROST) throw new Error('team');
+      finite(projectile.position.x, projectile.position.y, projectile.position.z);
+      finite(projectile.velocity.x, projectile.velocity.y, projectile.velocity.z);
+    }
+    for (let i = 0; i < snapshot.zoneCount; i++) {
+      const zone = snapshot.zones[i];
+      if (zone === undefined) throw new Error('missing zone');
+      if (zone.kind < 0 || zone.kind >= ZONE_KINDS.length) throw new Error('bad zone kind');
+      if (zone.team !== TEAM_EMBER && zone.team !== TEAM_FROST) throw new Error('bad zone team');
+      finite(zone.position.x, zone.position.y, zone.position.z, zone.radius);
+      if (Number.isNaN(zone.remainingS) || zone.remainingS < 0) throw new Error('bad zone time');
+    }
     const seen = new Set<number>();
     for (let i = 0; i < snapshot.dragonCount; i++) {
       const dragon = snapshot.dragons[i];
@@ -214,7 +261,8 @@ function decodeAll(view: DataView): number {
       playerId(o.id);
       finite(o.position.x, o.position.y, o.position.z, o.yaw, o.pitch, o.roll);
       finite(o.yawRate, o.pitchRate, o.speed, o.burst.x, o.burst.y, o.burst.z);
-      finite(o.stamina, o.health, o.maxHealth);
+      finite(o.stamina, o.health, o.maxHealth, o.ultCharge, o.slowScale, o.hasteScale);
+      if (o.castSlot < -1 || o.castSlot > 3) throw new Error('bad castSlot');
       if (o.dodgeDir < -1 || o.dodgeDir > 1) throw new Error('bad dodgeDir');
       if ((o.prevButtons & ~BUTTON_MASK) !== 0) throw new Error('unknown button bits');
     }
@@ -319,6 +367,25 @@ function sampleMessages(): Uint8Array[] {
   snapshotMsg.dragonCount = 2;
   keep(encodeSnapshot(w, snapshotMsg));
 
+  // A fight: slow projectiles, zones, statuses and timers in the owner block, a moved storm wall.
+  const fight = createInputFrame();
+  fight.buttons = BUTTON_PRIMARY | BUTTON_SECONDARY | BUTTON_UTILITY | BUTTON_ULTIMATE | BUTTON_AIM;
+  fight.aimYaw = 0.2;
+  for (const dragon of sim.current.dragons) if (dragon.active) dragon.ultCharge = 1;
+  sim.setStormRadius(640);
+  for (let tick = 20; tick < 45; tick++) {
+    fight.buttons ^= BUTTON_SECONDARY | BUTTON_UTILITY | BUTTON_ULTIMATE;
+    sim.step(tick, [fight, fight, fight, fight, fight, fight, fight, fight, fight, fight]);
+  }
+  const fightMsg = fillSnapshotDragons(createSnapshotMessage(), sim.current);
+  fillSnapshotEffects(fightMsg, sim.current);
+  if (fightMsg.projectileCount === 0 || fightMsg.zoneCount === 0) {
+    throw new Error('the sample fight produced no projectile or zone records');
+  }
+  setSnapshotOwner(fightMsg, sim.getDragon(3));
+  fightMsg.phase = 'playing';
+  keep(encodeSnapshot(w, fightMsg));
+
   let lobby = createLobby({ roomCode: 'K7QXM', hostName: 'Aurelia' });
   const joined = joinLobby(lobby, { name: 'Bram', token: 'token-1' });
   if (joined.ok) lobby = joined.lobby;
@@ -372,6 +439,24 @@ function sampleMessages(): Uint8Array[] {
     direction: { x: 0, y: 1, z: 0 },
   });
   writeGameEvent(w, { type: 'matchPhase', tick: 9202, phase: 'playing', round: 1, winner: null });
+  writeGameEvent(w, { type: 'assist', tick: 9203, assisterId: 3, killerId: 1, victimId: 2 });
+  writeGameEvent(w, {
+    type: 'statusApplied',
+    tick: 9204,
+    targetId: 2,
+    sourceId: 1,
+    status: 'slow',
+    durationS: 1.5,
+    position: { x: 4, y: 5, z: 6 },
+  });
+  writeGameEvent(w, {
+    type: 'impact',
+    tick: 9205,
+    projectile: 'staticMine',
+    ownerId: 1,
+    targetId: 255,
+    position: { x: 7, y: 8, z: 9 },
+  });
   keep(endGameEvents(w));
   return out;
 }

@@ -1,5 +1,7 @@
 /** Barrel for snapshots: host-side building, client-side buffering and the client WorldView. */
 
+export { CLIENT_BOLT_CAPACITY, CLIENT_BOLT_ID_BASE, ClientBolts } from './client-bolts';
+export type { BoltLocalTarget, ClientBoltsOptions } from './client-bolts';
 export { CLIENT_STORM_WALL_ZONE_ID, ClientRoster, buildClientWorldView } from './client-view';
 export type { ClientStormWallSource, ClientWorldViewOptions } from './client-view';
 export {

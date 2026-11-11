@@ -5,7 +5,10 @@
  * - the dragon this browser flies comes from the `ClientPredictor` (predicted, with the
  *   reconciliation offset still being smoothed out);
  * - every other dragon comes from the `SnapshotBuffer` sample (interpolated in the past);
- * - the clock comes from the sample; the storm wall is passed in like on the host.
+ * - the clock comes from the sample; the storm wall is passed in like on the host;
+ * - slow projectiles and ability zones come from the sample; fast bolts are appended afterwards
+ *   by `ClientBolts.writeView` (the session does it);
+ * - `view.local` (cooldowns, ultimate, respawn) comes from the predicted dragon.
  *
  * The result is the same pooled `MutableWorldView` with the same conventions (storm wall is
  * zone id 0, health is a 0..1 fraction), so nothing downstream can tell which side built it.
@@ -18,10 +21,16 @@
 
 import {
   DEFAULT_DRAGON_CLASS,
+  FLIGHT_TUNING,
+  MATCH_TUNING,
+  PROJECTILE_KINDS,
   TEAM_EMBER,
+  ZONE_KINDS,
   acquireDragonView,
+  acquireProjectileView,
   acquireZoneView,
   beginWorldView,
+  writeLocalCombatView,
 } from '../../shared';
 import type {
   DragonClassId,
@@ -115,6 +124,11 @@ export interface ClientWorldViewOptions {
    * dragon in the wrong colours is better than an invisible one.
    */
   readonly showUnknown?: boolean;
+  /**
+   * Seconds a dead dragon waits to respawn, for `view.local.respawnInS`. Default:
+   * MATCH_TUNING.respawnDelayS. Pass Infinity while the mode has respawns off.
+   */
+  readonly respawnDelayS?: number;
 }
 
 /**
@@ -139,6 +153,12 @@ export function buildClientWorldView(
 
   if (predicted && predictor !== null) {
     predictor.writeView(acquireDragonView(view), alpha);
+    writeLocalCombatView(
+      view.local,
+      predictor.dragon,
+      options.respawnDelayS ?? MATCH_TUNING.respawnDelayS,
+      FLIGHT_TUNING.dodgeCooldownS,
+    );
   }
 
   if (sample.valid) {
@@ -178,7 +198,42 @@ export function buildClientWorldView(
     zone.position.x = storm.stormCenterX;
     zone.position.y = 0;
     zone.position.z = storm.stormCenterZ;
-    zone.radius = storm.stormRadius;
+    // A radius a mode set travels in the snapshots; the source's own is the map's.
+    zone.radius = sample.valid && sample.stormRadius >= 0 ? sample.stormRadius : storm.stormRadius;
+  }
+
+  if (sample.valid) {
+    for (let i = 0; i < sample.zoneCount; i++) {
+      const from = sample.zones[i];
+      const kind = from !== undefined ? ZONE_KINDS[from.kind] : undefined;
+      if (from === undefined || kind === undefined) continue;
+      const zone = acquireZoneView(view);
+      zone.id = from.id;
+      zone.kind = kind;
+      zone.team = from.team;
+      zone.position.x = from.position.x;
+      zone.position.y = from.position.y;
+      zone.position.z = from.position.z;
+      zone.radius = from.radius;
+      zone.ownerId = from.ownerId;
+      zone.remainingS = from.remainingS;
+    }
+    for (let i = 0; i < sample.projectileCount; i++) {
+      const from = sample.projectiles[i];
+      const kind = from !== undefined ? PROJECTILE_KINDS[from.kind] : undefined;
+      if (from === undefined || kind === undefined) continue;
+      const projectile = acquireProjectileView(view);
+      projectile.id = from.id;
+      projectile.kind = kind;
+      projectile.ownerId = from.ownerId;
+      projectile.team = from.team;
+      projectile.position.x = from.position.x;
+      projectile.position.y = from.position.y;
+      projectile.position.z = from.position.z;
+      projectile.velocity.x = from.velocity.x;
+      projectile.velocity.y = from.velocity.y;
+      projectile.velocity.z = from.velocity.z;
+    }
   }
 
   view.localDragonId = localId;

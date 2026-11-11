@@ -19,6 +19,7 @@ import {
   REC_KEEPALIVE,
   REC_PACKET,
   REC_PEER_OPEN,
+  STATE_INFO_BYTES,
   STATE_RECORD_MAX_BYTES,
   STATS_FIXED_BYTES,
   createHostTickInfo,
@@ -39,7 +40,7 @@ import {
   MAX_PLAYERS,
   createSeededRandom,
 } from '../../src/shared';
-import type { LobbyState } from '../../src/shared';
+import type { InputFrame, LobbyState } from '../../src/shared';
 import { createSim } from '../../src/sim';
 
 function bytesOf(...values: number[]): Uint8Array {
@@ -189,7 +190,7 @@ function flownSim(seed: number, dragons: number, ticks: number): ReturnType<type
       random() * 6 - 3,
     );
   }
-  const inputs: { tick: number; steerX: number; steerY: number; buttons: number }[] = [];
+  const inputs: InputFrame[] = [];
   for (let tick = 0; tick < ticks; tick++) {
     for (let i = 0; i < dragons; i++) {
       inputs[i * 3 + 1] = {
@@ -197,6 +198,8 @@ function flownSim(seed: number, dragons: number, ticks: number): ReturnType<type
         steerX: random() * 2 - 1,
         steerY: random() * 2 - 1,
         buttons: Math.floor(random() * 2048),
+        aimYaw: 0,
+        aimPitch: 0,
       };
     }
     sim.step(tick, inputs);
@@ -247,6 +250,11 @@ describe('view state record', () => {
       simUs: 50,
       snapshotUs: 30,
       pulseUs: 120,
+      round: 3,
+      winner: 'draw',
+      timeRemainingS: 77.5,
+      scoreEmber: 2,
+      scoreFrost: 1,
     };
     const bytes = hostStateBytes(sim.prev, sim.current);
     expect(bytes).toBeLessThanOrEqual(STATE_RECORD_MAX_BYTES);
@@ -269,7 +277,14 @@ describe('view state record', () => {
 
   it('fits the largest state and encodes an empty one', () => {
     const full = flownSim(3, MAX_PLAYERS, 2);
-    expect(hostStateBytes(full.prev, full.current)).toBe(STATE_RECORD_MAX_BYTES);
+    // Every dragon slot live; the projectile and zone pools are as full as the fight left them.
+    const fullBytes = hostStateBytes(full.prev, full.current);
+    expect(fullBytes).toBeGreaterThan(STATE_INFO_BYTES + 2 * MAX_PLAYERS * 145);
+    expect(fullBytes).toBeLessThanOrEqual(STATE_RECORD_MAX_BYTES);
+    const fullView = new DataView(new ArrayBuffer(fullBytes));
+    expect(encodeHostState(fullView, 0, createHostTickInfo(), full.prev, full.current)).toBe(
+      fullBytes,
+    );
     const empty = createSim();
     const bytes = hostStateBytes(empty.prev, empty.current);
     const view = new DataView(new ArrayBuffer(bytes));

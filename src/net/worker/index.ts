@@ -16,11 +16,13 @@ export {
   RECORD_HEADER_BYTES,
   RECORD_MAX_PAYLOAD,
   REC_CLOSE,
+  REC_EVENTS,
   REC_INPUT,
   REC_KEEPALIVE,
   REC_PACKET,
   REC_PEER_GONE,
   REC_PEER_OPEN,
+  REC_SCORES,
   REC_STATE,
   REC_STATS,
   REC_TEXT,
@@ -29,7 +31,12 @@ export type { BatchMessage } from './batch';
 export { createHost } from './create-host';
 export type { CreateHostOptions } from './create-host';
 export { AUTOSTART_PATIENCE_MS, HOST_COST_SMOOTHING, HostCore, createHostCore } from './host-core';
-export type { HostCoreOptions, LocalInputSource, LocalInputSubject } from './host-core';
+export type {
+  HostAutoSettings,
+  HostCoreOptions,
+  LocalInputSource,
+  LocalInputSubject,
+} from './host-core';
 export { DirectHost, MeteredHostTransport, WorkMeter, createHostMetrics } from './host-handle';
 export type { HostHandle, HostMetrics } from './host-handle';
 export {
@@ -67,6 +74,7 @@ export type { HostWorkerStats } from './stats-record';
 export {
   STATE_INFO_BYTES,
   STATE_RECORD_MAX_BYTES,
+  appendHostEffects,
   createHostTickInfo,
   createHostViewDragon,
   createHostViewState,
@@ -75,7 +83,14 @@ export {
   findViewDragon,
   hostStateBytes,
 } from './view-state';
-export type { HostTickInfo, HostViewDragon, HostViewState } from './view-state';
+export type {
+  HostEffectsOptions,
+  HostTickInfo,
+  HostViewDragon,
+  HostViewProjectile,
+  HostViewState,
+  HostViewZone,
+} from './view-state';
 export {
   VIEW_EXTRAPOLATE_TICKS,
   WORKER_SILENT_MS,

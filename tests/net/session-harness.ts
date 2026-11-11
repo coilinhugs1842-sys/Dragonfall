@@ -32,9 +32,14 @@ import type {
   ReconnectTokenStore,
 } from '../../src/net/session';
 import {
+  BUTTON_AIM,
   BUTTON_BOOST,
   BUTTON_DODGE_LEFT,
   BUTTON_FLAP,
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  BUTTON_ULTIMATE,
+  BUTTON_UTILITY,
   TICK_MS,
   createInputFrame,
   createSeededRandom,
@@ -57,6 +62,11 @@ export class ScriptPilot implements ClientInputSampler {
   step = 0;
   /** Dodge presses made so far (each is one tick of BUTTON_DODGE_LEFT). */
   dodgePresses = 0;
+  /**
+   * Ability buttons this pilot uses (BUTTON_PRIMARY | ...; default none): the primary is held
+   * in bursts, the others are pressed on staggered schedules. With any of them it also aims.
+   */
+  abilityButtons = 0;
 
   constructor(
     private readonly variant: number,
@@ -76,6 +86,18 @@ export class ScriptPilot implements ClientInputSampler {
     if (own !== null && step % this.dodgeEvery === 20) {
       buttons |= BUTTON_DODGE_LEFT;
       this.dodgePresses++;
+    }
+    const abilities = this.abilityButtons;
+    if (abilities !== 0) {
+      if ((step + v * 17) % 120 < 45) buttons |= abilities & BUTTON_PRIMARY;
+      if ((step + v * 23) % 97 === 10) buttons |= abilities & BUTTON_SECONDARY;
+      if ((step + v * 31) % 131 === 40) buttons |= abilities & BUTTON_UTILITY;
+      if ((step + v * 41) % 211 === 5) buttons |= abilities & BUTTON_ULTIMATE;
+      if (own !== null) {
+        buttons |= BUTTON_AIM;
+        frame.aimYaw = own.yaw + Math.sin(step * 0.02 + v) * 0.2;
+        frame.aimPitch = own.pitch + Math.cos(step * 0.027 + v) * 0.1;
+      }
     }
     frame.buttons = buttons;
   }

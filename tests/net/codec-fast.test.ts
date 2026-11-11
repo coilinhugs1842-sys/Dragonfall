@@ -50,7 +50,13 @@ import {
   SNAPSHOT_DRAGON_BYTES,
   SNAPSHOT_FIXED_BYTES,
   SNAPSHOT_MAX_BYTES,
+  SNAPSHOT_MAX_PROJECTILES,
+  SNAPSHOT_MAX_ZONES,
   SNAPSHOT_OWNER_BYTES,
+  SNAPSHOT_OWNER_MASK_BYTES,
+  SNAPSHOT_OWNER_MAX_WIRE_BYTES,
+  SNAPSHOT_PROJECTILE_BYTES,
+  SNAPSHOT_ZONE_BYTES,
   WIRE_POSITION_STEP_M,
   WIRE_VELOCITY_STEP_MPS,
   createInputMessage,
@@ -97,9 +103,9 @@ function flownSim(count: number, ticks: number): Sim {
 describe('INPUT', () => {
   it('has the documented sizes', () => {
     expect(INPUT_FRAMES_PER_PACKET).toBe(1 + INPUT_REDUNDANCY);
-    expect(inputByteLength(1)).toBe(12);
-    expect(inputByteLength(3)).toBe(24);
-    expect(INPUT_MAX_BYTES).toBe(24);
+    expect(inputByteLength(1)).toBe(16);
+    expect(inputByteLength(3)).toBe(36);
+    expect(INPUT_MAX_BYTES).toBe(36);
   });
 
   it('round-trips the newest frame and its two repeats', () => {
@@ -115,11 +121,13 @@ describe('INPUT', () => {
       frame.steerX = 0.25 * (i + 1);
       frame.steerY = -0.3 * (i + 1);
       frame.buttons = BUTTON_BOOST << i;
+      frame.aimYaw = 0.7 * (i + 1) - 2;
+      frame.aimPitch = 0.4 * (i - 1);
       snapInputFrame(frame);
     });
 
     const length = encodeInput(w, msg);
-    expect(length).toBe(24);
+    expect(length).toBe(36);
 
     const out = createInputMessage();
     expect(decodeInput(r.reset(viewOf(w, length)), out)).toBe(true);
@@ -153,13 +161,20 @@ describe('INPUT', () => {
       first.buttons = 0xffff;
     }
     const length = encodeInput(w, msg);
-    expect(length).toBe(12);
+    expect(length).toBe(16);
     const out = createInputMessage();
     expect(decodeInput(r.reset(viewOf(w, length)), out)).toBe(true);
     expect(out.frameCount).toBe(1);
     expect(out.hasAck).toBe(false);
     expect(out.ackSnapshotTick).toBe(0);
-    expect(out.frames[0]).toEqual({ tick: 7, steerX: 1, steerY: 0, buttons: BUTTON_MASK });
+    expect(out.frames[0]).toEqual({
+      tick: 7,
+      steerX: 1,
+      steerY: 0,
+      buttons: BUTTON_MASK,
+      aimYaw: 0,
+      aimPitch: 0,
+    });
   });
 
   it('rejects malformed packets with a typed error', () => {
@@ -212,15 +227,24 @@ describe('INPUT', () => {
 describe('SNAPSHOT', () => {
   it('has the documented sizes and fits the 360 B budget for 10 dragons', () => {
     expect(SNAPSHOT_DRAGON_BYTES).toBe(19);
-    expect(SNAPSHOT_OWNER_BYTES).toBe(84);
-    expect(SNAPSHOT_FIXED_BYTES).toBe(17);
-    expect(snapshotByteLength(10, true)).toBe(291);
-    expect(snapshotByteLength(10, false)).toBe(207);
-    expect(SNAPSHOT_MAX_BYTES).toBe(291);
-    expect(SNAPSHOT_MAX_BYTES).toBeLessThanOrEqual(360);
+    expect(SNAPSHOT_OWNER_BYTES).toBe(140);
+    expect(SNAPSHOT_FIXED_BYTES).toBe(19);
+    expect(SNAPSHOT_PROJECTILE_BYTES).toBe(13);
+    expect(SNAPSHOT_ZONE_BYTES).toBe(11);
+    // 10 dragons and nothing else in the air: the budget of docs/NETWORKING.md.
+    // The owner block is packed on the wire: an 18-byte mask and the non-zero bytes of its
+    // 140-byte image, so 158 at the very worst.
+    expect(SNAPSHOT_OWNER_MASK_BYTES).toBe(18);
+    expect(SNAPSHOT_OWNER_MAX_WIRE_BYTES).toBe(158);
+    expect(snapshotByteLength(10, 0)).toBe(209);
+    // A busy fight: 6 slow projectiles and 8 zones.
+    expect(snapshotByteLength(10, 100, 6, 8)).toBe(309 + 6 * 13 + 8 * 11);
+    // The cap: every record slot used. One SCTP message either way.
+    expect(SNAPSHOT_MAX_BYTES).toBe(367 + SNAPSHOT_MAX_PROJECTILES * 13 + SNAPSHOT_MAX_ZONES * 11);
+    expect(FAST_MAX_BYTES).toBe(SNAPSHOT_MAX_BYTES);
   });
 
-  it('encodes a full 5v5 sim state in exactly 291 bytes and round-trips it', () => {
+  it('encodes a full 5v5 sim state in about 290 bytes and round-trips it', () => {
     const sim = flownSim(MAX_PLAYERS, 90);
     const state = sim.current;
     const w = new Writer(FAST_MAX_BYTES);
@@ -239,7 +263,9 @@ describe('SNAPSHOT', () => {
     msg.scoreFrost = 9;
 
     const length = encodeSnapshot(w, msg);
-    expect(length).toBe(291);
+    // 209 without the owner; its packed block is about half of the 140-byte image in flight.
+    expect(length).toBeGreaterThan(209 + SNAPSHOT_OWNER_MASK_BYTES);
+    expect(length).toBeLessThan(305);
     expect(msg.dragonCount).toBe(MAX_PLAYERS);
 
     const out = createSnapshotMessage();
@@ -355,7 +381,7 @@ describe('SNAPSHOT', () => {
     for (const dodgeDir of [-1, 0, 1]) {
       o.dodgeDir = dodgeDir;
       const length = encodeSnapshot(w, msg);
-      expect(length).toBe(snapshotByteLength(0, true));
+      expect(length).toBeLessThanOrEqual(snapshotByteLength(0, SNAPSHOT_OWNER_MAX_WIRE_BYTES));
       const out = createSnapshotMessage();
       expect(decodeSnapshot(r.reset(viewOf(w, length)), out)).toBe(true);
       // Every value above is exactly representable as an f32.
@@ -428,19 +454,29 @@ describe('SNAPSHOT', () => {
     expect(decode(2)).toBe(false);
     expect(r.error).toBe(DECODE_TRUNCATED);
 
-    bytes[14] = 200; // dragon count far beyond the buffer and the pool
+    bytes[16] = 200; // dragon count far beyond the buffer and the pool
     expect(decode()).toBe(false);
     expect(r.error).toBe(DECODE_BAD_VALUE);
     restore();
 
-    bytes[14] = 4; // one more dragon than the bytes hold
+    bytes[16] = 4; // one more dragon than the bytes hold
     expect(decode()).toBe(false);
     expect(r.error).toBe(DECODE_TRUNCATED);
     restore();
 
-    bytes[15] = 1; // projectiles are reserved in this version
+    bytes[17] = 1; // a projectile record the bytes do not hold
     expect(decode()).toBe(false);
-    expect(r.error).toBe(DECODE_UNSUPPORTED);
+    expect(r.error).toBe(DECODE_TRUNCATED);
+    restore();
+
+    bytes[17] = SNAPSHOT_MAX_PROJECTILES + 1;
+    expect(decode()).toBe(false);
+    expect(r.error).toBe(DECODE_BAD_VALUE);
+    restore();
+
+    bytes[18] = SNAPSHOT_MAX_ZONES + 1;
+    expect(decode()).toBe(false);
+    expect(r.error).toBe(DECODE_BAD_VALUE);
     restore();
 
     bytes[6] = 99; // phase
@@ -448,17 +484,34 @@ describe('SNAPSHOT', () => {
     expect(r.error).toBe(DECODE_BAD_VALUE);
     restore();
 
-    w.view.setFloat32(SNAPSHOT_FIXED_BYTES + 1, NaN, true); // owner position.x
+    // The owner block is packed, so a bad value is put in through the encoder.
+    const reencode = (change: () => void): void => {
+      const kept = structuredClone(msg.owner);
+      change();
+      const size = encodeSnapshot(w, msg);
+      expect(decode(size)).toBe(false);
+      expect(r.error).toBe(DECODE_BAD_VALUE);
+      Object.assign(msg.owner, kept);
+      restore();
+    };
+    reencode(() => (msg.owner.position.x = NaN));
+    reencode(() => (msg.owner.speed = Infinity));
+
+    // The owner mask: bits past the end of the image, and a bit that changes the length.
+    const lastMask = SNAPSHOT_FIXED_BYTES + SNAPSHOT_OWNER_MASK_BYTES - 1;
+    bytes[lastMask] = (bytes[lastMask] ?? 0) | 0x80;
     expect(decode()).toBe(false);
     expect(r.error).toBe(DECODE_BAD_VALUE);
     restore();
-
-    w.view.setFloat32(SNAPSHOT_FIXED_BYTES + 1 + 4 * 8, Infinity, true); // owner speed
+    bytes[SNAPSHOT_FIXED_BYTES + 2] = (bytes[SNAPSHOT_FIXED_BYTES + 2] ?? 0) ^ 0x01;
     expect(decode()).toBe(false);
-    expect(r.error).toBe(DECODE_BAD_VALUE);
+    expect([DECODE_TRUNCATED, DECODE_OVERSIZED]).toContain(r.error);
     restore();
+    expect(decode(SNAPSHOT_FIXED_BYTES + 4)).toBe(false);
+    expect(r.error).toBe(DECODE_TRUNCATED);
+    expect(decode()).toBe(true);
 
-    const firstDragon = SNAPSHOT_FIXED_BYTES + SNAPSHOT_OWNER_BYTES;
+    const firstDragon = length - 3 * SNAPSHOT_DRAGON_BYTES;
     bytes[firstDragon] = NO_PLAYER; // not a player id
     expect(decode()).toBe(false);
     expect(r.error).toBe(DECODE_BAD_VALUE);
@@ -483,7 +536,7 @@ describe('SNAPSHOT', () => {
     expect(small.overflow).toBe(true);
     // The writer recovers on the next message.
     msg.dragonCount = 1;
-    expect(encodeSnapshot(small, msg)).toBe(snapshotByteLength(1, false));
+    expect(encodeSnapshot(small, msg)).toBe(snapshotByteLength(1, 0));
   });
 });
 
@@ -554,7 +607,8 @@ describe('hot path allocations', () => {
     });
     const inputOut = createInputMessage();
     // One view over the whole buffer per size, made up front: the loop itself must not allocate.
-    const snapshotView = viewOf(w, snapshotByteLength(MAX_PLAYERS, true));
+    // Nothing but the ack changes per cycle, so the packed owner block keeps its length.
+    const snapshotView = viewOf(w, encodeSnapshot(w, snapshot));
     const inputView = viewOf(w, inputByteLength(3));
 
     let ok = 0;

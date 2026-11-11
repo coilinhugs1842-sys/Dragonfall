@@ -8,6 +8,7 @@
  */
 
 import type { LobbyState, MatchPhase, PlayerId, UiIntent } from '../../shared';
+import type { HostAutoSettings } from './host-core';
 import type { StartBlocker } from '../../sim/lobby';
 import type { HostSessionState } from '../session';
 import type { TransportError } from '../transport';
@@ -36,6 +37,14 @@ export interface HostWorkerConfig {
   readonly measure: boolean;
   /** `?autopilot`: the worker flies the host's dragon itself; the page sends no input. */
   readonly autopilot: WorkerPilotCourse | null;
+  /** `?autopilot=bot`: the host's own dragon is flown by a bot brain in the worker. */
+  readonly localBot: boolean;
+  /** False: hits are tested against current positions (`?lagcomp=0`). */
+  readonly lagCompensation: boolean;
+  /** The page has views that want the match's GameEvents. */
+  readonly wantEvents: boolean;
+  /** Host settings applied when the room opens (`?mode=`, `?score=`, ...). */
+  readonly autoSettings: HostAutoSettings | null;
   /** Tests: a fixed room code and countdown. */
   readonly roomCode?: string;
   readonly countdownTicks?: number;
@@ -92,5 +101,8 @@ export const PAGE_KEEPALIVE_MS = 200;
 export const PAGE_STALL_MS = 1000;
 /** Ticks the worker holds the host player's last input sample before treating the seat as away. */
 export const INPUT_HOLD_TICKS = 15;
-/** Size of a REC_INPUT payload: f32 steerX, f32 steerY, u16 buttons, u16 pad, f64 sampledAtMs. */
-export const INPUT_RECORD_BYTES = 20;
+/**
+ * Size of a REC_INPUT payload: f32 steerX, f32 steerY, u16 buttons, u16 pad, f64 sampledAtMs,
+ * f32 aimYaw, f32 aimPitch.
+ */
+export const INPUT_RECORD_BYTES = 28;

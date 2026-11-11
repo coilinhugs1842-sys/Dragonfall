@@ -42,6 +42,7 @@
  */
 
 import {
+  ABILITY_TABLE,
   CLASS_TUNING,
   DEFAULT_DRAGON_CLASS,
   DRAGON_FLAG_ALIVE,
@@ -55,6 +56,7 @@ import {
   createVec3,
 } from '../../shared';
 import type {
+  AbilityTable,
   ClassTuning,
   DragonClassId,
   FlightTuning,
@@ -118,6 +120,8 @@ export interface ClientPredictorOptions {
   classTuning?: Record<DragonClassId, ClassTuning>;
   /** The same map collision the host sim uses. Default: open sky. */
   collisionWorld?: SimCollisionWorld;
+  /** Must be the table the host uses. Default: the shared one. */
+  abilityTable?: AbilityTable;
 }
 
 const HISTORY_MASK = PREDICTION_HISTORY_TICKS - 1;
@@ -155,6 +159,34 @@ function ownerMatches(predicted: Readonly<DragonState>, owner: Readonly<Snapshot
     predicted.spawnProtectTicks === owner.spawnProtectTicks &&
     predicted.hitTicks === owner.hitTicks &&
     predicted.terrainGraceTicks === owner.terrainGraceTicks &&
+    predicted.castSlot === owner.castSlot &&
+    predicted.castTicks === owner.castTicks &&
+    predicted.firingTicks === owner.firingTicks &&
+    predicted.slowTicks === owner.slowTicks &&
+    predicted.hasteTicks === owner.hasteTicks &&
+    predicted.burnTicks === owner.burnTicks &&
+    predicted.regenTicks === owner.regenTicks &&
+    predicted.blindTicks === owner.blindTicks &&
+    predicted.veilTicks === owner.veilTicks &&
+    predicted.phaseTicks === owner.phaseTicks &&
+    predicted.shieldTicks === owner.shieldTicks &&
+    predicted.deadTicks === owner.deadTicks &&
+    predicted.lastDamagerId === owner.lastDamagerId &&
+    predicted.abilityCooldownTicks[0] === owner.abilityCooldownTicks[0] &&
+    predicted.abilityCooldownTicks[1] === owner.abilityCooldownTicks[1] &&
+    predicted.abilityCooldownTicks[2] === owner.abilityCooldownTicks[2] &&
+    predicted.abilityCooldownTicks[3] === owner.abilityCooldownTicks[3] &&
+    predicted.abilityActiveTicks[0] === owner.abilityActiveTicks[0] &&
+    predicted.abilityActiveTicks[1] === owner.abilityActiveTicks[1] &&
+    predicted.abilityActiveTicks[2] === owner.abilityActiveTicks[2] &&
+    predicted.abilityActiveTicks[3] === owner.abilityActiveTicks[3] &&
+    predicted.abilityChargesUsed[0] === owner.abilityChargesUsed[0] &&
+    predicted.abilityChargesUsed[1] === owner.abilityChargesUsed[1] &&
+    predicted.abilityChargesUsed[2] === owner.abilityChargesUsed[2] &&
+    predicted.abilityChargesUsed[3] === owner.abilityChargesUsed[3] &&
+    near(predicted.ultCharge, owner.ultCharge, RECONCILE_VALUE_EPSILON) &&
+    near(predicted.slowScale, owner.slowScale, RECONCILE_VALUE_EPSILON) &&
+    near(predicted.hasteScale, owner.hasteScale, RECONCILE_VALUE_EPSILON) &&
     near(predicted.position.x, owner.position.x, RECONCILE_POSITION_EPSILON_M) &&
     near(predicted.position.y, owner.position.y, RECONCILE_POSITION_EPSILON_M) &&
     near(predicted.position.z, owner.position.z, RECONCILE_POSITION_EPSILON_M) &&
@@ -176,7 +208,10 @@ function ownerMatches(predicted: Readonly<DragonState>, owner: Readonly<Snapshot
 export class ClientPredictor {
   private readonly flight: FlightTuning;
   private readonly classes: Record<DragonClassId, ClassTuning>;
+  private readonly abilities: AbilityTable;
   private collision: SimCollisionWorld;
+  private pulse = 0;
+  private started = 0;
 
   private readonly current: DragonState = createDragonState();
   private readonly previous: DragonState = createDragonState();
@@ -210,6 +245,7 @@ export class ClientPredictor {
     this.flight = options.flightTuning ?? FLIGHT_TUNING;
     this.classes = options.classTuning ?? CLASS_TUNING;
     this.collision = options.collisionWorld ?? NULL_COLLISION_WORLD;
+    this.abilities = options.abilityTable ?? ABILITY_TABLE;
     for (let i = 0; i < PREDICTION_HISTORY_TICKS; i++) {
       this.inputs.push(createInputFrame());
       this.states.push(createDragonState());
@@ -238,6 +274,8 @@ export class ClientPredictor {
     this.inputTicks.fill(-1);
     this.stateTicks.fill(-1);
     this.authTick = -1;
+    this.pulse = 0;
+    this.started = 0;
     this.clearOffset();
     this.lastCorrection = 0;
     this.largestCorrection = 0;
@@ -319,6 +357,22 @@ export class ClientPredictor {
   }
 
   /**
+   * Ability slots (bit i = ABILITY_SLOTS[i]) whose effect the LAST `step` predicted to apply on
+   * its tick: a shot fired, a burst bomb dropped. For instant cosmetic feedback of the local
+   * rider's own shots (docs/NETWORKING.md: "the client shows its own shot instantly; the host
+   * decides the hits"): draw from `dragon` with `resolveFireDirection`. 0 after a tick that was
+   * not simulated. A replay inside `reconcile` never changes it, so nothing is shown twice.
+   */
+  get castPulse(): number {
+    return this.pulse;
+  }
+
+  /** Slots that started a new cast on the last `step` (the host will send `abilityCast`). */
+  get castStarted(): number {
+    return this.started;
+  }
+
+  /**
    * Simulates the next tick with `input` and returns that tick. `input` is REWRITTEN to what
    * the host will see: `tick` is set, steer is snapped to the wire grid and unknown buttons are
    * dropped. Call once per fixed step, then `writeInputMessage` to send it.
@@ -340,6 +394,8 @@ export class ClientPredictor {
     }
 
     const dragon = this.current;
+    this.pulse = 0;
+    this.started = 0;
     if (dragon.active) {
       copyDragonState(this.previous, dragon);
       if (tick >= this.simStart) {
@@ -350,7 +406,10 @@ export class ClientPredictor {
           this.classes[dragon.classId],
           this.collision,
           this.scratch,
+          this.abilities[dragon.classId],
         );
+        this.pulse = dragon.castPulse;
+        this.started = dragon.castStarted;
       }
       const state = this.states[index];
       if (state !== undefined) {
@@ -455,6 +514,7 @@ export class ClientPredictor {
 
     // --- Reset to the host's state --------------------------------------------------------------
     const cls = this.classes[this.classId];
+    const abilities = this.abilities[this.classId];
     dragon.active = true;
     dragon.team = this.team;
     dragon.classId = this.classId;
@@ -477,7 +537,7 @@ export class ClientPredictor {
         const input = this.inputTicks[slot] === tick ? stored : undefined;
         if (tick === present) copyDragonState(this.previous, dragon);
         if (tick >= this.simStart) {
-          stepDragon(dragon, input, this.flight, cls, this.collision, this.scratch);
+          stepDragon(dragon, input, this.flight, cls, this.collision, this.scratch, abilities);
         }
         const state = this.states[slot];
         if (state !== undefined) {

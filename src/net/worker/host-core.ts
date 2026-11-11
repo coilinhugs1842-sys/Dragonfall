@@ -14,7 +14,7 @@
  */
 
 import { TICK_DT_S, copyInputFrame, createInputFrame } from '../../shared';
-import type { InputFrame, Vec3 } from '../../shared';
+import type { BotDifficulty, GameEventSink, InputFrame, ModeId, Vec3 } from '../../shared';
 import { createNetBots } from '../bots';
 import type { NetBots } from '../bots';
 import { createHostSession } from '../session';
@@ -35,6 +35,23 @@ export interface LocalInputSubject {
  */
 export interface LocalInputSource {
   sample(tick: number, subject: LocalInputSubject | undefined, out: InputFrame, dtS: number): void;
+}
+
+/**
+ * Host settings applied once, when the room opens (the dev params `?mode=`, `?score=`,
+ * `?time=`, `?botlevel=`, `?fill`): a headless test or a soak run configures its match without
+ * clicking through the host panel. Plain data, so it crosses to the host worker.
+ */
+export interface HostAutoSettings {
+  readonly mode?: ModeId;
+  /** Riders per side. Left out with `autoStart`: just enough for the host and its bots. */
+  readonly teamSize?: number;
+  readonly scoreLimit?: number;
+  /** Seconds; 0 = no limit. */
+  readonly timeLimitS?: number;
+  readonly botDifficulty?: BotDifficulty;
+  /** Seat a host-flown bot in every empty team slot before starting. */
+  readonly fillBots?: boolean;
 }
 
 /** EMA weight for the HUD's per-tick cost figures. */
@@ -67,6 +84,13 @@ export interface HostCoreOptions {
   readonly localInput?: LocalInputSource | null;
   /** Called after every tick (debug probe). */
   readonly onTick?: ((core: HostCore) => void) | null;
+  /** Every GameEvent of the match, for the host's own views (VFX, audio, HUD). */
+  readonly events?: GameEventSink | null;
+  /** `?autopilot=bot`: a bot brain flies the host's own dragon. */
+  readonly localBot?: boolean;
+  /** False: no lag compensation (`?lagcomp=0`). */
+  readonly lagCompensation?: boolean;
+  readonly autoSettings?: HostAutoSettings | null;
   /** Extra session options (tests: `roomCode`, `random`, `countdownTicks`). */
   readonly session?: Partial<HostSessionOptions>;
 }
@@ -88,9 +112,12 @@ export class HostCore {
   private readonly measure: boolean;
   private readonly frame: InputFrame = createInputFrame();
   private autoStart: boolean;
+  private autoSettings: HostAutoSettings | null;
+  private readonly botCount: number;
   private autoStartSinceMs = -1;
   private skipTicks: number;
   private botsJoined = false;
+  private fillPending = false;
 
   constructor(options: HostCoreOptions) {
     const botCount = Math.max(0, Math.floor(options.bots));
@@ -110,6 +137,8 @@ export class HostCore {
     this.onTick = options.onTick ?? null;
     this.measure = options.profileClock !== undefined;
     this.autoStart = options.autoStart;
+    this.autoSettings = options.autoSettings ?? null;
+    this.botCount = botCount;
     this.skipTicks = Math.max(0, Math.floor(options.skipTicks));
 
     this.session = createHostSession({
@@ -125,6 +154,11 @@ export class HostCore {
       ...(options.mapSeed !== undefined ? { mapSeed: options.mapSeed } : {}),
       ...(options.now !== undefined ? { now: options.now } : {}),
       ...(options.profileClock !== undefined ? { profileClock: options.profileClock } : {}),
+      ...(options.events !== undefined && options.events !== null
+        ? { events: options.events }
+        : {}),
+      ...(options.localBot === true ? { localBot: true } : {}),
+      ...(options.lagCompensation === false ? { lagCompensation: false } : {}),
     });
     this.bots =
       hub !== null && botCount > 0
@@ -159,6 +193,8 @@ export class HostCore {
     const hub = this.hub;
     if (hub !== null) hub.pump();
     if (session.state !== 'open') return;
+    // Before the bots take their seats, so they are dealt onto teams of the final size.
+    if (this.autoSettings !== null) this.applyAutoSettings(this.autoSettings);
     const bots = this.bots;
     if (bots !== null && hub !== null) {
       if (!this.botsJoined) {
@@ -215,6 +251,26 @@ export class HostCore {
     if (this.onTick !== null) this.onTick(this);
   }
 
+  private applyAutoSettings(settings: HostAutoSettings): void {
+    this.autoSettings = null;
+    const session = this.session;
+    if (settings.mode !== undefined)
+      session.applyIntent({ type: 'host.setMode', mode: settings.mode });
+    const teamSize =
+      settings.teamSize ?? (this.autoStart ? Math.ceil((this.botCount + 1) / 2) : undefined);
+    if (teamSize !== undefined) session.applyIntent({ type: 'host.setTeamSize', teamSize });
+    if (settings.scoreLimit !== undefined) {
+      session.applyIntent({ type: 'host.setScoreLimit', scoreLimit: settings.scoreLimit });
+    }
+    if (settings.timeLimitS !== undefined) {
+      session.applyIntent({ type: 'host.setTimeLimit', timeLimitS: settings.timeLimitS });
+    }
+    if (settings.botDifficulty !== undefined) {
+      session.applyIntent({ type: 'host.setBotDifficulty', difficulty: settings.botDifficulty });
+    }
+    this.fillPending = settings.fillBots === true;
+  }
+
   private driveAutoStart(nowMs: number): void {
     const session = this.session;
     if (session.inMatch || session.lobby.phase !== 'lobby') {
@@ -226,6 +282,10 @@ export class HostCore {
     const waited = nowMs - this.autoStartSinceMs;
     if (bots !== null && bots.connectedCount < bots.count && waited < AUTOSTART_PATIENCE_MS) {
       return;
+    }
+    if (this.fillPending) {
+      this.fillPending = false;
+      session.applyIntent({ type: 'host.fillBots' });
     }
     const blocker = session.startBlocker();
     if (blocker === 'teamsUneven') {

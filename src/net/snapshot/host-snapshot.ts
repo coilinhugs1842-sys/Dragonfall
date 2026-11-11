@@ -7,9 +7,12 @@
  * time, not on arrival time, so uneven spacing costs nothing. Sending on whole ticks keeps every
  * snapshot an exact sim state (no host-side interpolation, nothing to disagree with prediction).
  *
- * WHAT: the dragon list and the clock are the same for everyone and are filled once per tick
- * (`begin`). Per recipient only three things change (`forRecipient`): the input ack, the owner
- * block (the recipient's own dragon at full precision, for reconciliation) and nothing else.
+ * WHAT: the dragon list, the projectile and zone records, the storm radius and the clock are
+ * the same for everyone and are filled once per tick (`begin`). Per recipient three things
+ * change (`forRecipient`): the input ack, the owner block (the recipient's own dragon at full
+ * precision, for reconciliation), and which dragons are listed at all: a VEILED dragon is left
+ * out of the snapshots of the other team, so an enemy client has nothing to draw (or to read
+ * out of memory). Its own team and spectators still get it, with DRAGON_FLAG_VEILED set.
  * One message struct is reused for all of it; encode it before asking for the next recipient.
  *
  * Usage, once per host tick after `sim.step`:
@@ -24,13 +27,13 @@
  *   }
  */
 
-import { NO_PLAYER, SNAPSHOT_HZ, TICK_HZ } from '../../shared';
+import { DRAGON_FLAG_VEILED, NO_PLAYER, SNAPSHOT_HZ, TICK_HZ } from '../../shared';
 import type { MatchPhase, PlayerId } from '../../shared';
 import { findDragon } from '../../sim';
 import type { SimState } from '../../sim';
-import { fillSnapshotDragons, setSnapshotOwner } from '../codec/fast';
+import { fillSnapshotDragons, fillSnapshotEffects, setSnapshotOwner } from '../codec/fast';
 import { createSnapshotMessage } from '../protocol';
-import type { SnapshotMessage } from '../protocol';
+import type { SnapshotDragon, SnapshotMessage } from '../protocol';
 
 /**
  * Longest run of ticks between two snapshots when nothing is lost (2 at 30 Hz sim / 20 Hz
@@ -78,6 +81,14 @@ export class HostSnapshotBuilder {
   /** The one reused message. Valid for encoding between `forRecipient` calls. */
   readonly message: SnapshotMessage = createSnapshotMessage();
   private state: Readonly<SimState> | null = null;
+  /** This tick's dragons in fill order (`message.dragons` is re-ordered per recipient). */
+  private readonly all: SnapshotDragon[] = [];
+  /** Team of each entry of `all`, and whether it is veiled. */
+  private readonly teams: number[] = [];
+  private total = 0;
+  private veiled = 0;
+  /** `message.dragons` currently lists fewer than `all`. */
+  private filtered = false;
 
   /**
    * Start of a snapshot tick: copies every active dragon and the clock into the message.
@@ -86,7 +97,23 @@ export class HostSnapshotBuilder {
    */
   begin(state: Readonly<SimState>, clock: Readonly<SnapshotClock>): void {
     const message = this.message;
+    this.restoreOrder();
     fillSnapshotDragons(message, state);
+    fillSnapshotEffects(message, state);
+    // Who is veiled this tick, and on which team. Same walk as `fillSnapshotDragons`.
+    let count = 0;
+    let veiled = 0;
+    for (let i = 0; i < state.dragons.length && count < message.dragonCount; i++) {
+      const dragon = state.dragons[i];
+      const entry = message.dragons[count];
+      if (dragon === undefined || !dragon.active || entry === undefined) continue;
+      this.all[count] = entry;
+      this.teams[count] = dragon.team;
+      if ((dragon.flags & DRAGON_FLAG_VEILED) !== 0) veiled++;
+      count++;
+    }
+    this.total = count;
+    this.veiled = veiled;
     message.phase = clock.phase;
     message.round = clock.round;
     message.phaseTimeS = clock.phaseTimeS;
@@ -118,6 +145,39 @@ export class HostSnapshotBuilder {
     const dragon =
       state !== null && playerId !== NO_PLAYER ? findDragon(state, playerId) : undefined;
     setSnapshotOwner(message, dragon);
+
+    // Veiled enemies are not sent at all. Riders only: a spectator sees everyone.
+    if (this.veiled > 0 && dragon !== undefined) {
+      const team = dragon.team;
+      let kept = 0;
+      let hidden = this.total;
+      for (let i = 0; i < this.total; i++) {
+        const entry = this.all[i];
+        if (entry === undefined) continue;
+        if ((entry.flags & DRAGON_FLAG_VEILED) !== 0 && this.teams[i] !== team) {
+          // Parked behind the live entries, so the array stays a permutation of its slots.
+          message.dragons[--hidden] = entry;
+        } else {
+          message.dragons[kept++] = entry;
+        }
+      }
+      message.dragonCount = kept;
+      this.filtered = true;
+    } else if (this.filtered) {
+      this.restoreOrder();
+    }
     return message;
+  }
+
+  /** Puts `message.dragons` back in fill order with every dragon listed. */
+  private restoreOrder(): void {
+    if (!this.filtered) return;
+    const message = this.message;
+    for (let i = 0; i < this.total; i++) {
+      const entry = this.all[i];
+      if (entry !== undefined) message.dragons[i] = entry;
+    }
+    message.dragonCount = this.total;
+    this.filtered = false;
   }
 }
