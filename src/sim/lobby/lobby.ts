@@ -16,6 +16,11 @@
  *   unlocks first. Shrinking the team size still moves the overflow to the spectators.
  * - Teams, classes and settings only change in the `lobby` phase. Joining, leaving, reconnecting
  *   and kicking work in every phase.
+ * - Bot riders (T-3.10): the host seats them on a team (`addBot`, `fillBots`). A bot is a
+ *   LobbyPlayer with `isBot` and a seat without a token: it has no connection, is always ready
+ *   and is flown by the host's sim. Bots never spectate: a bot that would be moved to the
+ *   spectators (host drag, a smaller team size) is removed instead. A human who joins a room
+ *   whose teams are full of bots takes the newest bot's seat rather than a spectator's.
  */
 
 import type { DragonClassId } from '../../shared/classes';
@@ -32,6 +37,7 @@ import {
   TICK_MS,
 } from '../../shared/constants';
 import type {
+  BotDifficulty,
   HostSettings,
   LobbyPlayer,
   LobbyState,
@@ -39,10 +45,14 @@ import type {
   RejectReason,
 } from '../../shared/lobby';
 import {
+  BOT_RIDER_NAMES,
+  DEFAULT_BOT_DIFFICULTY,
   DEFAULT_HOST_SETTINGS,
   HOST_SETTING_LIMITS,
   MAX_LOBBY_MEMBERS,
   MAX_SPECTATORS,
+  isBotDifficulty,
+  isBotSide,
 } from '../../shared/lobby';
 import { createSeededRandom } from '../../shared/maps/seeded-random';
 import type { MapId, ModeId } from '../../shared/match';
@@ -356,6 +366,9 @@ function sanitizeSettings(settings: HostSettings | undefined): HostSettings {
     friendlyFire: source.friendlyFire === true,
     allowedClasses: classes.length > 0 ? classes : [...DRAGON_CLASS_IDS],
     teamsLocked: source.teamsLocked === true,
+    botDifficulty: isBotDifficulty(source.botDifficulty)
+      ? source.botDifficulty
+      : DEFAULT_BOT_DIFFICULTY,
   };
 }
 
@@ -445,6 +458,19 @@ function joinWithEffects(
     throw new Error('lobby: reconnect token already in use');
   }
   const side = pickJoinSide(state);
+  if (request.isBot !== true && (side === null || side === 'spectator')) {
+    // The teams are full: a human takes the seat of the newest bot rider, if there is one.
+    const bot = newestSeatedBot(lobby);
+    if (bot !== undefined && state.phase === 'lobby' && !state.settings.teamsLocked) {
+      const freed = removePlayer(lobby, bot.id);
+      const joined = joinWithEffects(freed, request, [
+        ...effects,
+        { type: 'playerRemoved', playerId: bot.id, cause: 'left' },
+      ]);
+      // `freed` only differs from `lobby` by the bot, so a refusal hands back the original.
+      return joined.ok ? joined : { ok: false, lobby, reject: joined.reject };
+    }
+  }
   if (side === null) {
     return { ok: false, lobby, reject: state.phase === 'lobby' ? 'full' : 'matchInProgress' };
   }
@@ -615,6 +641,12 @@ function changeSide(lobby: HostLobby, playerId: PlayerId, side: LobbySide): Lobb
   const player = state.players[index];
   if (player === undefined) return refuse(lobby, 'unknownPlayer');
   if (player.side === side) return done(lobby, lobby);
+  if (side === 'spectator' && isSeatedBot(lobby, player)) {
+    // A bot has nothing to watch: off the team means out of the room.
+    return done(lobby, removePlayer(lobby, playerId), [
+      { type: 'playerRemoved', playerId, cause: 'left' },
+    ]);
+  }
   if (side !== 'spectator' && countLobbySide(state.players, side) >= state.settings.teamSize) {
     return refuse(lobby, 'teamFull');
   }
@@ -786,7 +818,18 @@ function resizeTeams(
 ): LobbyResult {
   const players = [...lobby.state.players];
   const moved = spillOverflow(players, teamSize);
-  return applySettings(lobby, { ...patch, teamSize }, moved ? players : undefined);
+  const result = applySettings(lobby, { ...patch, teamSize }, moved ? players : undefined);
+  if (!moved || !result.ok) return result;
+  // Bots that no longer fit leave the room instead of spectating.
+  let next = result.lobby;
+  const effects: LobbyEffect[] = [];
+  for (const player of result.lobby.state.players) {
+    if (player.side === 'spectator' && isSeatedBot(next, player)) {
+      next = removePlayer(next, player.id);
+      effects.push({ type: 'playerRemoved', playerId: player.id, cause: 'left' });
+    }
+  }
+  return effects.length > 0 ? done(lobby, next, effects) : result;
 }
 
 /**
@@ -912,6 +955,167 @@ export function setAllowedClasses(
     return { ...player, classId: fallback, ready: false };
   });
   return applySettings(lobby, { allowedClasses: allowed }, anyFallback ? players : undefined);
+}
+
+// --- Bot riders (T-3.10) --------------------------------------------------------------------------
+
+/** The seat of a bot the host added has no token (a `?bots=N` fake client has one). */
+function isSeatedBot(lobby: HostLobby, player: LobbyPlayer): boolean {
+  if (!player.isBot || player.isHost) return false;
+  const seat = lobby.seats.find((candidate) => candidate.id === player.id);
+  return seat === undefined || seat.token.length === 0;
+}
+
+/** The latest-joined bot rider on a team, or undefined. */
+function newestSeatedBot(lobby: HostLobby): LobbyPlayer | undefined {
+  const players = lobby.state.players;
+  for (let i = players.length - 1; i >= 0; i--) {
+    const player = players[i];
+    if (player !== undefined && player.side !== 'spectator' && isSeatedBot(lobby, player)) {
+      return player;
+    }
+  }
+  return undefined;
+}
+
+/** The first bot name nobody in the room uses, starting at a seeded place in the list. */
+function pickBotName(players: readonly LobbyPlayer[], seed: number): string {
+  const names = BOT_RIDER_NAMES;
+  const taken = players.map((player) => player.name);
+  const used = new Set(taken.map((name) => name.toLowerCase()));
+  const start = Math.floor(createSeededRandom(seed)() * names.length);
+  for (let i = 0; i < names.length; i++) {
+    const name = names[(start + i) % names.length];
+    if (name !== undefined && !used.has(name.toLowerCase())) return name;
+  }
+  return dedupePlayerName(names[start % names.length] ?? 'Rider', taken);
+}
+
+function seatBot(
+  lobby: HostLobby,
+  side: TeamId,
+  seed: number,
+  classId: DragonClassId | undefined,
+): HostLobby {
+  const state = lobby.state;
+  const players = state.players;
+  const allowed = state.settings.allowedClasses;
+  const random = createSeededRandom(seed ^ 0x51ed270b);
+  const picked =
+    classId !== undefined && allowed.includes(classId)
+      ? classId
+      : (allowed[Math.floor(random() * allowed.length)] ?? fallbackClass(allowed));
+  const id = lowestFreeId(players);
+  const bot: LobbyPlayer = {
+    id,
+    name: pickBotName(players, seed),
+    side,
+    perch: lowestFreePerch(players, side),
+    classId: picked,
+    // A bot is always ready (and `canStart` does not wait for bots anyway).
+    ready: true,
+    isHost: false,
+    connected: true,
+    reconnectDeadlineTick: -1,
+    isBot: true,
+  };
+  return {
+    ...lobby,
+    state: { ...state, players: [...players, bot] },
+    seats: [...lobby.seats, { id, token: '', clientId: '' }],
+  };
+}
+
+function roomHasSeat(state: LobbyState): boolean {
+  return state.players.length < MAX_LOBBY_MEMBERS && state.players.length < NO_PLAYER;
+}
+
+/**
+ * Host seats a bot rider on `side`. The name comes from BOT_RIDER_NAMES and, unless `classId` is
+ * given and allowed, the class from the allowed list; both are picked with `seed` (the caller
+ * supplies a new one per call), so the same lobby and seed always give the same bot. Refused
+ * with `teamFull` when the team has `teamSize` riders or the room has no seat left. Locked teams
+ * do not stop it: the lock is about who sits where, and a new bot moves nobody.
+ */
+export function addBot(
+  lobby: HostLobby,
+  actorId: PlayerId,
+  side: TeamId,
+  seed: number,
+  classId?: DragonClassId,
+): LobbyResult {
+  const refusal = hostPanelRefusal(lobby, actorId);
+  if (refusal !== null) return refuse(lobby, refusal);
+  if (!isBotSide(side) || !isRealNumber(seed)) return refuse(lobby, 'invalidValue');
+  if (classId !== undefined && !isDragonClassId(classId)) return refuse(lobby, 'invalidValue');
+  const state = lobby.state;
+  if (countLobbySide(state.players, side) >= state.settings.teamSize || !roomHasSeat(state)) {
+    return refuse(lobby, 'teamFull');
+  }
+  return done(lobby, seatBot(lobby, side, seed, classId));
+}
+
+/**
+ * Host fills every empty team slot with a bot, the smaller team first (Ember on a tie), so the
+ * teams end up even. Nothing to fill is not an error.
+ */
+export function fillBots(lobby: HostLobby, actorId: PlayerId, seed: number): LobbyResult {
+  const refusal = hostPanelRefusal(lobby, actorId);
+  if (refusal !== null) return refuse(lobby, refusal);
+  if (!isRealNumber(seed)) return refuse(lobby, 'invalidValue');
+  let next = lobby;
+  for (let added = 0; added < MAX_TEAM_SIZE * 2; added++) {
+    const state = next.state;
+    if (!roomHasSeat(state)) break;
+    const ember = countLobbySide(state.players, TEAM_EMBER);
+    const frost = countLobbySide(state.players, TEAM_FROST);
+    const side: TeamId = frost < ember ? TEAM_FROST : TEAM_EMBER;
+    if (Math.min(ember, frost) >= state.settings.teamSize) break;
+    next = seatBot(next, side, (seed + Math.imul(added + 1, 0x9e3779b1)) >>> 0, undefined);
+  }
+  return done(lobby, next);
+}
+
+/**
+ * Host removes one bot rider, in any phase (mid-match its dragon leaves with it). A human is
+ * refused with `invalidValue`: that is `kickPlayer`, which also bans the seat.
+ */
+export function removeBot(lobby: HostLobby, actorId: PlayerId, playerId: PlayerId): LobbyResult {
+  const refusal = hostRefusal(lobby, actorId);
+  if (refusal !== null) return refuse(lobby, refusal);
+  const target = findLobbyPlayer(lobby.state, playerId);
+  if (target === undefined) return refuse(lobby, 'unknownPlayer');
+  if (!isSeatedBot(lobby, target)) return refuse(lobby, 'invalidValue');
+  return done(lobby, removePlayer(lobby, playerId), [
+    { type: 'playerRemoved', playerId, cause: 'left' },
+  ]);
+}
+
+/** Host removes every bot rider it added. `?bots=N` fake clients are connections and stay. */
+export function clearBots(lobby: HostLobby, actorId: PlayerId): LobbyResult {
+  const refusal = hostRefusal(lobby, actorId);
+  if (refusal !== null) return refuse(lobby, refusal);
+  let next = lobby;
+  const effects: LobbyEffect[] = [];
+  for (const player of lobby.state.players) {
+    if (!isSeatedBot(lobby, player)) continue;
+    next = removePlayer(next, player.id);
+    effects.push({ type: 'playerRemoved', playerId: player.id, cause: 'left' });
+  }
+  return done(lobby, next, effects);
+}
+
+/** Host sets how well the bots fly and fight (a match rule: read when the match starts). */
+export function setBotDifficulty(
+  lobby: HostLobby,
+  actorId: PlayerId,
+  difficulty: BotDifficulty,
+): LobbyResult {
+  const refusal = hostPanelRefusal(lobby, actorId);
+  if (refusal !== null) return refuse(lobby, refusal);
+  if (!isBotDifficulty(difficulty)) return refuse(lobby, 'invalidValue');
+  if (lobby.state.settings.botDifficulty === difficulty) return done(lobby, lobby);
+  return applySettings(lobby, { botDifficulty: difficulty });
 }
 
 // --- Match flow ---------------------------------------------------------------------------------

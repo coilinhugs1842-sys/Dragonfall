@@ -1,18 +1,21 @@
 /** Barrel for the host's lobby logic. Pure: no transport, no DOM, no clock. */
 
-export { applyLobbyIntent, parseLobbyIntent } from './intents';
+export { applyLobbyIntent, parseLobbyBotIntent, parseLobbyIntent } from './intents';
 export type { LobbyIntent, LobbyIntentContext } from './intents';
 export {
   HOST_PLAYER_ID,
   MAX_KICKED_TOKENS,
   MAX_RECONNECT_TOKEN_LENGTH,
   RECONNECT_GRACE_TICKS,
+  addBot,
   autoBalance,
+  clearBots,
   countLobbySide,
   createLobby,
   disconnectPlayer,
   enterMatch,
   expireReconnects,
+  fillBots,
   findLobbyPlayer,
   handleHello,
   isLobbySide,
@@ -23,8 +26,10 @@ export {
   movePlayer,
   nextReconnectDeadline,
   pickClass,
+  removeBot,
   returnToLobby,
   setAllowedClasses,
+  setBotDifficulty,
   setFriendlyFire,
   setMap,
   setMode,

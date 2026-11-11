@@ -15,7 +15,13 @@ import {
   TEAM_FROST,
 } from '../../shared/constants';
 import type { HostSettings, LobbyPhase, LobbyPlayer, LobbyState } from '../../shared/lobby';
-import { HOST_SETTING_LIMITS, LOBBY_PHASES, MAX_LOBBY_MEMBERS } from '../../shared/lobby';
+import {
+  DEFAULT_BOT_DIFFICULTY,
+  HOST_SETTING_LIMITS,
+  LOBBY_PHASES,
+  MAX_LOBBY_MEMBERS,
+  isBotDifficulty,
+} from '../../shared/lobby';
 import type { MapId, ModeId } from '../../shared/match';
 import { MAPS, MODES } from '../../shared/match';
 import { isLobbySide } from './lobby';
@@ -53,6 +59,9 @@ export function validateHostSettings(raw: unknown): HostSettings | null {
   const { mode, map, teamSize, unevenTeams, scoreLimit, timeLimitS, friendlyFire, teamsLocked } =
     raw;
   const classesRaw = raw['allowedClasses'];
+  // Absent = a host that predates the setting; anything else must be a known level.
+  const difficultyRaw = raw['botDifficulty'];
+  if (difficultyRaw !== undefined && !isBotDifficulty(difficultyRaw)) return null;
   const limits = HOST_SETTING_LIMITS;
   if (!isModeId(mode) || !isMapId(map)) return null;
   if (!isInt(teamSize, MIN_TEAM_SIZE, MAX_TEAM_SIZE)) return null;
@@ -84,6 +93,7 @@ export function validateHostSettings(raw: unknown): HostSettings | null {
     friendlyFire,
     allowedClasses,
     teamsLocked,
+    botDifficulty: difficultyRaw ?? DEFAULT_BOT_DIFFICULTY,
   };
 }
 

@@ -20,20 +20,14 @@ import {
   createSeededRandom,
 } from '../../shared';
 import type { InputFrame } from '../../shared';
+import type { BotArena } from '../../sim/bots';
 import type { SnapshotOwner } from '../protocol';
 import type { ClientInputSampler } from '../session/client-session';
 import { steerToCourse } from '../session/pilot';
 import type { PilotCourse } from '../session/pilot';
 
 /** The part of the map a bot needs to know: no geometry, just the bowl. */
-export interface BotArena {
-  readonly centerX: number;
-  readonly centerZ: number;
-  /** Where the storm starts. */
-  readonly radius: number;
-  readonly floorY: number;
-  readonly ceilingY: number;
-}
+export type { BotArena };
 
 /** The greybox map's bowl, from the shared map constants (no BVH is built for a bot). */
 export const GREYBOX_BOT_ARENA: BotArena = {

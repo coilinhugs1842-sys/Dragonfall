@@ -5,10 +5,12 @@
  * the host does its full per-client work: handshake, input buffer, per-recipient snapshot. That
  * is what makes it a load test.
  *
- * A bot joins by room code, picks a class, readies up and, once the match runs, flies with a
- * seeded `BotPilot`. By default it does not predict (no flight sim, no map collision, no view
- * smoothing), so the bots themselves cost the host page almost nothing; pass `predict: true`
- * to make them full clients.
+ * A bot joins by room code, picks a class, readies up and, once the match runs, flies and
+ * fights with a seeded `NetBotPilot`: the `BotBrain` of the bot riders, looking at the sim of
+ * the host it was shown with `markOnHost` (the bots live next to the host). Until then, or with
+ * `fight: false`, it flies the plain weave of `BotPilot`. By default it does not predict (no
+ * flight sim, no map collision, no view smoothing), so the bots themselves cost the host page
+ * almost nothing; pass `predict: true` to make them full clients.
  *
  * Driven by the caller like the sessions: `update(nowMs)` once per frame, after pumping the
  * transport the bots are on. No timers.
@@ -20,8 +22,10 @@ import { ClientSession } from '../session/client-session';
 import type { HostSession } from '../session/host-session';
 import type { MatchWorldFactory } from '../session/match-world';
 import type { ClientTransport } from '../transport/transport';
+import type { BotBrainOptions } from '../../sim/bots';
 import { BotPilot, GREYBOX_BOT_ARENA } from './bot-pilot';
 import type { BotArena } from './bot-pilot';
+import { NetBotPilot } from './fight-pilot';
 
 /** A bot sends at most one lobby intent per this many ms (well inside the host's rate limit). */
 export const BOT_INTENT_INTERVAL_MS = 400;
@@ -48,11 +52,18 @@ export interface NetBotsOptions {
   readonly namePrefix?: string;
   /** Ready up in the lobby (default true). */
   readonly autoReady?: boolean;
+  /**
+   * Fight (default true): chase, shoot and use abilities once `markOnHost` has shown the bots
+   * their host. False = the weave only, the Phase 2 behaviour (a quiet-sky load baseline).
+   */
+  readonly fight?: boolean;
+  /** Tables for the bots' brains (tests). Default: the live ones. */
+  readonly brain?: BotBrainOptions;
 }
 
 interface Bot {
   readonly client: ClientSession;
-  readonly pilot: BotPilot;
+  readonly pilot: BotPilot | NetBotPilot;
   readonly random: () => number;
   wantClass: DragonClassId | null;
   lastIntentMs: number;
@@ -95,7 +106,10 @@ export class NetBots {
       clients.push(client);
       this.bots.push({
         client,
-        pilot: new BotPilot(botSeed, arena),
+        pilot:
+          options.fight === false
+            ? new BotPilot(botSeed, arena)
+            : new NetBotPilot(botSeed, arena, options.brain),
         random: createSeededRandom(botSeed ^ 0x5bd1e995),
         wantClass: null,
         lastIntentMs: -Infinity,
@@ -127,12 +141,19 @@ export class NetBots {
 
   /**
    * Flags the bots' seats on the host as bots (badge in the lobby, no ready check, no seat held
-   * after a drop). Cheap; call it every frame or whenever `connectedCount` changes.
+   * after a drop) and shows the bots their host, whose sim state they fight by. Cheap; call it
+   * every frame or whenever `connectedCount` changes.
    */
   markOnHost(host: HostSession): void {
     for (let i = 0; i < this.bots.length; i++) {
       const bot = this.bots[i];
-      if (bot === undefined || bot.marked) continue;
+      if (bot === undefined) continue;
+      const pilot = bot.pilot;
+      if (pilot instanceof NetBotPilot) {
+        pilot.host = host;
+        pilot.playerId = bot.client.status === 'connected' ? bot.client.localPlayerId : NO_PLAYER;
+      }
+      if (bot.marked) continue;
       const id = bot.client.localPlayerId;
       if (bot.client.status !== 'connected' || id === NO_PLAYER) continue;
       host.setPlayerIsBot(id, true);
@@ -155,7 +176,12 @@ export class NetBots {
   }
 
   dispose(): void {
-    for (let i = 0; i < this.bots.length; i++) this.bots[i]?.client.dispose();
+    for (let i = 0; i < this.bots.length; i++) {
+      const bot = this.bots[i];
+      if (bot === undefined) continue;
+      if (bot.pilot instanceof NetBotPilot) bot.pilot.host = null;
+      bot.client.dispose();
+    }
   }
 
   private lobbyChores(bot: Bot, nowMs: number): void {

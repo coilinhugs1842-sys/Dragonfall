@@ -6,18 +6,24 @@
 
 import { isDragonClassId } from '../../shared/classes';
 import type { PlayerId } from '../../shared/constants';
-import type { LobbySwitchSideIntent } from '../../shared/lobby';
+import type { LobbyBotIntent, LobbySwitchSideIntent } from '../../shared/lobby';
+import { isBotDifficulty, isBotSide } from '../../shared/lobby';
 import type { UiIntent } from '../../shared/ui';
 import type { HostLobby, LobbyResult } from './lobby';
 import {
+  addBot,
   autoBalance,
+  clearBots,
+  fillBots,
   isLobbySide,
   kickPlayer,
   leaveLobby,
   lockTeams,
   movePlayer,
   pickClass,
+  removeBot,
   setAllowedClasses,
+  setBotDifficulty,
   setFriendlyFire,
   setMap,
   setMode,
@@ -37,14 +43,17 @@ import { allowIntent } from './rate-limit';
 export type LobbyIntent =
   | Exclude<
       Extract<UiIntent, { readonly type: `lobby.${string}` | `host.${string}` }>,
-      { readonly type: 'lobby.focusPlayer' }
+      { readonly type: 'lobby.focusPlayer' } | LobbyBotIntent
     >
   | LobbySwitchSideIntent;
 
 export interface LobbyIntentContext {
   /** Current host lobby tick (drives the rate limiter). */
   readonly tick: number;
-  /** Seed for `host.shuffle`; the caller picks a new one per shuffle. */
+  /**
+   * Seed for `host.shuffle` and for the names and classes of `host.addBot` / `host.fillBots`;
+   * the caller picks a new one per intent.
+   */
   readonly seed: number;
   /** When given, intents from anyone but the host spend a token and are refused when it runs dry. */
   readonly limiter?: IntentRateLimiter;
@@ -61,7 +70,7 @@ export interface LobbyIntentContext {
 export function applyLobbyIntent(
   lobby: HostLobby,
   actorId: PlayerId,
-  intent: UiIntent | LobbySwitchSideIntent,
+  intent: UiIntent | LobbySwitchSideIntent | LobbyBotIntent,
   ctx: LobbyIntentContext,
 ): LobbyResult {
   if (
@@ -108,6 +117,16 @@ export function applyLobbyIntent(
       return kickPlayer(lobby, actorId, intent.playerId);
     case 'host.start':
       return startMatch(lobby, actorId, { force: ctx.forceStart === true });
+    case 'host.addBot':
+      return addBot(lobby, actorId, intent.side, ctx.seed, intent.classId);
+    case 'host.removeBot':
+      return removeBot(lobby, actorId, intent.playerId);
+    case 'host.fillBots':
+      return fillBots(lobby, actorId, ctx.seed);
+    case 'host.clearBots':
+      return clearBots(lobby, actorId);
+    case 'host.setBotDifficulty':
+      return setBotDifficulty(lobby, actorId, intent.difficulty);
     default:
       return { ok: false, lobby, reason: 'unsupportedIntent' };
   }
@@ -179,6 +198,38 @@ export function parseLobbyIntent(raw: unknown): LobbyIntent | null {
     case 'host.kick': {
       const playerId = raw['playerId'];
       return isPlayerIdValue(playerId) ? { type, playerId } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Decodes one of the host's bot intents (`host.addBot`, ...) from untyped data, e.g. a message
+ * the hosting page posts to its host worker. They are not part of `LobbyIntent`: no client ever
+ * sends them, so they have no wire encoding. Null for anything else.
+ */
+export function parseLobbyBotIntent(raw: unknown): LobbyBotIntent | null {
+  if (!isRecord(raw)) return null;
+  const type = raw['type'];
+  switch (type) {
+    case 'host.fillBots':
+    case 'host.clearBots':
+      return { type };
+    case 'host.addBot': {
+      const side = raw['side'];
+      const classId = raw['classId'];
+      if (!isBotSide(side)) return null;
+      if (classId === undefined) return { type, side };
+      return isDragonClassId(classId) ? { type, side, classId } : null;
+    }
+    case 'host.removeBot': {
+      const playerId = raw['playerId'];
+      return isPlayerIdValue(playerId) ? { type, playerId } : null;
+    }
+    case 'host.setBotDifficulty': {
+      const difficulty = raw['difficulty'];
+      return isBotDifficulty(difficulty) ? { type, difficulty } : null;
     }
     default:
       return null;
