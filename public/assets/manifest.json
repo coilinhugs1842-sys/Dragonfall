@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "dragons": {
+    "talon": "dragons/talon/manifest.json",
+    "bastion": "dragons/bastion/manifest.json",
+    "tempest": "dragons/tempest/manifest.json",
+    "wraith": "dragons/wraith/manifest.json"
+  },
+  "maps": {
+    "shattered-spires": "maps/shattered-spires/manifest.json"
+  }
+}

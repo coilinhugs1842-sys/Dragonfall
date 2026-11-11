@@ -20,6 +20,13 @@ Reference*.*
 art-source/_scratch/
 *.blend1
 
+# Python caches of the Blender / audio / texture scripts
+__pycache__/
+*.pyc
+
+# The second dev server's dependency cache (DRAGONFALL_VITE_CACHE, see vite.config.ts)
+node_modules/.vite-capture/
+
 # editor
 .idea/
 

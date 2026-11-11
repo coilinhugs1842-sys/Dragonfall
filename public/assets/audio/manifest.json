@@ -1,0 +1,545 @@
+{
+ "version": 1,
+ "sounds": {
+  "afterburn": {
+   "files": [
+    "sfx/afterburn_1.ogg",
+    "sfx/afterburn_2.ogg"
+   ],
+   "gain": 0.466,
+   "loop": null
+  },
+  "assist": {
+   "files": [
+    "sfx/assist_1.ogg"
+   ],
+   "gain": 0.365,
+   "loop": null
+  },
+  "blast": {
+   "files": [
+    "sfx/blast_1.ogg",
+    "sfx/blast_2.ogg",
+    "sfx/blast_3.ogg"
+   ],
+   "gain": 0.547,
+   "loop": null
+  },
+  "blindSwell": {
+   "files": [
+    "sfx/blindSwell_1.ogg"
+   ],
+   "gain": 0.39,
+   "loop": null
+  },
+  "boostLoop": {
+   "files": [
+    "sfx/boostLoop_1.ogg"
+   ],
+   "gain": 1.098,
+   "loop": {
+    "startS": 0.25,
+    "endS": 4.25
+   }
+  },
+  "boostStart": {
+   "files": [
+    "sfx/boostStart_1.ogg",
+    "sfx/boostStart_2.ogg"
+   ],
+   "gain": 0.451,
+   "loop": null
+  },
+  "bulwarkWave": {
+   "files": [
+    "sfx/bulwarkWave_1.ogg"
+   ],
+   "gain": 0.612,
+   "loop": null
+  },
+  "burnIgnite": {
+   "files": [
+    "sfx/burnIgnite_1.ogg",
+    "sfx/burnIgnite_2.ogg"
+   ],
+   "gain": 0.651,
+   "loop": null
+  },
+  "countdownGo": {
+   "files": [
+    "sfx/countdownGo_1.ogg"
+   ],
+   "gain": 0.566,
+   "loop": null
+  },
+  "countdownTick": {
+   "files": [
+    "sfx/countdownTick_1.ogg"
+   ],
+   "gain": 0.498,
+   "loop": null
+  },
+  "dashWhoosh": {
+   "files": [
+    "sfx/dashWhoosh_1.ogg",
+    "sfx/dashWhoosh_2.ogg"
+   ],
+   "gain": 0.382,
+   "loop": null
+  },
+  "deathFall": {
+   "files": [
+    "sfx/deathFall_1.ogg",
+    "sfx/deathFall_2.ogg"
+   ],
+   "gain": 0.415,
+   "loop": null
+  },
+  "defeat": {
+   "files": [
+    "music/defeat.ogg"
+   ],
+   "gain": 0.672,
+   "loop": null
+  },
+  "diveLoop": {
+   "files": [
+    "sfx/diveLoop_1.ogg"
+   ],
+   "gain": 1.039,
+   "loop": {
+    "startS": 0.25,
+    "endS": 4.25
+   }
+  },
+  "fireBolt": {
+   "files": [
+    "sfx/fireBolt_1.ogg",
+    "sfx/fireBolt_2.ogg",
+    "sfx/fireBolt_3.ogg",
+    "sfx/fireBolt_4.ogg"
+   ],
+   "gain": 0.452,
+   "loop": null
+  },
+  "flameLoop": {
+   "files": [
+    "sfx/flameLoop_1.ogg"
+   ],
+   "gain": 0.752,
+   "loop": {
+    "startS": 0.25,
+    "endS": 3.25
+   }
+  },
+  "flameStart": {
+   "files": [
+    "sfx/flameStart_1.ogg",
+    "sfx/flameStart_2.ogg"
+   ],
+   "gain": 0.45,
+   "loop": null
+  },
+  "flap": {
+   "files": [
+    "sfx/flap_1.ogg",
+    "sfx/flap_2.ogg",
+    "sfx/flap_3.ogg",
+    "sfx/flap_4.ogg"
+   ],
+   "gain": 0.448,
+   "loop": null
+  },
+  "flapLarge": {
+   "files": [
+    "sfx/flapLarge_1.ogg",
+    "sfx/flapLarge_2.ogg",
+    "sfx/flapLarge_3.ogg",
+    "sfx/flapLarge_4.ogg"
+   ],
+   "gain": 0.42,
+   "loop": null
+  },
+  "flapSmall": {
+   "files": [
+    "sfx/flapSmall_1.ogg",
+    "sfx/flapSmall_2.ogg",
+    "sfx/flapSmall_3.ogg",
+    "sfx/flapSmall_4.ogg"
+   ],
+   "gain": 0.448,
+   "loop": null
+  },
+  "healShimmer": {
+   "files": [
+    "sfx/healShimmer_1.ogg",
+    "sfx/healShimmer_2.ogg"
+   ],
+   "gain": 0.467,
+   "loop": null
+  },
+  "heartbeat": {
+   "files": [
+    "sfx/heartbeat_1.ogg",
+    "sfx/heartbeat_2.ogg"
+   ],
+   "gain": 0.429,
+   "loop": null
+  },
+  "hitConfirm": {
+   "files": [
+    "sfx/hitConfirm_1.ogg",
+    "sfx/hitConfirm_2.ogg"
+   ],
+   "gain": 1.033,
+   "loop": null
+  },
+  "hitFlesh": {
+   "files": [
+    "sfx/hitFlesh_1.ogg",
+    "sfx/hitFlesh_2.ogg",
+    "sfx/hitFlesh_3.ogg",
+    "sfx/hitFlesh_4.ogg"
+   ],
+   "gain": 0.597,
+   "loop": null
+  },
+  "hitRock": {
+   "files": [
+    "sfx/hitRock_1.ogg",
+    "sfx/hitRock_2.ogg",
+    "sfx/hitRock_3.ogg"
+   ],
+   "gain": 0.438,
+   "loop": null
+  },
+  "hitShield": {
+   "files": [
+    "sfx/hitShield_1.ogg",
+    "sfx/hitShield_2.ogg",
+    "sfx/hitShield_3.ogg"
+   ],
+   "gain": 0.618,
+   "loop": null
+  },
+  "lightningCharge": {
+   "files": [
+    "sfx/lightningCharge_1.ogg",
+    "sfx/lightningCharge_2.ogg"
+   ],
+   "gain": 0.614,
+   "loop": null
+  },
+  "lightningCrack": {
+   "files": [
+    "sfx/lightningCrack_1.ogg",
+    "sfx/lightningCrack_2.ogg",
+    "sfx/lightningCrack_3.ogg"
+   ],
+   "gain": 0.713,
+   "loop": null
+  },
+  "meteorDrop": {
+   "files": [
+    "sfx/meteorDrop_1.ogg",
+    "sfx/meteorDrop_2.ogg"
+   ],
+   "gain": 0.357,
+   "loop": null
+  },
+  "mineArm": {
+   "files": [
+    "sfx/mineArm_1.ogg",
+    "sfx/mineArm_2.ogg"
+   ],
+   "gain": 0.514,
+   "loop": null
+  },
+  "mineLaunch": {
+   "files": [
+    "sfx/mineLaunch_1.ogg",
+    "sfx/mineLaunch_2.ogg"
+   ],
+   "gain": 0.504,
+   "loop": null
+  },
+  "nightTerror": {
+   "files": [
+    "sfx/nightTerror_1.ogg"
+   ],
+   "gain": 0.417,
+   "loop": null
+  },
+  "objective": {
+   "files": [
+    "sfx/objective_1.ogg"
+   ],
+   "gain": 0.389,
+   "loop": null
+  },
+  "phaseDive": {
+   "files": [
+    "sfx/phaseDive_1.ogg",
+    "sfx/phaseDive_2.ogg"
+   ],
+   "gain": 0.445,
+   "loop": null
+  },
+  "roarBastion": {
+   "files": [
+    "sfx/roarBastion_1.ogg",
+    "sfx/roarBastion_2.ogg"
+   ],
+   "gain": 0.6,
+   "loop": null
+  },
+  "roarTalon": {
+   "files": [
+    "sfx/roarTalon_1.ogg",
+    "sfx/roarTalon_2.ogg"
+   ],
+   "gain": 0.417,
+   "loop": null
+  },
+  "roarTempest": {
+   "files": [
+    "sfx/roarTempest_1.ogg",
+    "sfx/roarTempest_2.ogg"
+   ],
+   "gain": 0.419,
+   "loop": null
+  },
+  "roarWraith": {
+   "files": [
+    "sfx/roarWraith_1.ogg",
+    "sfx/roarWraith_2.ogg"
+   ],
+   "gain": 0.45,
+   "loop": null
+  },
+  "roundEnd": {
+   "files": [
+    "sfx/roundEnd_1.ogg"
+   ],
+   "gain": 0.434,
+   "loop": null
+  },
+  "shadeHiss": {
+   "files": [
+    "sfx/shadeHiss_1.ogg",
+    "sfx/shadeHiss_2.ogg",
+    "sfx/shadeHiss_3.ogg"
+   ],
+   "gain": 0.488,
+   "loop": null
+  },
+  "shadeLoop": {
+   "files": [
+    "sfx/shadeLoop_1.ogg"
+   ],
+   "gain": 0.76,
+   "loop": {
+    "startS": 0.25,
+    "endS": 3.25
+   }
+  },
+  "shieldUp": {
+   "files": [
+    "sfx/shieldUp_1.ogg",
+    "sfx/shieldUp_2.ogg"
+   ],
+   "gain": 0.524,
+   "loop": null
+  },
+  "slowZap": {
+   "files": [
+    "sfx/slowZap_1.ogg",
+    "sfx/slowZap_2.ogg"
+   ],
+   "gain": 0.866,
+   "loop": null
+  },
+  "spawnChime": {
+   "files": [
+    "sfx/spawnChime_1.ogg"
+   ],
+   "gain": 0.424,
+   "loop": null
+  },
+  "stormLoop": {
+   "files": [
+    "sfx/stormLoop_1.ogg"
+   ],
+   "gain": 1.6,
+   "loop": {
+    "startS": 0.25,
+    "endS": 5.25
+   }
+  },
+  "stormZap": {
+   "files": [
+    "sfx/stormZap_1.ogg",
+    "sfx/stormZap_2.ogg",
+    "sfx/stormZap_3.ogg"
+   ],
+   "gain": 0.856,
+   "loop": null
+  },
+  "takedownBoom": {
+   "files": [
+    "sfx/takedownBoom_1.ogg",
+    "sfx/takedownBoom_2.ogg"
+   ],
+   "gain": 0.507,
+   "loop": null
+  },
+  "takedownConfirm": {
+   "files": [
+    "sfx/takedownConfirm_1.ogg"
+   ],
+   "gain": 0.398,
+   "loop": null
+  },
+  "thunder": {
+   "files": [
+    "sfx/thunder_1.ogg",
+    "sfx/thunder_2.ogg"
+   ],
+   "gain": 0.531,
+   "loop": null
+  },
+  "uiClick": {
+   "files": [
+    "sfx/uiClick_1.ogg",
+    "sfx/uiClick_2.ogg",
+    "sfx/uiClick_3.ogg"
+   ],
+   "gain": 0.888,
+   "loop": null
+  },
+  "uiError": {
+   "files": [
+    "sfx/uiError_1.ogg"
+   ],
+   "gain": 0.411,
+   "loop": null
+  },
+  "uiHover": {
+   "files": [
+    "sfx/uiHover_1.ogg",
+    "sfx/uiHover_2.ogg"
+   ],
+   "gain": 1.016,
+   "loop": null
+  },
+  "uiReady": {
+   "files": [
+    "sfx/uiReady_1.ogg"
+   ],
+   "gain": 0.434,
+   "loop": null
+  },
+  "updraft": {
+   "files": [
+    "sfx/updraft_1.ogg",
+    "sfx/updraft_2.ogg"
+   ],
+   "gain": 0.419,
+   "loop": null
+  },
+  "veil": {
+   "files": [
+    "sfx/veil_1.ogg",
+    "sfx/veil_2.ogg"
+   ],
+   "gain": 0.575,
+   "loop": null
+  },
+  "veilOut": {
+   "files": [
+    "sfx/veilOut_1.ogg",
+    "sfx/veilOut_2.ogg"
+   ],
+   "gain": 0.522,
+   "loop": null
+  },
+  "victory": {
+   "files": [
+    "music/victory.ogg"
+   ],
+   "gain": 0.759,
+   "loop": null
+  },
+  "windLoop": {
+   "files": [
+    "sfx/windLoop_1.ogg"
+   ],
+   "gain": 1.062,
+   "loop": {
+    "startS": 0.25,
+    "endS": 6.25
+   }
+  },
+  "windup": {
+   "files": [
+    "sfx/windup_1.ogg",
+    "sfx/windup_2.ogg"
+   ],
+   "gain": 0.486,
+   "loop": null
+  }
+ },
+ "music": {
+  "lobby": {
+   "file": "music/lobby.ogg",
+   "gain": 0.8,
+   "loop": {
+    "startS": 0.5,
+    "endS": 58.681814
+   }
+  },
+  "matchLow": {
+   "file": "music/matchLow.ogg",
+   "gain": 0.8,
+   "loop": {
+    "startS": 0.5,
+    "endS": 48.5
+   }
+  },
+  "matchHigh": {
+   "file": "music/matchHigh.ogg",
+   "gain": 0.8,
+   "loop": {
+    "startS": 0.5,
+    "endS": 48.5
+   }
+  }
+ },
+ "ambience": {
+  "windBed": {
+   "file": "ambience/windBed.ogg",
+   "gain": 0.8,
+   "loop": {
+    "startS": 0.5,
+    "endS": 24.5
+   }
+  },
+  "thunder": {
+   "file": "ambience/thunder.ogg",
+   "gain": 1.0,
+   "loop": {
+    "startS": 0.5,
+    "endS": 36.5
+   }
+  },
+  "aerie": {
+   "file": "ambience/aerie.ogg",
+   "gain": 0.9,
+   "loop": {
+    "startS": 0.5,
+    "endS": 24.5
+   }
+  }
+ },
+ "totalBytes": 6163829
+}

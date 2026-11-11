@@ -14,7 +14,11 @@
     "test:watch": "vitest",
     "format": "prettier --write .",
     "peer:lan": "peerjs --port 9000 --path /dragonfall",
-    "assets:inspect": "gltf-transform inspect"
+    "assets:optimize": "node tools/pipeline/optimize.mjs",
+    "assets:inspect": "node tools/pipeline/inspect.mjs",
+    "assets:texture": "node tools/pipeline/texture.mjs",
+    "assets:audio": "node tools/pipeline/audio.mjs",
+    "assets:check": "node tools/pipeline/manifest.mjs"
   },
   "dependencies": {
     "peerjs": "^1.5.5",
@@ -22,9 +26,13 @@
   },
   "devDependencies": {
     "@gltf-transform/cli": "^4.5.1",
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
     "@types/three": "^0.187.0",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
     "lil-gui": "^0.21.0",
+    "meshoptimizer": "^1.3.0",
     "peer": "^1.0.2",
     "prettier": "^3.9.10",
     "stats-gl": "^4.2.3",

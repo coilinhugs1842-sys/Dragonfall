@@ -1,0 +1,136 @@
+{
+ "classId": "tempest",
+ "triangles": [
+  7518,
+  2460,
+  792
+ ],
+ "vertices": [
+  5907,
+  2691,
+  1151
+ ],
+ "bones": [
+  "root",
+  "hips",
+  "chest",
+  "neck1",
+  "neck2",
+  "neck3",
+  "head",
+  "jaw",
+  "tail1",
+  "tail2",
+  "tail3",
+  "tail4",
+  "wing_shoulder_L",
+  "wing_elbow_L",
+  "wing_wrist_L",
+  "wing_finger1_L",
+  "wing_finger2_L",
+  "wing_finger3_L",
+  "wing_shoulder_R",
+  "wing_elbow_R",
+  "wing_wrist_R",
+  "wing_finger1_R",
+  "wing_finger2_R",
+  "wing_finger3_R"
+ ],
+ "parents": {
+  "root": null,
+  "hips": "root",
+  "chest": "root",
+  "neck1": "chest",
+  "neck2": "neck1",
+  "neck3": "neck2",
+  "head": "neck3",
+  "jaw": "head",
+  "tail1": "hips",
+  "tail2": "tail1",
+  "tail3": "tail2",
+  "tail4": "tail3",
+  "wing_shoulder_L": "chest",
+  "wing_elbow_L": "wing_shoulder_L",
+  "wing_wrist_L": "wing_elbow_L",
+  "wing_finger1_L": "wing_wrist_L",
+  "wing_finger2_L": "wing_wrist_L",
+  "wing_finger3_L": "wing_wrist_L",
+  "wing_shoulder_R": "chest",
+  "wing_elbow_R": "wing_shoulder_R",
+  "wing_wrist_R": "wing_elbow_R",
+  "wing_finger1_R": "wing_wrist_R",
+  "wing_finger2_R": "wing_wrist_R",
+  "wing_finger3_R": "wing_wrist_R"
+ },
+ "clips": {
+  "glide": {
+   "duration": 4.0,
+   "loop": true,
+   "frames": 121
+  },
+  "flap": {
+   "duration": 1.0,
+   "loop": true,
+   "frames": 31
+  },
+  "boost": {
+   "duration": 0.6,
+   "loop": true,
+   "frames": 19
+  },
+  "dive": {
+   "duration": 2.0,
+   "loop": true,
+   "frames": 61
+  },
+  "bank_l": {
+   "duration": 3.0,
+   "loop": true,
+   "frames": 91
+  },
+  "bank_r": {
+   "duration": 3.0,
+   "loop": true,
+   "frames": 91
+  },
+  "hover": {
+   "duration": 1.2,
+   "loop": true,
+   "frames": 37
+  },
+  "roar": {
+   "duration": 2.2,
+   "loop": false,
+   "frames": 67
+  },
+  "land": {
+   "duration": 1.6,
+   "loop": false,
+   "frames": 49
+  },
+  "takeoff": {
+   "duration": 1.4,
+   "loop": false,
+   "frames": 43
+  },
+  "hit": {
+   "duration": 0.5,
+   "loop": false,
+   "frames": 16
+  },
+  "death_fall": {
+   "duration": 2.0,
+   "loop": true,
+   "frames": 61
+  }
+ },
+ "wingspan": 13.82,
+ "length": 12.57,
+ "height": 3.4,
+ "muzzle": [
+  0.0,
+  0.834,
+  6.453
+ ],
+ "raw_glb_bytes": 1900952
+}

@@ -1,0 +1,5063 @@
+{
+ "sampleRate": 44100,
+ "totalBytes": 6163829,
+ "files": [
+  {
+   "id": "fireBolt",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/fireBolt_1.ogg",
+   "bytes": 9227,
+   "channels": 1,
+   "durationS": 0.4597,
+   "samples": 20272,
+   "sourceSamples": 20400,
+   "peak": 0.8741,
+   "rmsDb": -17.2,
+   "crestDb": 16.03,
+   "dc": 0.000222,
+   "clipped": 0,
+   "centroidHz": 5845.1,
+   "loud100msDb": -10.73,
+   "toneBalance": {
+    "before": [
+     0.088,
+     0.221,
+     0.632,
+     0.058
+    ],
+    "after": [
+     0.088,
+     0.221,
+     0.632,
+     0.058
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -16.75,
+   "truePeakDb": -1.14,
+   "problems": []
+  },
+  {
+   "id": "fireBolt",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/fireBolt_2.ogg",
+   "bytes": 9074,
+   "channels": 1,
+   "durationS": 0.4669,
+   "samples": 20592,
+   "sourceSamples": 20720,
+   "peak": 0.8232,
+   "rmsDb": -17.71,
+   "crestDb": 16.02,
+   "dc": 2.5e-05,
+   "clipped": 0,
+   "centroidHz": 5864.7,
+   "loud100msDb": -11.17,
+   "toneBalance": {
+    "before": [
+     0.092,
+     0.229,
+     0.625,
+     0.054
+    ],
+    "after": [
+     0.092,
+     0.229,
+     0.625,
+     0.054
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -17.35,
+   "truePeakDb": -1.61,
+   "problems": []
+  },
+  {
+   "id": "fireBolt",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/fireBolt_3.ogg",
+   "bytes": 8959,
+   "channels": 1,
+   "durationS": 0.4627,
+   "samples": 20404,
+   "sourceSamples": 20532,
+   "peak": 0.8909,
+   "rmsDb": -18.17,
+   "crestDb": 17.17,
+   "dc": 0.000459,
+   "clipped": 0,
+   "centroidHz": 5607.2,
+   "loud100msDb": -11.69,
+   "toneBalance": {
+    "before": [
+     0.083,
+     0.208,
+     0.637,
+     0.072
+    ],
+    "after": [
+     0.083,
+     0.208,
+     0.637,
+     0.072
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -17.65,
+   "truePeakDb": -0.91,
+   "problems": []
+  },
+  {
+   "id": "fireBolt",
+   "v": 3,
+   "kind": "sfx",
+   "file": "sfx/fireBolt_4.ogg",
+   "bytes": 8768,
+   "channels": 1,
+   "durationS": 0.461,
+   "samples": 20328,
+   "sourceSamples": 20456,
+   "peak": 0.855,
+   "rmsDb": -17.27,
+   "crestDb": 15.91,
+   "dc": 0.00015,
+   "clipped": 0,
+   "centroidHz": 5395.5,
+   "loud100msDb": -10.8,
+   "toneBalance": {
+    "before": [
+     0.079,
+     0.211,
+     0.641,
+     0.068
+    ],
+    "after": [
+     0.079,
+     0.211,
+     0.641,
+     0.068
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -16.75,
+   "truePeakDb": -1.12,
+   "problems": []
+  },
+  {
+   "id": "dashWhoosh",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/dashWhoosh_1.ogg",
+   "bytes": 12517,
+   "channels": 1,
+   "durationS": 0.86,
+   "samples": 37924,
+   "sourceSamples": 38052,
+   "peak": 0.895,
+   "rmsDb": -15.92,
+   "crestDb": 14.96,
+   "dc": 0.000258,
+   "clipped": 0,
+   "centroidHz": 4149.5,
+   "loud100msDb": -9.3,
+   "toneBalance": {
+    "before": [
+     0.636,
+     0.161,
+     0.19,
+     0.013
+    ],
+    "after": [
+     0.177,
+     0.353,
+     0.42,
+     0.05
+    ],
+    "gainsDb": [
+     -9.0,
+     -0.1,
+     0.0,
+     2.3
+    ]
+   },
+   "lufs": -15.67,
+   "truePeakDb": -0.96,
+   "problems": []
+  },
+  {
+   "id": "dashWhoosh",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/dashWhoosh_2.ogg",
+   "bytes": 12467,
+   "channels": 1,
+   "durationS": 0.8722,
+   "samples": 38464,
+   "sourceSamples": 37472,
+   "peak": 0.8862,
+   "rmsDb": -16.65,
+   "crestDb": 15.6,
+   "dc": -5.3e-05,
+   "clipped": 0,
+   "centroidHz": 4297.3,
+   "loud100msDb": -9.96,
+   "toneBalance": {
+    "before": [
+     0.635,
+     0.166,
+     0.187,
+     0.012
+    ],
+    "after": [
+     0.179,
+     0.351,
+     0.419,
+     0.05
+    ],
+    "gainsDb": [
+     -9.0,
+     -0.3,
+     0.0,
+     2.9
+    ]
+   },
+   "lufs": -16.39,
+   "truePeakDb": -1.03,
+   "problems": []
+  },
+  {
+   "id": "afterburn",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/afterburn_1.ogg",
+   "bytes": 17909,
+   "channels": 1,
+   "durationS": 1.2547,
+   "samples": 55334,
+   "sourceSamples": 55334,
+   "peak": 0.8901,
+   "rmsDb": -19.95,
+   "crestDb": 18.94,
+   "dc": -0.00018,
+   "clipped": 0,
+   "centroidHz": 5937.7,
+   "loud100msDb": -11.46,
+   "toneBalance": {
+    "before": [
+     0.774,
+     0.131,
+     0.081,
+     0.014
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.392,
+     0.068
+    ],
+    "gainsDb": [
+     -13.2,
+     -2.5,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -21.45,
+   "truePeakDb": -1.01,
+   "problems": []
+  },
+  {
+   "id": "afterburn",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/afterburn_2.ogg",
+   "bytes": 18841,
+   "channels": 1,
+   "durationS": 1.2437,
+   "samples": 54849,
+   "sourceSamples": 54849,
+   "peak": 0.8782,
+   "rmsDb": -20.04,
+   "crestDb": 18.92,
+   "dc": 0.000144,
+   "clipped": 0,
+   "centroidHz": 6525.6,
+   "loud100msDb": -11.28,
+   "toneBalance": {
+    "before": [
+     0.804,
+     0.108,
+     0.073,
+     0.015
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.381,
+     0.079
+    ],
+    "gainsDb": [
+     -13.6,
+     -1.9,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -21.85,
+   "truePeakDb": -1.06,
+   "problems": []
+  },
+  {
+   "id": "meteorDrop",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/meteorDrop_1.ogg",
+   "bytes": 22756,
+   "channels": 1,
+   "durationS": 1.7616,
+   "samples": 77688,
+   "sourceSamples": 77688,
+   "peak": 0.8812,
+   "rmsDb": -18.75,
+   "crestDb": 17.65,
+   "dc": -4e-06,
+   "clipped": 0,
+   "centroidHz": 5314.7,
+   "loud100msDb": -9.15,
+   "toneBalance": {
+    "before": [
+     0.4,
+     0.256,
+     0.308,
+     0.037
+    ],
+    "after": [
+     0.18,
+     0.349,
+     0.421,
+     0.05
+    ],
+    "gainsDb": [
+     -4.8,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -20.13,
+   "truePeakDb": -1.1,
+   "problems": []
+  },
+  {
+   "id": "meteorDrop",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/meteorDrop_2.ogg",
+   "bytes": 23374,
+   "channels": 1,
+   "durationS": 1.7407,
+   "samples": 76763,
+   "sourceSamples": 76763,
+   "peak": 0.9001,
+   "rmsDb": -18.71,
+   "crestDb": 17.79,
+   "dc": -3.8e-05,
+   "clipped": 0,
+   "centroidHz": 5369.5,
+   "loud100msDb": -8.96,
+   "toneBalance": {
+    "before": [
+     0.417,
+     0.263,
+     0.283,
+     0.037
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.407,
+     0.053
+    ],
+    "gainsDb": [
+     -5.2,
+     -0.2,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -20.21,
+   "truePeakDb": -0.91,
+   "problems": []
+  },
+  {
+   "id": "flameStart",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/flameStart_1.ogg",
+   "bytes": 13494,
+   "channels": 1,
+   "durationS": 0.7329,
+   "samples": 32319,
+   "sourceSamples": 32447,
+   "peak": 0.8735,
+   "rmsDb": -16.85,
+   "crestDb": 15.68,
+   "dc": 7e-05,
+   "clipped": 0,
+   "centroidHz": 6039.3,
+   "loud100msDb": -11.0,
+   "toneBalance": {
+    "before": [
+     0.757,
+     0.111,
+     0.115,
+     0.016
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.403,
+     0.057
+    ],
+    "gainsDb": [
+     -11.7,
+     -0.3,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -17.88,
+   "truePeakDb": -1.17,
+   "problems": []
+  },
+  {
+   "id": "flameStart",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/flameStart_2.ogg",
+   "bytes": 12433,
+   "channels": 1,
+   "durationS": 0.7619,
+   "samples": 33600,
+   "sourceSamples": 32676,
+   "peak": 0.898,
+   "rmsDb": -17.2,
+   "crestDb": 16.26,
+   "dc": 0.00038,
+   "clipped": 0,
+   "centroidHz": 6627.7,
+   "loud100msDb": -11.11,
+   "toneBalance": {
+    "before": [
+     0.77,
+     0.13,
+     0.082,
+     0.018
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.376,
+     0.084
+    ],
+    "gainsDb": [
+     -12.9,
+     -2.2,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -18.14,
+   "truePeakDb": -0.93,
+   "problems": []
+  },
+  {
+   "id": "flameLoop",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/flameLoop_1.ogg",
+   "bytes": 46238,
+   "channels": 1,
+   "durationS": 3.5,
+   "samples": 154350,
+   "sourceSamples": 154350,
+   "peak": 0.867,
+   "rmsDb": -15.53,
+   "crestDb": 14.29,
+   "dc": -0.000401,
+   "clipped": 0,
+   "centroidHz": 5908.3,
+   "loud100msDb": -13.09,
+   "toneBalance": {
+    "before": [
+     0.871,
+     0.058,
+     0.057,
+     0.014
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.372,
+     0.088
+    ],
+    "gainsDb": [
+     -15.0,
+     -0.2,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -16.15,
+   "truePeakDb": -1.12,
+   "loop": {
+    "startS": 0.25,
+    "endS": 3.25,
+    "seamErrorDb": -23.0,
+    "seamStep": 0.00686,
+    "typicalStep999": 0.23655,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "shieldUp",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/shieldUp_1.ogg",
+   "bytes": 13361,
+   "channels": 1,
+   "durationS": 1.05,
+   "samples": 46305,
+   "sourceSamples": 46305,
+   "peak": 0.892,
+   "rmsDb": -19.71,
+   "crestDb": 18.72,
+   "dc": 8e-06,
+   "clipped": 0,
+   "centroidHz": 1807.7,
+   "loud100msDb": -12.29,
+   "toneBalance": {
+    "before": [
+     0.051,
+     0.224,
+     0.72,
+     0.005
+    ],
+    "after": [
+     0.049,
+     0.217,
+     0.695,
+     0.039
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -19.43,
+   "truePeakDb": -0.98,
+   "problems": []
+  },
+  {
+   "id": "shieldUp",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/shieldUp_2.ogg",
+   "bytes": 13623,
+   "channels": 1,
+   "durationS": 1.084,
+   "samples": 47804,
+   "sourceSamples": 47804,
+   "peak": 0.8628,
+   "rmsDb": -20.27,
+   "crestDb": 18.99,
+   "dc": -2.4e-05,
+   "clipped": 0,
+   "centroidHz": 1797.0,
+   "loud100msDb": -12.48,
+   "toneBalance": {
+    "before": [
+     0.061,
+     0.281,
+     0.652,
+     0.005
+    ],
+    "after": [
+     0.059,
+     0.271,
+     0.629,
+     0.04
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -19.37,
+   "truePeakDb": -1.28,
+   "problems": []
+  },
+  {
+   "id": "healShimmer",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/healShimmer_1.ogg",
+   "bytes": 21630,
+   "channels": 1,
+   "durationS": 1.7966,
+   "samples": 79229,
+   "sourceSamples": 79229,
+   "peak": 0.8649,
+   "rmsDb": -16.67,
+   "crestDb": 15.41,
+   "dc": -7e-06,
+   "clipped": 0,
+   "centroidHz": 1941.7,
+   "loud100msDb": -11.93,
+   "toneBalance": {
+    "before": [
+     0.494,
+     0.157,
+     0.347,
+     0.002
+    ],
+    "after": [
+     0.176,
+     0.249,
+     0.552,
+     0.023
+    ],
+    "gainsDb": [
+     -6.5,
+     0.0,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -16.18,
+   "truePeakDb": -1.26,
+   "problems": []
+  },
+  {
+   "id": "healShimmer",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/healShimmer_2.ogg",
+   "bytes": 21209,
+   "channels": 1,
+   "durationS": 1.7895,
+   "samples": 78915,
+   "sourceSamples": 78915,
+   "peak": 0.89,
+   "rmsDb": -15.04,
+   "crestDb": 14.03,
+   "dc": -3e-05,
+   "clipped": 0,
+   "centroidHz": 1925.8,
+   "loud100msDb": -10.83,
+   "toneBalance": {
+    "before": [
+     0.416,
+     0.229,
+     0.353,
+     0.002
+    ],
+    "after": [
+     0.177,
+     0.317,
+     0.488,
+     0.018
+    ],
+    "gainsDb": [
+     -5.1,
+     0.0,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -15.01,
+   "truePeakDb": -1.0,
+   "problems": []
+  },
+  {
+   "id": "bulwarkWave",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/bulwarkWave_1.ogg",
+   "bytes": 22948,
+   "channels": 1,
+   "durationS": 2.2577,
+   "samples": 99565,
+   "sourceSamples": 99565,
+   "peak": 0.6086,
+   "rmsDb": -22.18,
+   "crestDb": 17.86,
+   "dc": -9.9e-05,
+   "clipped": 0,
+   "centroidHz": 4960.9,
+   "loud100msDb": -13.73,
+   "toneBalance": {
+    "before": [
+     0.64,
+     0.302,
+     0.051,
+     0.007
+    ],
+    "after": [
+     0.28,
+     0.38,
+     0.27,
+     0.07
+    ],
+    "gainsDb": [
+     -10.9,
+     -6.3,
+     0.0,
+     2.5
+    ]
+   },
+   "lufs": -21.55,
+   "truePeakDb": -1.65,
+   "problems": []
+  },
+  {
+   "id": "lightningCharge",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/lightningCharge_1.ogg",
+   "bytes": 19777,
+   "channels": 1,
+   "durationS": 1.1722,
+   "samples": 51693,
+   "sourceSamples": 51693,
+   "peak": 0.8848,
+   "rmsDb": -20.45,
+   "crestDb": 19.39,
+   "dc": 4e-06,
+   "clipped": 0,
+   "centroidHz": 3770.6,
+   "loud100msDb": -13.4,
+   "toneBalance": {
+    "before": [
+     0.0,
+     0.06,
+     0.57,
+     0.37
+    ],
+    "after": [
+     0.0,
+     0.06,
+     0.57,
+     0.37
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -16.43,
+   "truePeakDb": -1.06,
+   "problems": []
+  },
+  {
+   "id": "lightningCharge",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/lightningCharge_2.ogg",
+   "bytes": 20248,
+   "channels": 1,
+   "durationS": 1.1652,
+   "samples": 51386,
+   "sourceSamples": 51386,
+   "peak": 0.8956,
+   "rmsDb": -21.02,
+   "crestDb": 20.07,
+   "dc": 1.3e-05,
+   "clipped": 0,
+   "centroidHz": 3654.6,
+   "loud100msDb": -14.14,
+   "toneBalance": {
+    "before": [
+     0.001,
+     0.057,
+     0.596,
+     0.347
+    ],
+    "after": [
+     0.001,
+     0.057,
+     0.596,
+     0.347
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -17.05,
+   "truePeakDb": -0.93,
+   "problems": []
+  },
+  {
+   "id": "lightningCrack",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/lightningCrack_1.ogg",
+   "bytes": 13591,
+   "channels": 1,
+   "durationS": 1.1502,
+   "samples": 50726,
+   "sourceSamples": 50726,
+   "peak": 0.7486,
+   "rmsDb": -25.91,
+   "crestDb": 23.39,
+   "dc": 0.000122,
+   "clipped": 0,
+   "centroidHz": 2635.5,
+   "loud100msDb": -16.46,
+   "toneBalance": {
+    "before": [
+     0.777,
+     0.109,
+     0.018,
+     0.096
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.072,
+     0.388
+    ],
+    "gainsDb": [
+     -12.4,
+     -0.9,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -26.85,
+   "truePeakDb": -2.45,
+   "problems": []
+  },
+  {
+   "id": "lightningCrack",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/lightningCrack_2.ogg",
+   "bytes": 13589,
+   "channels": 1,
+   "durationS": 1.1176,
+   "samples": 49286,
+   "sourceSamples": 49286,
+   "peak": 0.8489,
+   "rmsDb": -22.97,
+   "crestDb": 21.55,
+   "dc": -5e-06,
+   "clipped": 0,
+   "centroidHz": 2814.7,
+   "loud100msDb": -13.52,
+   "toneBalance": {
+    "before": [
+     0.807,
+     0.082,
+     0.015,
+     0.096
+    ],
+    "after": [
+     0.18,
+     0.347,
+     0.065,
+     0.408
+    ],
+    "gainsDb": [
+     -12.8,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -23.04,
+   "truePeakDb": -0.92,
+   "problems": []
+  },
+  {
+   "id": "lightningCrack",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/lightningCrack_3.ogg",
+   "bytes": 13132,
+   "channels": 1,
+   "durationS": 1.1096,
+   "samples": 48935,
+   "sourceSamples": 48935,
+   "peak": 0.7832,
+   "rmsDb": -24.4,
+   "crestDb": 22.27,
+   "dc": 0.000117,
+   "clipped": 0,
+   "centroidHz": 2862.8,
+   "loud100msDb": -15.19,
+   "toneBalance": {
+    "before": [
+     0.785,
+     0.095,
+     0.018,
+     0.103
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.068,
+     0.392
+    ],
+    "gainsDb": [
+     -12.2,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -24.49,
+   "truePeakDb": -1.79,
+   "problems": []
+  },
+  {
+   "id": "mineLaunch",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/mineLaunch_1.ogg",
+   "bytes": 8615,
+   "channels": 1,
+   "durationS": 0.4471,
+   "samples": 19716,
+   "sourceSamples": 19844,
+   "peak": 0.8895,
+   "rmsDb": -18.38,
+   "crestDb": 17.36,
+   "dc": -8.4e-05,
+   "clipped": 0,
+   "centroidHz": 5667.4,
+   "loud100msDb": -12.09,
+   "toneBalance": {
+    "before": [
+     0.004,
+     0.437,
+     0.507,
+     0.052
+    ],
+    "after": [
+     0.005,
+     0.36,
+     0.577,
+     0.059
+    ],
+    "gainsDb": [
+     0.0,
+     -1.4,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -18.25,
+   "truePeakDb": -1.01,
+   "problems": []
+  },
+  {
+   "id": "mineLaunch",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/mineLaunch_2.ogg",
+   "bytes": 8696,
+   "channels": 1,
+   "durationS": 0.4717,
+   "samples": 20800,
+   "sourceSamples": 19836,
+   "peak": 0.8841,
+   "rmsDb": -18.52,
+   "crestDb": 17.45,
+   "dc": -3e-05,
+   "clipped": 0,
+   "centroidHz": 5641.8,
+   "loud100msDb": -12.02,
+   "toneBalance": {
+    "before": [
+     0.004,
+     0.442,
+     0.5,
+     0.054
+    ],
+    "after": [
+     0.004,
+     0.36,
+     0.574,
+     0.062
+    ],
+    "gainsDb": [
+     0.0,
+     -1.5,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -18.05,
+   "truePeakDb": -1.06,
+   "problems": []
+  },
+  {
+   "id": "mineArm",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/mineArm_1.ogg",
+   "bytes": 12177,
+   "channels": 1,
+   "durationS": 0.8599,
+   "samples": 37922,
+   "sourceSamples": 38050,
+   "peak": 0.7765,
+   "rmsDb": -19.37,
+   "crestDb": 17.17,
+   "dc": 0.000208,
+   "clipped": 0,
+   "centroidHz": 7264.3,
+   "loud100msDb": -12.39,
+   "toneBalance": {
+    "before": [
+     0.559,
+     0.177,
+     0.023,
+     0.241
+    ],
+    "after": [
+     0.18,
+     0.328,
+     0.043,
+     0.449
+    ],
+    "gainsDb": [
+     -7.6,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -18.01,
+   "truePeakDb": -1.72,
+   "problems": []
+  },
+  {
+   "id": "mineArm",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/mineArm_2.ogg",
+   "bytes": 12227,
+   "channels": 1,
+   "durationS": 0.8662,
+   "samples": 38199,
+   "sourceSamples": 38327,
+   "peak": 0.8444,
+   "rmsDb": -19.24,
+   "crestDb": 17.77,
+   "dc": -5.1e-05,
+   "clipped": 0,
+   "centroidHz": 7003.3,
+   "loud100msDb": -12.06,
+   "toneBalance": {
+    "before": [
+     0.551,
+     0.183,
+     0.022,
+     0.244
+    ],
+    "after": [
+     0.18,
+     0.334,
+     0.041,
+     0.445
+    ],
+    "gainsDb": [
+     -7.5,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -17.89,
+   "truePeakDb": -0.95,
+   "problems": []
+  },
+  {
+   "id": "updraft",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/updraft_1.ogg",
+   "bytes": 15871,
+   "channels": 1,
+   "durationS": 1.2568,
+   "samples": 55425,
+   "sourceSamples": 55425,
+   "peak": 0.8988,
+   "rmsDb": -15.59,
+   "crestDb": 14.66,
+   "dc": 6.2e-05,
+   "clipped": 0,
+   "centroidHz": 2675.6,
+   "loud100msDb": -10.38,
+   "toneBalance": {
+    "before": [
+     0.746,
+     0.121,
+     0.13,
+     0.004
+    ],
+    "after": [
+     0.18,
+     0.347,
+     0.423,
+     0.05
+    ],
+    "gainsDb": [
+     -11.3,
+     -0.6,
+     0.0,
+     6.1
+    ]
+   },
+   "lufs": -14.7,
+   "truePeakDb": -0.92,
+   "problems": []
+  },
+  {
+   "id": "updraft",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/updraft_2.ogg",
+   "bytes": 15815,
+   "channels": 1,
+   "durationS": 1.2393,
+   "samples": 54652,
+   "sourceSamples": 54652,
+   "peak": 0.8687,
+   "rmsDb": -16.73,
+   "crestDb": 15.5,
+   "dc": 0.000543,
+   "clipped": 0,
+   "centroidHz": 2603.1,
+   "loud100msDb": -10.49,
+   "toneBalance": {
+    "before": [
+     0.74,
+     0.11,
+     0.146,
+     0.004
+    ],
+    "after": [
+     0.173,
+     0.334,
+     0.443,
+     0.05
+    ],
+    "gainsDb": [
+     -11.1,
+     0.0,
+     0.0,
+     6.0
+    ]
+   },
+   "lufs": -15.77,
+   "truePeakDb": -1.14,
+   "problems": []
+  },
+  {
+   "id": "thunder",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/thunder_1.ogg",
+   "bytes": 31736,
+   "channels": 1,
+   "durationS": 3.2864,
+   "samples": 144932,
+   "sourceSamples": 144932,
+   "peak": 0.8988,
+   "rmsDb": -21.5,
+   "crestDb": 20.58,
+   "dc": -1.2e-05,
+   "clipped": 0,
+   "centroidHz": 783.6,
+   "loud100msDb": -11.9,
+   "toneBalance": {
+    "before": [
+     0.803,
+     0.149,
+     0.029,
+     0.018
+    ],
+    "after": [
+     0.3,
+     0.4,
+     0.184,
+     0.116
+    ],
+    "gainsDb": [
+     -12.2,
+     -3.7,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -23.77,
+   "truePeakDb": -0.92,
+   "problems": []
+  },
+  {
+   "id": "thunder",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/thunder_2.ogg",
+   "bytes": 30990,
+   "channels": 1,
+   "durationS": 3.1047,
+   "samples": 136916,
+   "sourceSamples": 136916,
+   "peak": 0.8145,
+   "rmsDb": -21.2,
+   "crestDb": 19.42,
+   "dc": -6.1e-05,
+   "clipped": 0,
+   "centroidHz": 791.2,
+   "loud100msDb": -13.12,
+   "toneBalance": {
+    "before": [
+     0.744,
+     0.198,
+     0.04,
+     0.019
+    ],
+    "after": [
+     0.3,
+     0.4,
+     0.203,
+     0.097
+    ],
+    "gainsDb": [
+     -11.0,
+     -4.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -23.1,
+   "truePeakDb": -1.77,
+   "problems": []
+  },
+  {
+   "id": "shadeHiss",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/shadeHiss_1.ogg",
+   "bytes": 13485,
+   "channels": 1,
+   "durationS": 0.8721,
+   "samples": 38460,
+   "sourceSamples": 38588,
+   "peak": 0.8928,
+   "rmsDb": -17.49,
+   "crestDb": 16.5,
+   "dc": -7.3e-05,
+   "clipped": 0,
+   "centroidHz": 7345.2,
+   "loud100msDb": -11.38,
+   "toneBalance": {
+    "before": [
+     0.001,
+     0.474,
+     0.313,
+     0.212
+    ],
+    "after": [
+     0.001,
+     0.36,
+     0.381,
+     0.258
+    ],
+    "gainsDb": [
+     0.0,
+     -2.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -16.32,
+   "truePeakDb": -1.0,
+   "problems": []
+  },
+  {
+   "id": "shadeHiss",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/shadeHiss_2.ogg",
+   "bytes": 12827,
+   "channels": 1,
+   "durationS": 0.8374,
+   "samples": 36928,
+   "sourceSamples": 36030,
+   "peak": 0.8207,
+   "rmsDb": -18.41,
+   "crestDb": 16.69,
+   "dc": 4e-06,
+   "clipped": 0,
+   "centroidHz": 7459.4,
+   "loud100msDb": -12.19,
+   "toneBalance": {
+    "before": [
+     0.001,
+     0.517,
+     0.307,
+     0.175
+    ],
+    "after": [
+     0.001,
+     0.36,
+     0.407,
+     0.232
+    ],
+    "gainsDb": [
+     0.0,
+     -2.8,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -17.52,
+   "truePeakDb": -1.53,
+   "problems": []
+  },
+  {
+   "id": "shadeHiss",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/shadeHiss_3.ogg",
+   "bytes": 12990,
+   "channels": 1,
+   "durationS": 0.8355,
+   "samples": 36845,
+   "sourceSamples": 36973,
+   "peak": 0.816,
+   "rmsDb": -17.72,
+   "crestDb": 15.96,
+   "dc": -5.9e-05,
+   "clipped": 0,
+   "centroidHz": 7268.9,
+   "loud100msDb": -11.73,
+   "toneBalance": {
+    "before": [
+     0.001,
+     0.472,
+     0.324,
+     0.202
+    ],
+    "after": [
+     0.001,
+     0.36,
+     0.393,
+     0.245
+    ],
+    "gainsDb": [
+     0.0,
+     -2.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -16.78,
+   "truePeakDb": -1.33,
+   "problems": []
+  },
+  {
+   "id": "shadeLoop",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/shadeLoop_1.ogg",
+   "bytes": 42762,
+   "channels": 1,
+   "durationS": 3.5,
+   "samples": 154350,
+   "sourceSamples": 154350,
+   "peak": 0.8904,
+   "rmsDb": -15.62,
+   "crestDb": 14.62,
+   "dc": -2.7e-05,
+   "clipped": 0,
+   "centroidHz": 7752.2,
+   "loud100msDb": -12.69,
+   "toneBalance": {
+    "before": [
+     0.052,
+     0.281,
+     0.407,
+     0.261
+    ],
+    "after": [
+     0.052,
+     0.281,
+     0.407,
+     0.261
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -14.89,
+   "truePeakDb": -1.0,
+   "loop": {
+    "startS": 0.25,
+    "endS": 3.25,
+    "seamErrorDb": -21.2,
+    "seamStep": 0.05783,
+    "typicalStep999": 0.34765,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "veil",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/veil_1.ogg",
+   "bytes": 12707,
+   "channels": 1,
+   "durationS": 1.184,
+   "samples": 52213,
+   "sourceSamples": 52213,
+   "peak": 0.8635,
+   "rmsDb": -20.53,
+   "crestDb": 19.26,
+   "dc": -5.5e-05,
+   "clipped": 0,
+   "centroidHz": 2849.0,
+   "loud100msDb": -13.28,
+   "toneBalance": {
+    "before": [
+     0.063,
+     0.309,
+     0.606,
+     0.022
+    ],
+    "after": [
+     0.061,
+     0.3,
+     0.589,
+     0.05
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     3.7
+    ]
+   },
+   "lufs": -20.33,
+   "truePeakDb": -1.27,
+   "problems": []
+  },
+  {
+   "id": "veil",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/veil_2.ogg",
+   "bytes": 12801,
+   "channels": 1,
+   "durationS": 1.184,
+   "samples": 52216,
+   "sourceSamples": 52216,
+   "peak": 0.8971,
+   "rmsDb": -20.35,
+   "crestDb": 19.4,
+   "dc": -4.7e-05,
+   "clipped": 0,
+   "centroidHz": 2938.2,
+   "loud100msDb": -13.12,
+   "toneBalance": {
+    "before": [
+     0.063,
+     0.31,
+     0.607,
+     0.02
+    ],
+    "after": [
+     0.061,
+     0.301,
+     0.588,
+     0.05
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     4.1
+    ]
+   },
+   "lufs": -20.13,
+   "truePeakDb": -0.9,
+   "problems": []
+  },
+  {
+   "id": "veilOut",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/veilOut_1.ogg",
+   "bytes": 12170,
+   "channels": 1,
+   "durationS": 0.7749,
+   "samples": 34172,
+   "sourceSamples": 34300,
+   "peak": 0.892,
+   "rmsDb": -20.35,
+   "crestDb": 19.35,
+   "dc": -7.5e-05,
+   "clipped": 0,
+   "centroidHz": 4404.9,
+   "loud100msDb": -12.69,
+   "toneBalance": {
+    "before": [
+     0.18,
+     0.411,
+     0.386,
+     0.024
+    ],
+    "after": [
+     0.18,
+     0.355,
+     0.414,
+     0.051
+    ],
+    "gainsDb": [
+     -0.3,
+     -0.9,
+     0.0,
+     3.0
+    ]
+   },
+   "lufs": -21.77,
+   "truePeakDb": -0.97,
+   "problems": []
+  },
+  {
+   "id": "veilOut",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/veilOut_2.ogg",
+   "bytes": 12575,
+   "channels": 1,
+   "durationS": 0.8181,
+   "samples": 36077,
+   "sourceSamples": 36205,
+   "peak": 0.8725,
+   "rmsDb": -19.92,
+   "crestDb": 18.74,
+   "dc": -1.9e-05,
+   "clipped": 0,
+   "centroidHz": 4514.5,
+   "loud100msDb": -12.03,
+   "toneBalance": {
+    "before": [
+     0.181,
+     0.412,
+     0.384,
+     0.024
+    ],
+    "after": [
+     0.18,
+     0.356,
+     0.413,
+     0.051
+    ],
+    "gainsDb": [
+     -0.3,
+     -1.0,
+     0.0,
+     3.0
+    ]
+   },
+   "lufs": -21.15,
+   "truePeakDb": -0.94,
+   "problems": []
+  },
+  {
+   "id": "phaseDive",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/phaseDive_1.ogg",
+   "bytes": 13032,
+   "channels": 1,
+   "durationS": 1.0285,
+   "samples": 45355,
+   "sourceSamples": 45355,
+   "peak": 0.869,
+   "rmsDb": -14.85,
+   "crestDb": 13.63,
+   "dc": 0.000163,
+   "clipped": 0,
+   "centroidHz": 1939.1,
+   "loud100msDb": -11.12,
+   "toneBalance": {
+    "before": [
+     0.166,
+     0.639,
+     0.187,
+     0.009
+    ],
+    "after": [
+     0.22,
+     0.45,
+     0.298,
+     0.032
+    ],
+    "gainsDb": [
+     -0.8,
+     -3.5,
+     0.0,
+     3.6
+    ]
+   },
+   "lufs": -15.53,
+   "truePeakDb": -1.17,
+   "problems": []
+  },
+  {
+   "id": "phaseDive",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/phaseDive_2.ogg",
+   "bytes": 13202,
+   "channels": 1,
+   "durationS": 1.0361,
+   "samples": 45693,
+   "sourceSamples": 45693,
+   "peak": 0.8668,
+   "rmsDb": -14.48,
+   "crestDb": 13.23,
+   "dc": 9.1e-05,
+   "clipped": 0,
+   "centroidHz": 1946.6,
+   "loud100msDb": -10.83,
+   "toneBalance": {
+    "before": [
+     0.159,
+     0.641,
+     0.191,
+     0.009
+    ],
+    "after": [
+     0.22,
+     0.45,
+     0.299,
+     0.031
+    ],
+    "gainsDb": [
+     -0.6,
+     -3.5,
+     0.0,
+     3.4
+    ]
+   },
+   "lufs": -15.11,
+   "truePeakDb": -1.24,
+   "problems": []
+  },
+  {
+   "id": "nightTerror",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/nightTerror_1.ogg",
+   "bytes": 34253,
+   "channels": 1,
+   "durationS": 3.2263,
+   "samples": 142278,
+   "sourceSamples": 142278,
+   "peak": 0.8816,
+   "rmsDb": -16.22,
+   "crestDb": 15.13,
+   "dc": -0.000135,
+   "clipped": 0,
+   "centroidHz": 3183.4,
+   "loud100msDb": -10.4,
+   "toneBalance": {
+    "before": [
+     0.305,
+     0.161,
+     0.468,
+     0.066
+    ],
+    "after": [
+     0.25,
+     0.173,
+     0.505,
+     0.071
+    ],
+    "gainsDb": [
+     -1.2,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -14.19,
+   "truePeakDb": -1.09,
+   "problems": []
+  },
+  {
+   "id": "windup",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/windup_1.ogg",
+   "bytes": 9423,
+   "channels": 1,
+   "durationS": 0.5703,
+   "samples": 25152,
+   "sourceSamples": 24255,
+   "peak": 0.8478,
+   "rmsDb": -15.66,
+   "crestDb": 14.23,
+   "dc": 4.7e-05,
+   "clipped": 0,
+   "centroidHz": 3419.0,
+   "loud100msDb": -11.03,
+   "toneBalance": {
+    "before": [
+     0.1,
+     0.19,
+     0.575,
+     0.135
+    ],
+    "after": [
+     0.1,
+     0.19,
+     0.575,
+     0.135
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -14.51,
+   "truePeakDb": -1.27,
+   "problems": []
+  },
+  {
+   "id": "windup",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/windup_2.ogg",
+   "bytes": 9409,
+   "channels": 1,
+   "durationS": 0.5703,
+   "samples": 25152,
+   "sourceSamples": 24255,
+   "peak": 0.8365,
+   "rmsDb": -17.0,
+   "crestDb": 15.45,
+   "dc": 5.9e-05,
+   "clipped": 0,
+   "centroidHz": 3356.6,
+   "loud100msDb": -12.45,
+   "toneBalance": {
+    "before": [
+     0.115,
+     0.221,
+     0.544,
+     0.12
+    ],
+    "after": [
+     0.115,
+     0.221,
+     0.544,
+     0.12
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -16.15,
+   "truePeakDb": -1.46,
+   "problems": []
+  },
+  {
+   "id": "hitFlesh",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/hitFlesh_1.ogg",
+   "bytes": 7287,
+   "channels": 1,
+   "durationS": 0.3472,
+   "samples": 15312,
+   "sourceSamples": 15440,
+   "peak": 0.8887,
+   "rmsDb": -17.68,
+   "crestDb": 16.66,
+   "dc": 0.000129,
+   "clipped": 0,
+   "centroidHz": 3085.6,
+   "loud100msDb": -12.38,
+   "toneBalance": {
+    "before": [
+     0.604,
+     0.357,
+     0.034,
+     0.004
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.356,
+     0.104
+    ],
+    "gainsDb": [
+     -15.4,
+     -10.1,
+     0.0,
+     3.8
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.01,
+   "problems": []
+  },
+  {
+   "id": "hitFlesh",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/hitFlesh_2.ogg",
+   "bytes": 7316,
+   "channels": 1,
+   "durationS": 0.3473,
+   "samples": 15316,
+   "sourceSamples": 15444,
+   "peak": 0.8324,
+   "rmsDb": -19.24,
+   "crestDb": 17.65,
+   "dc": 0.000275,
+   "clipped": 0,
+   "centroidHz": 3826.9,
+   "loud100msDb": -14.09,
+   "toneBalance": {
+    "before": [
+     0.472,
+     0.487,
+     0.037,
+     0.004
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.343,
+     0.117
+    ],
+    "gainsDb": [
+     -13.8,
+     -10.9,
+     0.0,
+     4.9
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.59,
+   "problems": []
+  },
+  {
+   "id": "hitFlesh",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/hitFlesh_3.ogg",
+   "bytes": 7655,
+   "channels": 1,
+   "durationS": 0.348,
+   "samples": 15349,
+   "sourceSamples": 15477,
+   "peak": 0.8744,
+   "rmsDb": -19.55,
+   "crestDb": 18.38,
+   "dc": 1.4e-05,
+   "clipped": 0,
+   "centroidHz": 3163.5,
+   "loud100msDb": -14.29,
+   "toneBalance": {
+    "before": [
+     0.489,
+     0.464,
+     0.042,
+     0.004
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.353,
+     0.107
+    ],
+    "gainsDb": [
+     -13.6,
+     -10.3,
+     0.0,
+     4.8
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.17,
+   "problems": []
+  },
+  {
+   "id": "hitFlesh",
+   "v": 3,
+   "kind": "sfx",
+   "file": "sfx/hitFlesh_4.ogg",
+   "bytes": 7836,
+   "channels": 1,
+   "durationS": 0.348,
+   "samples": 15346,
+   "sourceSamples": 15474,
+   "peak": 0.8945,
+   "rmsDb": -18.52,
+   "crestDb": 17.55,
+   "dc": 0.0001,
+   "clipped": 0,
+   "centroidHz": 4447.5,
+   "loud100msDb": -13.33,
+   "toneBalance": {
+    "before": [
+     0.496,
+     0.443,
+     0.055,
+     0.006
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.368,
+     0.092
+    ],
+    "gainsDb": [
+     -12.6,
+     -9.1,
+     0.0,
+     3.9
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -0.97,
+   "problems": []
+  },
+  {
+   "id": "hitShield",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/hitShield_1.ogg",
+   "bytes": 9058,
+   "channels": 1,
+   "durationS": 0.5971,
+   "samples": 26332,
+   "sourceSamples": 26460,
+   "peak": 0.8654,
+   "rmsDb": -20.59,
+   "crestDb": 19.34,
+   "dc": -9.9e-05,
+   "clipped": 0,
+   "centroidHz": 2692.5,
+   "loud100msDb": -13.76,
+   "toneBalance": {
+    "before": [
+     0.053,
+     0.338,
+     0.582,
+     0.027
+    ],
+    "after": [
+     0.052,
+     0.33,
+     0.569,
+     0.05
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     2.8
+    ]
+   },
+   "lufs": -21.43,
+   "truePeakDb": -1.17,
+   "problems": []
+  },
+  {
+   "id": "hitShield",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/hitShield_2.ogg",
+   "bytes": 9023,
+   "channels": 1,
+   "durationS": 0.5971,
+   "samples": 26333,
+   "sourceSamples": 26461,
+   "peak": 0.8529,
+   "rmsDb": -20.37,
+   "crestDb": 18.99,
+   "dc": -0.000169,
+   "clipped": 0,
+   "centroidHz": 2814.1,
+   "loud100msDb": -13.52,
+   "toneBalance": {
+    "before": [
+     0.048,
+     0.322,
+     0.61,
+     0.02
+    ],
+    "after": [
+     0.046,
+     0.312,
+     0.591,
+     0.05
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     4.2
+    ]
+   },
+   "lufs": -21.43,
+   "truePeakDb": -1.38,
+   "problems": []
+  },
+  {
+   "id": "hitShield",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/hitShield_3.ogg",
+   "bytes": 9039,
+   "channels": 1,
+   "durationS": 0.5971,
+   "samples": 26332,
+   "sourceSamples": 26460,
+   "peak": 0.8666,
+   "rmsDb": -21.14,
+   "crestDb": 19.9,
+   "dc": 2.1e-05,
+   "clipped": 0,
+   "centroidHz": 2846.8,
+   "loud100msDb": -14.19,
+   "toneBalance": {
+    "before": [
+     0.059,
+     0.321,
+     0.601,
+     0.02
+    ],
+    "after": [
+     0.057,
+     0.311,
+     0.582,
+     0.05
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     4.2
+    ]
+   },
+   "lufs": -22.29,
+   "truePeakDb": -0.96,
+   "problems": []
+  },
+  {
+   "id": "hitRock",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/hitRock_1.ogg",
+   "bytes": 14125,
+   "channels": 1,
+   "durationS": 0.7739,
+   "samples": 34131,
+   "sourceSamples": 34259,
+   "peak": 0.879,
+   "rmsDb": -18.69,
+   "crestDb": 17.57,
+   "dc": -8e-05,
+   "clipped": 0,
+   "centroidHz": 2892.2,
+   "loud100msDb": -10.4,
+   "toneBalance": {
+    "before": [
+     0.493,
+     0.155,
+     0.318,
+     0.034
+    ],
+    "after": [
+     0.18,
+     0.251,
+     0.515,
+     0.054
+    ],
+    "gainsDb": [
+     -6.5,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -21.55,
+   "truePeakDb": -1.06,
+   "problems": []
+  },
+  {
+   "id": "hitRock",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/hitRock_2.ogg",
+   "bytes": 15948,
+   "channels": 1,
+   "durationS": 0.8799,
+   "samples": 38803,
+   "sourceSamples": 38931,
+   "peak": 0.8804,
+   "rmsDb": -19.65,
+   "crestDb": 18.54,
+   "dc": 9.6e-05,
+   "clipped": 0,
+   "centroidHz": 3009.8,
+   "loud100msDb": -10.95,
+   "toneBalance": {
+    "before": [
+     0.503,
+     0.185,
+     0.282,
+     0.03
+    ],
+    "after": [
+     0.18,
+     0.305,
+     0.465,
+     0.05
+    ],
+    "gainsDb": [
+     -6.6,
+     0.0,
+     0.0,
+     0.1
+    ]
+   },
+   "lufs": -22.7,
+   "truePeakDb": -1.09,
+   "problems": []
+  },
+  {
+   "id": "hitRock",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/hitRock_3.ogg",
+   "bytes": 13974,
+   "channels": 1,
+   "durationS": 0.8151,
+   "samples": 35948,
+   "sourceSamples": 36076,
+   "peak": 0.8705,
+   "rmsDb": -19.7,
+   "crestDb": 18.5,
+   "dc": -4.4e-05,
+   "clipped": 0,
+   "centroidHz": 3313.2,
+   "loud100msDb": -11.16,
+   "toneBalance": {
+    "before": [
+     0.553,
+     0.135,
+     0.28,
+     0.032
+    ],
+    "after": [
+     0.18,
+     0.247,
+     0.514,
+     0.059
+    ],
+    "gainsDb": [
+     -7.5,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -23.11,
+   "truePeakDb": -1.16,
+   "problems": []
+  },
+  {
+   "id": "stormZap",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/stormZap_1.ogg",
+   "bytes": 8304,
+   "channels": 1,
+   "durationS": 0.4271,
+   "samples": 18835,
+   "sourceSamples": 18963,
+   "peak": 0.8377,
+   "rmsDb": -21.69,
+   "crestDb": 20.15,
+   "dc": -7.2e-05,
+   "clipped": 0,
+   "centroidHz": 6301.3,
+   "loud100msDb": -15.74,
+   "toneBalance": {
+    "before": [
+     0.0,
+     0.333,
+     0.049,
+     0.617
+    ],
+    "after": [
+     0.0,
+     0.333,
+     0.049,
+     0.617
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -19.45,
+   "truePeakDb": -1.49,
+   "problems": []
+  },
+  {
+   "id": "stormZap",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/stormZap_2.ogg",
+   "bytes": 8357,
+   "channels": 1,
+   "durationS": 0.4269,
+   "samples": 18825,
+   "sourceSamples": 18953,
+   "peak": 0.833,
+   "rmsDb": -23.83,
+   "crestDb": 22.25,
+   "dc": -4.8e-05,
+   "clipped": 0,
+   "centroidHz": 6169.8,
+   "loud100msDb": -17.88,
+   "toneBalance": {
+    "before": [
+     0.001,
+     0.371,
+     0.038,
+     0.591
+    ],
+    "after": [
+     0.001,
+     0.36,
+     0.038,
+     0.601
+    ],
+    "gainsDb": [
+     0.0,
+     -0.2,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -21.65,
+   "truePeakDb": -1.36,
+   "problems": []
+  },
+  {
+   "id": "stormZap",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/stormZap_3.ogg",
+   "bytes": 8389,
+   "channels": 1,
+   "durationS": 0.4271,
+   "samples": 18835,
+   "sourceSamples": 18963,
+   "peak": 0.8402,
+   "rmsDb": -22.27,
+   "crestDb": 20.76,
+   "dc": -8.7e-05,
+   "clipped": 0,
+   "centroidHz": 6191.8,
+   "loud100msDb": -16.34,
+   "toneBalance": {
+    "before": [
+     0.017,
+     0.367,
+     0.042,
+     0.574
+    ],
+    "after": [
+     0.017,
+     0.36,
+     0.043,
+     0.58
+    ],
+    "gainsDb": [
+     0.0,
+     -0.1,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -20.05,
+   "truePeakDb": -1.22,
+   "problems": []
+  },
+  {
+   "id": "slowZap",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/slowZap_1.ogg",
+   "bytes": 9418,
+   "channels": 1,
+   "durationS": 0.5461,
+   "samples": 24085,
+   "sourceSamples": 24213,
+   "peak": 0.8644,
+   "rmsDb": -23.04,
+   "crestDb": 21.78,
+   "dc": -3e-05,
+   "clipped": 0,
+   "centroidHz": 4280.6,
+   "loud100msDb": -16.68,
+   "toneBalance": {
+    "before": [
+     0.001,
+     0.265,
+     0.464,
+     0.27
+    ],
+    "after": [
+     0.001,
+     0.265,
+     0.464,
+     0.27
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -23.02,
+   "truePeakDb": -1.21,
+   "problems": []
+  },
+  {
+   "id": "slowZap",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/slowZap_2.ogg",
+   "bytes": 9466,
+   "channels": 1,
+   "durationS": 0.5471,
+   "samples": 24129,
+   "sourceSamples": 24257,
+   "peak": 0.8742,
+   "rmsDb": -23.18,
+   "crestDb": 22.01,
+   "dc": 4.7e-05,
+   "clipped": 0,
+   "centroidHz": 4298.3,
+   "loud100msDb": -16.83,
+   "toneBalance": {
+    "before": [
+     0.0,
+     0.266,
+     0.456,
+     0.277
+    ],
+    "after": [
+     0.0,
+     0.266,
+     0.456,
+     0.277
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -23.2,
+   "truePeakDb": -1.08,
+   "problems": []
+  },
+  {
+   "id": "burnIgnite",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/burnIgnite_1.ogg",
+   "bytes": 14372,
+   "channels": 1,
+   "durationS": 0.6418,
+   "samples": 28303,
+   "sourceSamples": 28431,
+   "peak": 0.8964,
+   "rmsDb": -20.96,
+   "crestDb": 20.01,
+   "dc": -6e-06,
+   "clipped": 0,
+   "centroidHz": 5245.1,
+   "loud100msDb": -14.36,
+   "toneBalance": {
+    "before": [
+     0.01,
+     0.176,
+     0.627,
+     0.188
+    ],
+    "after": [
+     0.01,
+     0.176,
+     0.627,
+     0.188
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -20.9,
+   "truePeakDb": -0.92,
+   "problems": []
+  },
+  {
+   "id": "burnIgnite",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/burnIgnite_2.ogg",
+   "bytes": 12986,
+   "channels": 1,
+   "durationS": 0.6254,
+   "samples": 27581,
+   "sourceSamples": 27709,
+   "peak": 0.9003,
+   "rmsDb": -21.08,
+   "crestDb": 20.17,
+   "dc": 5.5e-05,
+   "clipped": 0,
+   "centroidHz": 5596.8,
+   "loud100msDb": -14.17,
+   "toneBalance": {
+    "before": [
+     0.011,
+     0.316,
+     0.49,
+     0.183
+    ],
+    "after": [
+     0.011,
+     0.316,
+     0.49,
+     0.183
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -22.05,
+   "truePeakDb": -0.91,
+   "problems": []
+  },
+  {
+   "id": "blindSwell",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/blindSwell_1.ogg",
+   "bytes": 13385,
+   "channels": 1,
+   "durationS": 1.2394,
+   "samples": 54656,
+   "sourceSamples": 54656,
+   "peak": 0.8799,
+   "rmsDb": -16.47,
+   "crestDb": 15.36,
+   "dc": 9.3e-05,
+   "clipped": 0,
+   "centroidHz": 542.3,
+   "loud100msDb": -9.82,
+   "toneBalance": {
+    "before": [
+     0.283,
+     0.621,
+     0.082,
+     0.015
+    ],
+    "after": [
+     0.251,
+     0.5,
+     0.21,
+     0.039
+    ],
+    "gainsDb": [
+     -4.6,
+     -5.1,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -15.66,
+   "truePeakDb": -1.1,
+   "problems": []
+  },
+  {
+   "id": "blast",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/blast_1.ogg",
+   "bytes": 22743,
+   "channels": 1,
+   "durationS": 1.753,
+   "samples": 77308,
+   "sourceSamples": 77308,
+   "peak": 0.7834,
+   "rmsDb": -21.78,
+   "crestDb": 19.66,
+   "dc": -6.4e-05,
+   "clipped": 0,
+   "centroidHz": 1699.8,
+   "loud100msDb": -12.35,
+   "toneBalance": {
+    "before": [
+     0.792,
+     0.16,
+     0.041,
+     0.008
+    ],
+    "after": [
+     0.3,
+     0.38,
+     0.262,
+     0.057
+    ],
+    "gainsDb": [
+     -12.3,
+     -4.3,
+     0.0,
+     0.7
+    ]
+   },
+   "lufs": -23.54,
+   "truePeakDb": -1.36,
+   "problems": []
+  },
+  {
+   "id": "blast",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/blast_2.ogg",
+   "bytes": 23827,
+   "channels": 1,
+   "durationS": 1.7523,
+   "samples": 77277,
+   "sourceSamples": 77277,
+   "peak": 0.8511,
+   "rmsDb": -22.7,
+   "crestDb": 21.3,
+   "dc": -1.7e-05,
+   "clipped": 0,
+   "centroidHz": 1663.7,
+   "loud100msDb": -13.49,
+   "toneBalance": {
+    "before": [
+     0.846,
+     0.11,
+     0.037,
+     0.007
+    ],
+    "after": [
+     0.3,
+     0.38,
+     0.269,
+     0.051
+    ],
+    "gainsDb": [
+     -13.1,
+     -3.2,
+     0.0,
+     0.1
+    ]
+   },
+   "lufs": -24.34,
+   "truePeakDb": -1.01,
+   "problems": []
+  },
+  {
+   "id": "blast",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/blast_3.ogg",
+   "bytes": 22754,
+   "channels": 1,
+   "durationS": 1.7525,
+   "samples": 77286,
+   "sourceSamples": 77286,
+   "peak": 0.7955,
+   "rmsDb": -21.88,
+   "crestDb": 19.89,
+   "dc": -3.5e-05,
+   "clipped": 0,
+   "centroidHz": 1500.9,
+   "loud100msDb": -12.42,
+   "toneBalance": {
+    "before": [
+     0.815,
+     0.132,
+     0.044,
+     0.009
+    ],
+    "after": [
+     0.3,
+     0.38,
+     0.265,
+     0.055
+    ],
+    "gainsDb": [
+     -12.2,
+     -3.2,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -23.52,
+   "truePeakDb": -1.27,
+   "problems": []
+  },
+  {
+   "id": "takedownBoom",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/takedownBoom_1.ogg",
+   "bytes": 28905,
+   "channels": 1,
+   "durationS": 2.285,
+   "samples": 100768,
+   "sourceSamples": 100768,
+   "peak": 0.8181,
+   "rmsDb": -22.83,
+   "crestDb": 21.09,
+   "dc": 0.000115,
+   "clipped": 0,
+   "centroidHz": 2124.5,
+   "loud100msDb": -12.22,
+   "toneBalance": {
+    "before": [
+     0.814,
+     0.147,
+     0.032,
+     0.008
+    ],
+    "after": [
+     0.3,
+     0.38,
+     0.257,
+     0.063
+    ],
+    "gainsDb": [
+     -13.4,
+     -5.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -24.61,
+   "truePeakDb": -1.61,
+   "problems": []
+  },
+  {
+   "id": "takedownBoom",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/takedownBoom_2.ogg",
+   "bytes": 28661,
+   "channels": 1,
+   "durationS": 2.242,
+   "samples": 98873,
+   "sourceSamples": 98873,
+   "peak": 0.7629,
+   "rmsDb": -22.22,
+   "crestDb": 19.87,
+   "dc": 3.5e-05,
+   "clipped": 0,
+   "centroidHz": 1993.3,
+   "loud100msDb": -11.99,
+   "toneBalance": {
+    "before": [
+     0.787,
+     0.165,
+     0.04,
+     0.008
+    ],
+    "after": [
+     0.3,
+     0.38,
+     0.261,
+     0.059
+    ],
+    "gainsDb": [
+     -12.3,
+     -4.5,
+     0.0,
+     0.7
+    ]
+   },
+   "lufs": -24.14,
+   "truePeakDb": -1.1,
+   "problems": []
+  },
+  {
+   "id": "deathFall",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/deathFall_1.ogg",
+   "bytes": 28064,
+   "channels": 1,
+   "durationS": 2.5299,
+   "samples": 111568,
+   "sourceSamples": 111568,
+   "peak": 0.8885,
+   "rmsDb": -14.78,
+   "crestDb": 13.75,
+   "dc": -2.7e-05,
+   "clipped": 0,
+   "centroidHz": 2384.5,
+   "loud100msDb": -9.94,
+   "toneBalance": {
+    "before": [
+     0.053,
+     0.406,
+     0.503,
+     0.038
+    ],
+    "after": [
+     0.056,
+     0.357,
+     0.537,
+     0.05
+    ],
+    "gainsDb": [
+     0.0,
+     -0.8,
+     0.0,
+     0.9
+    ]
+   },
+   "lufs": -13.65,
+   "truePeakDb": -1.01,
+   "problems": []
+  },
+  {
+   "id": "deathFall",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/deathFall_2.ogg",
+   "bytes": 27653,
+   "channels": 1,
+   "durationS": 2.4897,
+   "samples": 109794,
+   "sourceSamples": 109794,
+   "peak": 0.8224,
+   "rmsDb": -15.47,
+   "crestDb": 13.77,
+   "dc": -8.9e-05,
+   "clipped": 0,
+   "centroidHz": 2391.8,
+   "loud100msDb": -10.78,
+   "toneBalance": {
+    "before": [
+     0.084,
+     0.436,
+     0.441,
+     0.039
+    ],
+    "after": [
+     0.094,
+     0.358,
+     0.498,
+     0.05
+    ],
+    "gainsDb": [
+     0.0,
+     -1.4,
+     0.0,
+     0.5
+    ]
+   },
+   "lufs": -14.36,
+   "truePeakDb": -1.7,
+   "problems": []
+  },
+  {
+   "id": "spawnChime",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/spawnChime_1.ogg",
+   "bytes": 19554,
+   "channels": 1,
+   "durationS": 1.7225,
+   "samples": 75961,
+   "sourceSamples": 75961,
+   "peak": 0.8953,
+   "rmsDb": -17.55,
+   "crestDb": 16.59,
+   "dc": 2.6e-05,
+   "clipped": 0,
+   "centroidHz": 1656.4,
+   "loud100msDb": -10.55,
+   "toneBalance": {
+    "before": [
+     0.02,
+     0.192,
+     0.785,
+     0.004
+    ],
+    "after": [
+     0.02,
+     0.192,
+     0.785,
+     0.004
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -16.98,
+   "truePeakDb": -0.96,
+   "problems": []
+  },
+  {
+   "id": "flapSmall",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/flapSmall_1.ogg",
+   "bytes": 7206,
+   "channels": 1,
+   "durationS": 0.3432,
+   "samples": 15133,
+   "sourceSamples": 15261,
+   "peak": 0.8682,
+   "rmsDb": -15.62,
+   "crestDb": 14.39,
+   "dc": 0.002058,
+   "clipped": 0,
+   "centroidHz": 1744.6,
+   "loud100msDb": -11.29,
+   "toneBalance": {
+    "before": [
+     0.473,
+     0.249,
+     0.275,
+     0.002
+    ],
+    "after": [
+     0.18,
+     0.352,
+     0.438,
+     0.03
+    ],
+    "gainsDb": [
+     -6.2,
+     -0.5,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.23,
+   "problems": []
+  },
+  {
+   "id": "flapSmall",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/flapSmall_2.ogg",
+   "bytes": 7025,
+   "channels": 1,
+   "durationS": 0.3259,
+   "samples": 14371,
+   "sourceSamples": 14499,
+   "peak": 0.8629,
+   "rmsDb": -15.18,
+   "crestDb": 13.9,
+   "dc": 0.00046,
+   "clipped": 0,
+   "centroidHz": 1764.8,
+   "loud100msDb": -11.01,
+   "toneBalance": {
+    "before": [
+     0.438,
+     0.27,
+     0.289,
+     0.002
+    ],
+    "after": [
+     0.18,
+     0.354,
+     0.439,
+     0.028
+    ],
+    "gainsDb": [
+     -5.7,
+     -0.6,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.25,
+   "problems": []
+  },
+  {
+   "id": "flapSmall",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/flapSmall_3.ogg",
+   "bytes": 7130,
+   "channels": 1,
+   "durationS": 0.3354,
+   "samples": 14790,
+   "sourceSamples": 14918,
+   "peak": 0.8624,
+   "rmsDb": -15.41,
+   "crestDb": 14.12,
+   "dc": -9.2e-05,
+   "clipped": 0,
+   "centroidHz": 1718.1,
+   "loud100msDb": -11.0,
+   "toneBalance": {
+    "before": [
+     0.434,
+     0.282,
+     0.282,
+     0.002
+    ],
+    "after": [
+     0.18,
+     0.356,
+     0.437,
+     0.026
+    ],
+    "gainsDb": [
+     -5.7,
+     -0.9,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.28,
+   "problems": []
+  },
+  {
+   "id": "flapSmall",
+   "v": 3,
+   "kind": "sfx",
+   "file": "sfx/flapSmall_4.ogg",
+   "bytes": 6907,
+   "channels": 1,
+   "durationS": 0.341,
+   "samples": 15040,
+   "sourceSamples": 14069,
+   "peak": 0.8899,
+   "rmsDb": -15.16,
+   "crestDb": 14.15,
+   "dc": 0.000472,
+   "clipped": 0,
+   "centroidHz": 1659.9,
+   "loud100msDb": -10.82,
+   "toneBalance": {
+    "before": [
+     0.46,
+     0.283,
+     0.256,
+     0.002
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.435,
+     0.025
+    ],
+    "gainsDb": [
+     -6.4,
+     -1.3,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.01,
+   "problems": []
+  },
+  {
+   "id": "flap",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/flap_1.ogg",
+   "bytes": 8049,
+   "channels": 1,
+   "durationS": 0.4281,
+   "samples": 18879,
+   "sourceSamples": 19007,
+   "peak": 0.8412,
+   "rmsDb": -16.13,
+   "crestDb": 14.63,
+   "dc": -1e-06,
+   "clipped": 0,
+   "centroidHz": 1645.8,
+   "loud100msDb": -11.41,
+   "toneBalance": {
+    "before": [
+     0.633,
+     0.285,
+     0.082,
+     0.0
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.442,
+     0.018
+    ],
+    "gainsDb": [
+     -12.8,
+     -6.3,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -16.95,
+   "truePeakDb": -1.5,
+   "problems": []
+  },
+  {
+   "id": "flap",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/flap_2.ogg",
+   "bytes": 8284,
+   "channels": 1,
+   "durationS": 0.4526,
+   "samples": 19961,
+   "sourceSamples": 20089,
+   "peak": 0.8725,
+   "rmsDb": -16.17,
+   "crestDb": 14.99,
+   "dc": -0.000101,
+   "clipped": 0,
+   "centroidHz": 1622.3,
+   "loud100msDb": -11.4,
+   "toneBalance": {
+    "before": [
+     0.646,
+     0.27,
+     0.083,
+     0.0
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.442,
+     0.018
+    ],
+    "gainsDb": [
+     -12.8,
+     -6.0,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -16.85,
+   "truePeakDb": -1.17,
+   "problems": []
+  },
+  {
+   "id": "flap",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/flap_3.ogg",
+   "bytes": 8454,
+   "channels": 1,
+   "durationS": 0.4688,
+   "samples": 20674,
+   "sourceSamples": 20802,
+   "peak": 0.8634,
+   "rmsDb": -15.12,
+   "crestDb": 13.84,
+   "dc": 0.00026,
+   "clipped": 0,
+   "centroidHz": 1758.2,
+   "loud100msDb": -10.77,
+   "toneBalance": {
+    "before": [
+     0.474,
+     0.395,
+     0.13,
+     0.001
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.438,
+     0.022
+    ],
+    "gainsDb": [
+     -9.5,
+     -5.7,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -15.45,
+   "truePeakDb": -1.26,
+   "problems": []
+  },
+  {
+   "id": "flap",
+   "v": 3,
+   "kind": "sfx",
+   "file": "sfx/flap_4.ogg",
+   "bytes": 8245,
+   "channels": 1,
+   "durationS": 0.449,
+   "samples": 19802,
+   "sourceSamples": 19930,
+   "peak": 0.8681,
+   "rmsDb": -15.36,
+   "crestDb": 14.13,
+   "dc": 9e-06,
+   "clipped": 0,
+   "centroidHz": 1637.7,
+   "loud100msDb": -10.54,
+   "toneBalance": {
+    "before": [
+     0.728,
+     0.197,
+     0.075,
+     0.0
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.443,
+     0.017
+    ],
+    "gainsDb": [
+     -13.8,
+     -5.1,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -16.05,
+   "truePeakDb": -1.23,
+   "problems": []
+  },
+  {
+   "id": "flapLarge",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/flapLarge_1.ogg",
+   "bytes": 9602,
+   "channels": 1,
+   "durationS": 0.5866,
+   "samples": 25869,
+   "sourceSamples": 25997,
+   "peak": 0.8867,
+   "rmsDb": -14.74,
+   "crestDb": 13.69,
+   "dc": -0.000979,
+   "clipped": 0,
+   "centroidHz": 1514.1,
+   "loud100msDb": -10.07,
+   "toneBalance": {
+    "before": [
+     0.673,
+     0.301,
+     0.025,
+     0.0
+    ],
+    "after": [
+     0.281,
+     0.4,
+     0.307,
+     0.012
+    ],
+    "gainsDb": [
+     -14.6,
+     -9.6,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -14.9,
+   "truePeakDb": -1.03,
+   "problems": []
+  },
+  {
+   "id": "flapLarge",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/flapLarge_2.ogg",
+   "bytes": 9464,
+   "channels": 1,
+   "durationS": 0.5739,
+   "samples": 25307,
+   "sourceSamples": 25435,
+   "peak": 0.886,
+   "rmsDb": -14.09,
+   "crestDb": 13.04,
+   "dc": -0.001081,
+   "clipped": 0,
+   "centroidHz": 1513.1,
+   "loud100msDb": -9.58,
+   "toneBalance": {
+    "before": [
+     0.726,
+     0.247,
+     0.027,
+     0.0
+    ],
+    "after": [
+     0.281,
+     0.4,
+     0.309,
+     0.011
+    ],
+    "gainsDb": [
+     -14.7,
+     -8.5,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -14.3,
+   "truePeakDb": -1.03,
+   "problems": []
+  },
+  {
+   "id": "flapLarge",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/flapLarge_3.ogg",
+   "bytes": 9812,
+   "channels": 1,
+   "durationS": 0.6074,
+   "samples": 26786,
+   "sourceSamples": 26914,
+   "peak": 0.8825,
+   "rmsDb": -15.49,
+   "crestDb": 14.41,
+   "dc": -0.000486,
+   "clipped": 0,
+   "centroidHz": 1569.6,
+   "loud100msDb": -10.94,
+   "toneBalance": {
+    "before": [
+     0.775,
+     0.203,
+     0.022,
+     0.0
+    ],
+    "after": [
+     0.281,
+     0.4,
+     0.306,
+     0.014
+    ],
+    "gainsDb": [
+     -15.9,
+     -8.6,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -16.22,
+   "truePeakDb": -1.09,
+   "problems": []
+  },
+  {
+   "id": "flapLarge",
+   "v": 3,
+   "kind": "sfx",
+   "file": "sfx/flapLarge_4.ogg",
+   "bytes": 9483,
+   "channels": 1,
+   "durationS": 0.5749,
+   "samples": 25355,
+   "sourceSamples": 25483,
+   "peak": 0.86,
+   "rmsDb": -15.85,
+   "crestDb": 14.54,
+   "dc": 0.000251,
+   "clipped": 0,
+   "centroidHz": 1582.2,
+   "loud100msDb": -11.29,
+   "toneBalance": {
+    "before": [
+     0.723,
+     0.246,
+     0.03,
+     0.0
+    ],
+    "after": [
+     0.28,
+     0.4,
+     0.306,
+     0.014
+    ],
+    "gainsDb": [
+     -14.2,
+     -7.9,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -16.05,
+   "truePeakDb": -1.31,
+   "problems": []
+  },
+  {
+   "id": "boostStart",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/boostStart_1.ogg",
+   "bytes": 13419,
+   "channels": 1,
+   "durationS": 0.9746,
+   "samples": 42979,
+   "sourceSamples": 43107,
+   "peak": 0.8803,
+   "rmsDb": -18.26,
+   "crestDb": 17.15,
+   "dc": 2e-05,
+   "clipped": 0,
+   "centroidHz": 3196.9,
+   "loud100msDb": -11.26,
+   "toneBalance": {
+    "before": [
+     0.644,
+     0.216,
+     0.135,
+     0.005
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.407,
+     0.053
+    ],
+    "gainsDb": [
+     -10.3,
+     -2.6,
+     0.0,
+     5.6
+    ]
+   },
+   "lufs": -19.32,
+   "truePeakDb": -1.01,
+   "problems": []
+  },
+  {
+   "id": "boostStart",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/boostStart_2.ogg",
+   "bytes": 13287,
+   "channels": 1,
+   "durationS": 0.9502,
+   "samples": 41906,
+   "sourceSamples": 42034,
+   "peak": 0.8825,
+   "rmsDb": -17.76,
+   "crestDb": 16.67,
+   "dc": -5.3e-05,
+   "clipped": 0,
+   "centroidHz": 3115.3,
+   "loud100msDb": -10.9,
+   "toneBalance": {
+    "before": [
+     0.64,
+     0.209,
+     0.147,
+     0.005
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.408,
+     0.052
+    ],
+    "gainsDb": [
+     -9.9,
+     -2.1,
+     0.0,
+     5.9
+    ]
+   },
+   "lufs": -18.96,
+   "truePeakDb": -1.06,
+   "problems": []
+  },
+  {
+   "id": "roarTalon",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/roarTalon_1.ogg",
+   "bytes": 19793,
+   "channels": 1,
+   "durationS": 1.6465,
+   "samples": 72611,
+   "sourceSamples": 72611,
+   "peak": 0.8934,
+   "rmsDb": -14.6,
+   "crestDb": 13.62,
+   "dc": -7.2e-05,
+   "clipped": 0,
+   "centroidHz": 3027.2,
+   "loud100msDb": -11.05,
+   "toneBalance": {
+    "before": [
+     0.009,
+     0.446,
+     0.428,
+     0.117
+    ],
+    "after": [
+     0.011,
+     0.36,
+     0.494,
+     0.135
+    ],
+    "gainsDb": [
+     0.0,
+     -1.6,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -12.6,
+   "truePeakDb": -0.93,
+   "problems": []
+  },
+  {
+   "id": "roarTalon",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/roarTalon_2.ogg",
+   "bytes": 20349,
+   "channels": 1,
+   "durationS": 1.6786,
+   "samples": 74025,
+   "sourceSamples": 74025,
+   "peak": 0.8739,
+   "rmsDb": -13.18,
+   "crestDb": 12.01,
+   "dc": -0.000289,
+   "clipped": 0,
+   "centroidHz": 3159.5,
+   "loud100msDb": -9.77,
+   "toneBalance": {
+    "before": [
+     0.009,
+     0.41,
+     0.44,
+     0.142
+    ],
+    "after": [
+     0.01,
+     0.36,
+     0.477,
+     0.153
+    ],
+    "gainsDb": [
+     0.0,
+     -0.9,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -10.92,
+   "truePeakDb": -1.17,
+   "problems": []
+  },
+  {
+   "id": "roarBastion",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/roarBastion_1.ogg",
+   "bytes": 26987,
+   "channels": 1,
+   "durationS": 2.2952,
+   "samples": 101219,
+   "sourceSamples": 101219,
+   "peak": 0.8668,
+   "rmsDb": -16.12,
+   "crestDb": 14.88,
+   "dc": 0.000488,
+   "clipped": 0,
+   "centroidHz": 2054.2,
+   "loud100msDb": -12.47,
+   "toneBalance": {
+    "before": [
+     0.891,
+     0.078,
+     0.03,
+     0.001
+    ],
+    "after": [
+     0.25,
+     0.42,
+     0.295,
+     0.035
+    ],
+    "gainsDb": [
+     -15.5,
+     -2.7,
+     0.0,
+     6.3
+    ]
+   },
+   "lufs": -16.12,
+   "truePeakDb": -1.24,
+   "problems": []
+  },
+  {
+   "id": "roarBastion",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/roarBastion_2.ogg",
+   "bytes": 27672,
+   "channels": 1,
+   "durationS": 2.3006,
+   "samples": 101456,
+   "sourceSamples": 101456,
+   "peak": 0.8698,
+   "rmsDb": -18.16,
+   "crestDb": 16.95,
+   "dc": 0.000125,
+   "clipped": 0,
+   "centroidHz": 1892.5,
+   "loud100msDb": -14.65,
+   "toneBalance": {
+    "before": [
+     0.891,
+     0.073,
+     0.035,
+     0.001
+    ],
+    "after": [
+     0.25,
+     0.42,
+     0.298,
+     0.032
+    ],
+    "gainsDb": [
+     -14.8,
+     -1.6,
+     0.0,
+     5.5
+    ]
+   },
+   "lufs": -18.17,
+   "truePeakDb": -1.21,
+   "problems": []
+  },
+  {
+   "id": "roarTempest",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/roarTempest_1.ogg",
+   "bytes": 22360,
+   "channels": 1,
+   "durationS": 1.9577,
+   "samples": 86333,
+   "sourceSamples": 86333,
+   "peak": 0.8605,
+   "rmsDb": -15.47,
+   "crestDb": 14.16,
+   "dc": 1.6e-05,
+   "clipped": 0,
+   "centroidHz": 2462.2,
+   "loud100msDb": -11.51,
+   "toneBalance": {
+    "before": [
+     0.526,
+     0.204,
+     0.249,
+     0.021
+    ],
+    "after": [
+     0.177,
+     0.348,
+     0.425,
+     0.05
+    ],
+    "gainsDb": [
+     -7.0,
+     0.0,
+     0.0,
+     1.6
+    ]
+   },
+   "lufs": -14.54,
+   "truePeakDb": -1.31,
+   "problems": []
+  },
+  {
+   "id": "roarTempest",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/roarTempest_2.ogg",
+   "bytes": 22272,
+   "channels": 1,
+   "durationS": 1.9552,
+   "samples": 86224,
+   "sourceSamples": 86224,
+   "peak": 0.864,
+   "rmsDb": -13.86,
+   "crestDb": 12.59,
+   "dc": -4.3e-05,
+   "clipped": 0,
+   "centroidHz": 2695.5,
+   "loud100msDb": -9.37,
+   "toneBalance": {
+    "before": [
+     0.368,
+     0.434,
+     0.183,
+     0.015
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.401,
+     0.059
+    ],
+    "gainsDb": [
+     -6.5,
+     -4.2,
+     0.0,
+     2.5
+    ]
+   },
+   "lufs": -12.78,
+   "truePeakDb": -1.23,
+   "problems": []
+  },
+  {
+   "id": "roarWraith",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/roarWraith_1.ogg",
+   "bytes": 31058,
+   "channels": 1,
+   "durationS": 2.8527,
+   "samples": 125803,
+   "sourceSamples": 125803,
+   "peak": 0.8798,
+   "rmsDb": -16.03,
+   "crestDb": 14.91,
+   "dc": 7.1e-05,
+   "clipped": 0,
+   "centroidHz": 3286.5,
+   "loud100msDb": -11.27,
+   "toneBalance": {
+    "before": [
+     0.189,
+     0.188,
+     0.487,
+     0.135
+    ],
+    "after": [
+     0.18,
+     0.19,
+     0.493,
+     0.137
+    ],
+    "gainsDb": [
+     -0.3,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -14.41,
+   "truePeakDb": -1.02,
+   "problems": []
+  },
+  {
+   "id": "roarWraith",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/roarWraith_2.ogg",
+   "bytes": 30634,
+   "channels": 1,
+   "durationS": 2.8002,
+   "samples": 123490,
+   "sourceSamples": 123490,
+   "peak": 0.8947,
+   "rmsDb": -16.18,
+   "crestDb": 15.21,
+   "dc": 0.000138,
+   "clipped": 0,
+   "centroidHz": 3284.4,
+   "loud100msDb": -10.84,
+   "toneBalance": {
+    "before": [
+     0.152,
+     0.24,
+     0.48,
+     0.129
+    ],
+    "after": [
+     0.152,
+     0.24,
+     0.48,
+     0.129
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -14.64,
+   "truePeakDb": -0.96,
+   "problems": []
+  },
+  {
+   "id": "hitConfirm",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/hitConfirm_1.ogg",
+   "bytes": 5854,
+   "channels": 2,
+   "durationS": 0.1171,
+   "samples": 5164,
+   "sourceSamples": 5292,
+   "peak": 0.8506,
+   "rmsDb": -19.99,
+   "crestDb": 18.58,
+   "dc": 0.00021,
+   "clipped": 0,
+   "centroidHz": 2160.3,
+   "loud100msDb": -19.3,
+   "toneBalance": {
+    "before": [
+     0.089,
+     0.06,
+     0.7,
+     0.151
+    ],
+    "after": [
+     0.089,
+     0.06,
+     0.7,
+     0.151
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.3,
+   "problems": []
+  },
+  {
+   "id": "hitConfirm",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/hitConfirm_2.ogg",
+   "bytes": 5861,
+   "channels": 2,
+   "durationS": 0.1171,
+   "samples": 5164,
+   "sourceSamples": 5292,
+   "peak": 0.8653,
+   "rmsDb": -17.95,
+   "crestDb": 16.69,
+   "dc": 0.000181,
+   "clipped": 0,
+   "centroidHz": 2219.7,
+   "loud100msDb": -17.27,
+   "toneBalance": {
+    "before": [
+     0.044,
+     0.038,
+     0.766,
+     0.153
+    ],
+    "after": [
+     0.044,
+     0.038,
+     0.766,
+     0.153
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.26,
+   "problems": []
+  },
+  {
+   "id": "takedownConfirm",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/takedownConfirm_1.ogg",
+   "bytes": 33768,
+   "channels": 2,
+   "durationS": 1.9295,
+   "samples": 85092,
+   "sourceSamples": 85092,
+   "peak": 0.8917,
+   "rmsDb": -15.43,
+   "crestDb": 14.43,
+   "dc": 8.4e-05,
+   "clipped": 0,
+   "centroidHz": 1515.9,
+   "loud100msDb": -9.99,
+   "toneBalance": {
+    "before": [
+     0.264,
+     0.264,
+     0.461,
+     0.01
+    ],
+    "after": [
+     0.198,
+     0.285,
+     0.497,
+     0.02
+    ],
+    "gainsDb": [
+     -1.6,
+     0.0,
+     0.0,
+     2.6
+    ]
+   },
+   "lufs": -12.09,
+   "truePeakDb": -0.98,
+   "problems": []
+  },
+  {
+   "id": "assist",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/assist_1.ogg",
+   "bytes": 20118,
+   "channels": 2,
+   "durationS": 1.3134,
+   "samples": 57922,
+   "sourceSamples": 57922,
+   "peak": 0.8798,
+   "rmsDb": -12.9,
+   "crestDb": 11.79,
+   "dc": 3.4e-05,
+   "clipped": 0,
+   "centroidHz": 985.3,
+   "loud100msDb": -9.24,
+   "toneBalance": {
+    "before": [
+     0.0,
+     0.063,
+     0.932,
+     0.005
+    ],
+    "after": [
+     0.0,
+     0.063,
+     0.932,
+     0.005
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -8.94,
+   "truePeakDb": -1.09,
+   "problems": []
+  },
+  {
+   "id": "objective",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/objective_1.ogg",
+   "bytes": 25953,
+   "channels": 2,
+   "durationS": 1.4118,
+   "samples": 62259,
+   "sourceSamples": 62259,
+   "peak": 0.8902,
+   "rmsDb": -13.72,
+   "crestDb": 12.71,
+   "dc": -7e-06,
+   "clipped": 0,
+   "centroidHz": 1060.9,
+   "loud100msDb": -9.8,
+   "toneBalance": {
+    "before": [
+     0.0,
+     0.41,
+     0.587,
+     0.002
+    ],
+    "after": [
+     0.0,
+     0.4,
+     0.598,
+     0.002
+    ],
+    "gainsDb": [
+     0.0,
+     -0.2,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -9.74,
+   "truePeakDb": -1.01,
+   "problems": []
+  },
+  {
+   "id": "heartbeat",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/heartbeat_1.ogg",
+   "bytes": 7362,
+   "channels": 2,
+   "durationS": 0.521,
+   "samples": 22974,
+   "sourceSamples": 23102,
+   "peak": 0.8449,
+   "rmsDb": -15.03,
+   "crestDb": 13.57,
+   "dc": 0.000202,
+   "clipped": 0,
+   "centroidHz": 210.0,
+   "loud100msDb": -11.03,
+   "toneBalance": {
+    "before": [
+     0.38,
+     0.607,
+     0.013,
+     0.0
+    ],
+    "after": [
+     0.332,
+     0.6,
+     0.068,
+     0.0
+    ],
+    "gainsDb": [
+     -7.7,
+     -7.2,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -13.93,
+   "truePeakDb": -1.46,
+   "problems": []
+  },
+  {
+   "id": "heartbeat",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/heartbeat_2.ogg",
+   "bytes": 7508,
+   "channels": 2,
+   "durationS": 0.5225,
+   "samples": 23041,
+   "sourceSamples": 23169,
+   "peak": 0.8621,
+   "rmsDb": -14.25,
+   "crestDb": 12.96,
+   "dc": 0.000153,
+   "clipped": 0,
+   "centroidHz": 221.3,
+   "loud100msDb": -10.25,
+   "toneBalance": {
+    "before": [
+     0.337,
+     0.652,
+     0.012,
+     0.0
+    ],
+    "after": [
+     0.337,
+     0.6,
+     0.063,
+     0.0
+    ],
+    "gainsDb": [
+     -7.3,
+     -7.7,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -13.1,
+   "truePeakDb": -1.29,
+   "problems": []
+  },
+  {
+   "id": "windLoop",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/windLoop_1.ogg",
+   "bytes": 136173,
+   "channels": 2,
+   "durationS": 6.5,
+   "samples": 286650,
+   "sourceSamples": 286650,
+   "peak": 0.835,
+   "rmsDb": -18.52,
+   "crestDb": 16.95,
+   "dc": 0.000194,
+   "clipped": 0,
+   "centroidHz": 4880.6,
+   "loud100msDb": -16.16,
+   "toneBalance": {
+    "before": [
+     0.842,
+     0.05,
+     0.095,
+     0.013
+    ],
+    "after": [
+     0.18,
+     0.258,
+     0.496,
+     0.066
+    ],
+    "gainsDb": [
+     -13.9,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -13.46,
+   "truePeakDb": -1.57,
+   "loop": {
+    "startS": 0.25,
+    "endS": 6.25,
+    "seamErrorDb": -20.8,
+    "seamStep": 0.04626,
+    "typicalStep999": 0.1236,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "boostLoop",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/boostLoop_1.ogg",
+   "bytes": 90652,
+   "channels": 2,
+   "durationS": 4.5,
+   "samples": 198450,
+   "sourceSamples": 198450,
+   "peak": 0.8174,
+   "rmsDb": -18.81,
+   "crestDb": 17.06,
+   "dc": 0.000208,
+   "clipped": 0,
+   "centroidHz": 3916.2,
+   "loud100msDb": -16.84,
+   "toneBalance": {
+    "before": [
+     0.31,
+     0.459,
+     0.132,
+     0.099
+    ],
+    "after": [
+     0.18,
+     0.36,
+     0.262,
+     0.198
+    ],
+    "gainsDb": [
+     -5.3,
+     -4.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -12.66,
+   "truePeakDb": -1.73,
+   "loop": {
+    "startS": 0.25,
+    "endS": 4.25,
+    "seamErrorDb": -18.9,
+    "seamStep": 0.06994,
+    "typicalStep999": 0.13267,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "diveLoop",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/diveLoop_1.ogg",
+   "bytes": 94402,
+   "channels": 2,
+   "durationS": 4.5,
+   "samples": 198450,
+   "sourceSamples": 198450,
+   "peak": 0.8752,
+   "rmsDb": -18.33,
+   "crestDb": 17.18,
+   "dc": 0.000848,
+   "clipped": 0,
+   "centroidHz": 5333.5,
+   "loud100msDb": -16.79,
+   "toneBalance": {
+    "before": [
+     0.794,
+     0.024,
+     0.046,
+     0.136
+    ],
+    "after": [
+     0.18,
+     0.096,
+     0.183,
+     0.541
+    ],
+    "gainsDb": [
+     -12.5,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -10.48,
+   "truePeakDb": -1.16,
+   "loop": {
+    "startS": 0.25,
+    "endS": 4.25,
+    "seamErrorDb": -12.7,
+    "seamStep": 0.05594,
+    "typicalStep999": 0.21402,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "stormLoop",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/stormLoop_1.ogg",
+   "bytes": 195393,
+   "channels": 2,
+   "durationS": 5.5,
+   "samples": 242550,
+   "sourceSamples": 242550,
+   "peak": 0.8254,
+   "rmsDb": -22.18,
+   "crestDb": 20.52,
+   "dc": 4e-06,
+   "clipped": 0,
+   "centroidHz": 3647.7,
+   "loud100msDb": -20.25,
+   "toneBalance": {
+    "before": [
+     0.713,
+     0.114,
+     0.128,
+     0.046
+    ],
+    "after": [
+     0.25,
+     0.298,
+     0.333,
+     0.119
+    ],
+    "gainsDb": [
+     -8.7,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -16.81,
+   "truePeakDb": -1.64,
+   "loop": {
+    "startS": 0.25,
+    "endS": 5.25,
+    "seamErrorDb": -26.1,
+    "seamStep": 0.02452,
+    "typicalStep999": 0.13753,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "countdownTick",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/countdownTick_1.ogg",
+   "bytes": 14615,
+   "channels": 2,
+   "durationS": 0.86,
+   "samples": 37928,
+   "sourceSamples": 38056,
+   "peak": 0.8909,
+   "rmsDb": -16.34,
+   "crestDb": 15.34,
+   "dc": -6.7e-05,
+   "clipped": 0,
+   "centroidHz": 1011.6,
+   "loud100msDb": -11.94,
+   "toneBalance": {
+    "before": [
+     0.0,
+     0.478,
+     0.52,
+     0.001
+    ],
+    "after": [
+     0.0,
+     0.478,
+     0.52,
+     0.001
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -13.9,
+   "truePeakDb": -1.0,
+   "problems": []
+  },
+  {
+   "id": "countdownGo",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/countdownGo_1.ogg",
+   "bytes": 51484,
+   "channels": 2,
+   "durationS": 2.1643,
+   "samples": 95446,
+   "sourceSamples": 95446,
+   "peak": 0.8751,
+   "rmsDb": -18.74,
+   "crestDb": 17.58,
+   "dc": 0.000158,
+   "clipped": 0,
+   "centroidHz": 5621.1,
+   "loud100msDb": -13.05,
+   "toneBalance": {
+    "before": [
+     0.386,
+     0.168,
+     0.438,
+     0.009
+    ],
+    "after": [
+     0.216,
+     0.209,
+     0.545,
+     0.03
+    ],
+    "gainsDb": [
+     -3.5,
+     0.0,
+     0.0,
+     4.5
+    ]
+   },
+   "lufs": -13.88,
+   "truePeakDb": -0.97,
+   "problems": []
+  },
+  {
+   "id": "roundEnd",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/roundEnd_1.ogg",
+   "bytes": 45586,
+   "channels": 2,
+   "durationS": 2.4128,
+   "samples": 106403,
+   "sourceSamples": 106403,
+   "peak": 0.8915,
+   "rmsDb": -14.37,
+   "crestDb": 13.38,
+   "dc": -2e-06,
+   "clipped": 0,
+   "centroidHz": 3324.1,
+   "loud100msDb": -10.74,
+   "toneBalance": {
+    "before": [
+     0.41,
+     0.337,
+     0.251,
+     0.001
+    ],
+    "after": [
+     0.22,
+     0.36,
+     0.404,
+     0.016
+    ],
+    "gainsDb": [
+     -4.8,
+     -1.8,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -11.09,
+   "truePeakDb": -1.0,
+   "problems": []
+  },
+  {
+   "id": "uiHover",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/uiHover_1.ogg",
+   "bytes": 5722,
+   "channels": 2,
+   "durationS": 0.0671,
+   "samples": 2959,
+   "sourceSamples": 3087,
+   "peak": 0.8603,
+   "rmsDb": -18.08,
+   "crestDb": 16.77,
+   "dc": 0.000568,
+   "clipped": 0,
+   "centroidHz": 4861.2,
+   "loud100msDb": -18.08,
+   "toneBalance": {
+    "before": [
+     0.236,
+     0.161,
+     0.377,
+     0.226
+    ],
+    "after": [
+     0.236,
+     0.161,
+     0.377,
+     0.226
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.29,
+   "problems": []
+  },
+  {
+   "id": "uiHover",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/uiHover_2.ogg",
+   "bytes": 5714,
+   "channels": 2,
+   "durationS": 0.0671,
+   "samples": 2959,
+   "sourceSamples": 3087,
+   "peak": 0.8329,
+   "rmsDb": -18.19,
+   "crestDb": 16.6,
+   "dc": -0.000449,
+   "clipped": 0,
+   "centroidHz": 4739.9,
+   "loud100msDb": -18.19,
+   "toneBalance": {
+    "before": [
+     0.259,
+     0.169,
+     0.382,
+     0.189
+    ],
+    "after": [
+     0.259,
+     0.169,
+     0.382,
+     0.189
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.44,
+   "problems": []
+  },
+  {
+   "id": "uiClick",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/uiClick_1.ogg",
+   "bytes": 6271,
+   "channels": 2,
+   "durationS": 0.1611,
+   "samples": 7104,
+   "sourceSamples": 6174,
+   "peak": 0.8514,
+   "rmsDb": -19.03,
+   "crestDb": 17.64,
+   "dc": -0.000497,
+   "clipped": 0,
+   "centroidHz": 1335.0,
+   "loud100msDb": -16.96,
+   "toneBalance": {
+    "before": [
+     0.158,
+     0.147,
+     0.677,
+     0.018
+    ],
+    "after": [
+     0.158,
+     0.147,
+     0.677,
+     0.018
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.35,
+   "problems": []
+  },
+  {
+   "id": "uiClick",
+   "v": 1,
+   "kind": "sfx",
+   "file": "sfx/uiClick_2.ogg",
+   "bytes": 6269,
+   "channels": 2,
+   "durationS": 0.1611,
+   "samples": 7104,
+   "sourceSamples": 6174,
+   "peak": 0.7741,
+   "rmsDb": -19.27,
+   "crestDb": 17.05,
+   "dc": 0.000101,
+   "clipped": 0,
+   "centroidHz": 1277.9,
+   "loud100msDb": -17.2,
+   "toneBalance": {
+    "before": [
+     0.211,
+     0.199,
+     0.575,
+     0.016
+    ],
+    "after": [
+     0.211,
+     0.199,
+     0.575,
+     0.016
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.99,
+   "problems": []
+  },
+  {
+   "id": "uiClick",
+   "v": 2,
+   "kind": "sfx",
+   "file": "sfx/uiClick_3.ogg",
+   "bytes": 6201,
+   "channels": 2,
+   "durationS": 0.1371,
+   "samples": 6046,
+   "sourceSamples": 6174,
+   "peak": 0.8788,
+   "rmsDb": -18.1,
+   "crestDb": 16.98,
+   "dc": 0.000329,
+   "clipped": 0,
+   "centroidHz": 1648.7,
+   "loud100msDb": -16.74,
+   "toneBalance": {
+    "before": [
+     0.034,
+     0.09,
+     0.853,
+     0.023
+    ],
+    "after": [
+     0.034,
+     0.09,
+     0.853,
+     0.023
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.11,
+   "problems": []
+  },
+  {
+   "id": "uiReady",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/uiReady_1.ogg",
+   "bytes": 21536,
+   "channels": 2,
+   "durationS": 1.4298,
+   "samples": 63054,
+   "sourceSamples": 63054,
+   "peak": 0.8986,
+   "rmsDb": -14.38,
+   "crestDb": 13.45,
+   "dc": 7e-06,
+   "clipped": 0,
+   "centroidHz": 1139.6,
+   "loud100msDb": -10.75,
+   "toneBalance": {
+    "before": [
+     0.0,
+     0.067,
+     0.927,
+     0.006
+    ],
+    "after": [
+     0.0,
+     0.067,
+     0.927,
+     0.006
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": -10.4,
+   "truePeakDb": -0.93,
+   "problems": []
+  },
+  {
+   "id": "uiError",
+   "v": 0,
+   "kind": "sfx",
+   "file": "sfx/uiError_1.ogg",
+   "bytes": 8176,
+   "channels": 2,
+   "durationS": 0.3405,
+   "samples": 15017,
+   "sourceSamples": 15145,
+   "peak": 0.8792,
+   "rmsDb": -12.98,
+   "crestDb": 11.86,
+   "dc": 0.001058,
+   "clipped": 0,
+   "centroidHz": 1593.2,
+   "loud100msDb": -10.27,
+   "toneBalance": {
+    "before": [
+     0.006,
+     0.674,
+     0.321,
+     0.0
+    ],
+    "after": [
+     0.006,
+     0.674,
+     0.321,
+     0.0
+    ],
+    "gainsDb": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "lufs": null,
+   "truePeakDb": -1.12,
+   "problems": []
+  },
+  {
+   "id": "victory",
+   "v": 0,
+   "kind": "sting",
+   "file": "music/victory.ogg",
+   "bytes": 115805,
+   "channels": 2,
+   "durationS": 6.1142,
+   "samples": 269635,
+   "sourceSamples": 269635,
+   "peak": 0.5057,
+   "rmsDb": -19.92,
+   "crestDb": 14.0,
+   "dc": 2.1e-05,
+   "clipped": 0,
+   "centroidHz": 3149.7,
+   "loud100msDb": -15.61,
+   "toneBalance": {
+    "before": [
+     0.222,
+     0.225,
+     0.544,
+     0.009
+    ],
+    "after": [
+     0.137,
+     0.244,
+     0.589,
+     0.03
+    ],
+    "gainsDb": [
+     -2.4,
+     0.0,
+     0.0,
+     4.7
+    ]
+   },
+   "lufs": -16.02,
+   "truePeakDb": -5.92,
+   "problems": []
+  },
+  {
+   "id": "defeat",
+   "v": 0,
+   "kind": "sting",
+   "file": "music/defeat.ogg",
+   "bytes": 115787,
+   "channels": 2,
+   "durationS": 7.1234,
+   "samples": 314144,
+   "sourceSamples": 314144,
+   "peak": 0.6308,
+   "rmsDb": -18.55,
+   "crestDb": 14.55,
+   "dc": -9.5e-05,
+   "clipped": 0,
+   "centroidHz": 2398.7,
+   "loud100msDb": -14.55,
+   "toneBalance": {
+    "before": [
+     0.545,
+     0.259,
+     0.195,
+     0.0
+    ],
+    "after": [
+     0.2,
+     0.4,
+     0.395,
+     0.005
+    ],
+    "gainsDb": [
+     -7.4,
+     -1.2,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -16.03,
+   "truePeakDb": -4.0,
+   "problems": []
+  },
+  {
+   "id": "windBed",
+   "v": 0,
+   "kind": "ambience",
+   "file": "ambience/windBed.ogg",
+   "bytes": 365236,
+   "channels": 2,
+   "durationS": 25.0,
+   "samples": 1102500,
+   "sourceSamples": 1102500,
+   "peak": 0.3056,
+   "rmsDb": -28.47,
+   "crestDb": 18.17,
+   "dc": 5.8e-05,
+   "clipped": 0,
+   "centroidHz": 2631.6,
+   "loud100msDb": -25.51,
+   "toneBalance": {
+    "before": [
+     0.922,
+     0.047,
+     0.03,
+     0.001
+    ],
+    "after": [
+     0.1,
+     0.3,
+     0.557,
+     0.043
+    ],
+    "gainsDb": [
+     -22.3,
+     -4.5,
+     0.0,
+     5.4
+    ]
+   },
+   "lufs": -23.17,
+   "truePeakDb": -10.27,
+   "loop": {
+    "startS": 0.5,
+    "endS": 24.5,
+    "seamErrorDb": -28.5,
+    "seamStep": 0.00652,
+    "typicalStep999": 0.02169,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "thunder",
+   "v": 0,
+   "kind": "ambience",
+   "file": "ambience/thunder.ogg",
+   "bytes": 215763,
+   "channels": 2,
+   "durationS": 37.0,
+   "samples": 1631700,
+   "sourceSamples": 1631700,
+   "peak": 0.5226,
+   "rmsDb": -31.25,
+   "crestDb": 25.61,
+   "dc": 1.5e-05,
+   "clipped": 0,
+   "centroidHz": 786.9,
+   "loud100msDb": -18.48,
+   "toneBalance": {
+    "before": [
+     0.833,
+     0.164,
+     0.003,
+     0.0
+    ],
+    "after": [
+     0.308,
+     0.4,
+     0.292,
+     0.0
+    ],
+    "gainsDb": [
+     -25.0,
+     -16.8,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -23.08,
+   "truePeakDb": -5.64,
+   "loop": {
+    "startS": 0.5,
+    "endS": 36.5,
+    "seamErrorDb": -180.0,
+    "seamStep": 0.0,
+    "typicalStep999": 0.0064,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "aerie",
+   "v": 0,
+   "kind": "ambience",
+   "file": "ambience/aerie.ogg",
+   "bytes": 402763,
+   "channels": 2,
+   "durationS": 25.0,
+   "samples": 1102500,
+   "sourceSamples": 1102500,
+   "peak": 0.3927,
+   "rmsDb": -28.42,
+   "crestDb": 20.31,
+   "dc": -2e-06,
+   "clipped": 0,
+   "centroidHz": 2035.2,
+   "loud100msDb": -25.12,
+   "toneBalance": {
+    "before": [
+     0.141,
+     0.585,
+     0.27,
+     0.004
+    ],
+    "after": [
+     0.08,
+     0.34,
+     0.547,
+     0.033
+    ],
+    "gainsDb": [
+     -5.5,
+     -5.4,
+     0.0,
+     5.6
+    ]
+   },
+   "lufs": -23.1,
+   "truePeakDb": -8.1,
+   "loop": {
+    "startS": 0.5,
+    "endS": 24.5,
+    "seamErrorDb": -25.8,
+    "seamStep": 0.02143,
+    "typicalStep999": 0.03607,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "lobby",
+   "v": 0,
+   "kind": "music",
+   "file": "music/lobby.ogg",
+   "bytes": 977903,
+   "channels": 2,
+   "durationS": 59.1818,
+   "samples": 2609918,
+   "sourceSamples": 2609918,
+   "peak": 0.4445,
+   "rmsDb": -18.53,
+   "crestDb": 11.48,
+   "dc": 8e-06,
+   "clipped": 0,
+   "centroidHz": 1867.5,
+   "loud100msDb": -15.04,
+   "toneBalance": {
+    "before": [
+     0.177,
+     0.378,
+     0.444,
+     0.002
+    ],
+    "after": [
+     0.12,
+     0.339,
+     0.524,
+     0.016
+    ],
+    "gainsDb": [
+     -2.4,
+     -1.2,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -16.02,
+   "truePeakDb": -6.99,
+   "loop": {
+    "startS": 0.5,
+    "endS": 58.68181405895692,
+    "seamErrorDb": -33.3,
+    "seamStep": 0.01408,
+    "typicalStep999": 0.04927,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "matchLow",
+   "v": 0,
+   "kind": "music",
+   "file": "music/matchLow.ogg",
+   "bytes": 788289,
+   "channels": 2,
+   "durationS": 49.0,
+   "samples": 2160900,
+   "sourceSamples": 2160900,
+   "peak": 0.3549,
+   "rmsDb": -20.49,
+   "crestDb": 11.49,
+   "dc": -1.9e-05,
+   "clipped": 0,
+   "centroidHz": 1926.8,
+   "loud100msDb": -17.13,
+   "toneBalance": {
+    "before": [
+     0.217,
+     0.414,
+     0.368,
+     0.0
+    ],
+    "after": [
+     0.14,
+     0.36,
+     0.495,
+     0.005
+    ],
+    "gainsDb": [
+     -3.2,
+     -1.9,
+     0.0,
+     9.0
+    ]
+   },
+   "lufs": -18.02,
+   "truePeakDb": -8.99,
+   "loop": {
+    "startS": 0.5,
+    "endS": 48.5,
+    "seamErrorDb": -26.8,
+    "seamStep": 0.02275,
+    "typicalStep999": 0.03751,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  },
+  {
+   "id": "matchHigh",
+   "v": 0,
+   "kind": "music",
+   "file": "music/matchHigh.ogg",
+   "bytes": 935146,
+   "channels": 2,
+   "durationS": 49.0,
+   "samples": 2160900,
+   "sourceSamples": 2160900,
+   "peak": 0.4792,
+   "rmsDb": -18.58,
+   "crestDb": 12.19,
+   "dc": 6.8e-05,
+   "clipped": 0,
+   "centroidHz": 3920.9,
+   "loud100msDb": -13.65,
+   "toneBalance": {
+    "before": [
+     0.374,
+     0.276,
+     0.347,
+     0.003
+    ],
+    "after": [
+     0.16,
+     0.331,
+     0.474,
+     0.035
+    ],
+    "gainsDb": [
+     -5.0,
+     -0.6,
+     0.0,
+     8.8
+    ]
+   },
+   "lufs": -16.0,
+   "truePeakDb": -6.35,
+   "loop": {
+    "startS": 0.5,
+    "endS": 48.5,
+    "seamErrorDb": -20.4,
+    "seamStep": 0.03688,
+    "typicalStep999": 0.14307,
+    "decodeLagSamples": 0
+   },
+   "problems": []
+  }
+ ]
+}

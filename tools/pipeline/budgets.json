@@ -1,0 +1,32 @@
+{
+  "//": "JSON mirror of src/shared/manifests.ts (ASSET_BUDGETS), world-view.ts (DRAGON_ANIM_CLIPS), classes.ts and match.ts ids, for the Node pipeline tools. tests/tools/budgets.test.ts fails when this drifts from the TypeScript source.",
+  "assetBudgets": {
+    "dragonLodTriangles": [8000, 3000, 1000],
+    "dragonMaxTextureSize": 1024,
+    "dragonMaxFileBytes": 2097152,
+    "dragonMaxBones": 24,
+    "heroRockLodTriangles": [8000, 3000, 800],
+    "heroRockMaxFileBytes": 1048576,
+    "propMaxTriangles": 3000,
+    "propMaxFileBytes": 307200,
+    "skyPanoramaMaxFileBytes": 6291456,
+    "mapMaxDownloadBytes": 62914560,
+    "mapMaxAudioBytes": 15728640
+  },
+  "dragonAnimClips": [
+    "glide",
+    "flap",
+    "boost",
+    "dive",
+    "bank_l",
+    "bank_r",
+    "hover",
+    "roar",
+    "land",
+    "takeoff",
+    "hit",
+    "death_fall"
+  ],
+  "dragonClassIds": ["talon", "bastion", "tempest", "wraith"],
+  "mapIds": ["shattered-spires", "emberfall-caldera"]
+}

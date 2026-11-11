@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "source": "tools/textures/make_textures.py",
+  "textures": [
+    {
+      "id": "stone",
+      "url": "textures/stone.ktx2",
+      "size": 1024,
+      "colorSpace": "srgb",
+      "tileMetres": 64,
+      "meanLinear": [
+        0.1123,
+        0.1867,
+        0.2998
+      ],
+      "use": "rock detail / triplanar albedo",
+      "bytes": 212969
+    },
+    {
+      "id": "cliff",
+      "url": "textures/cliff.ktx2",
+      "size": 1024,
+      "colorSpace": "srgb",
+      "tileMetres": 64,
+      "meanLinear": [
+        0.1192,
+        0.1721,
+        0.2545
+      ],
+      "use": "rock sides (strata), V along world up",
+      "bytes": 211190
+    },
+    {
+      "id": "moss",
+      "url": "textures/moss.ktx2",
+      "size": 1024,
+      "colorSpace": "srgb",
+      "tileMetres": 24,
+      "meanLinear": [
+        0.055,
+        0.2394,
+        0.1736
+      ],
+      "use": "where _MASKS.g (moss) is set",
+      "bytes": 230005
+    },
+    {
+      "id": "masonry",
+      "url": "textures/masonry.ktx2",
+      "size": 1024,
+      "colorSpace": "srgb",
+      "tileMetres": 12,
+      "meanLinear": [
+        0.1606,
+        0.2062,
+        0.278
+      ],
+      "use": "props: worked ruin stone",
+      "bytes": 184155
+    },
+    {
+      "id": "brush",
+      "url": "textures/brush.ktx2",
+      "size": 1024,
+      "colorSpace": "linear",
+      "tileMetres": 32,
+      "meanLinear": [
+        0.2191,
+        0.2191,
+        0.2191
+      ],
+      "use": "greyscale brush-stroke detail, mean 0.5",
+      "bytes": 974544
+    }
+  ]
+}

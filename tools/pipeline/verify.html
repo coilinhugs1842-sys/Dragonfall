@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dragonfall asset load check (dev only)</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #1b2233;
+        color: #e8e2d4;
+        font:
+          12px/1.4 ui-monospace,
+          Consolas,
+          monospace;
+      }
+      canvas {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #log {
+        position: fixed;
+        left: 8px;
+        top: 8px;
+        max-width: 46%;
+        max-height: 96%;
+        overflow: auto;
+        white-space: pre-wrap;
+        background: rgb(0 0 0 / 45%);
+        padding: 6px 8px;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <pre id="log">loading...</pre>
+    <script type="module" src="./verify.ts"></script>
+  </body>
+</html>
