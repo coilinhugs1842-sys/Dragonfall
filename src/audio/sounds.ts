@@ -1,8 +1,9 @@
 /**
- * The sound library (T-3.8): every sound the game can play, as one data table. Each entry has
- * its mix numbers (gain, priority, instance cap, retrigger gap, audible range) and, for now, a
- * procedural generator that renders a placeholder once at init. Phase 4 puts a real `.ogg` in
- * `url`; the engine then decodes that instead and nothing else changes.
+ * The sound library (T-3.8, T-4.8): every sound the game can play, as one data table. Each entry
+ * has its mix numbers (gain, priority, instance cap, retrigger gap, audible range) and a
+ * procedural generator. The real sounds are `.ogg` files listed in
+ * `public/assets/audio/manifest.json` under the same ids (see `manifest.ts`); the generator is
+ * the fallback the engine plays until a sound's files are decoded, or for good when they fail.
  *
  * Generators are pure and deterministic (`renderSound` seeds each from its index). They write
  * layers into a zeroed buffer; `renderSound` then trims clicks, loops and normalises.
@@ -62,8 +63,6 @@ export interface SoundDef {
   maxDistanceM: number;
   /** Each play is repitched by up to this fraction either way, so repeats do not machine-gun. */
   pitchJitter: number;
-  /** Phase 4: the real asset. null = use the procedural placeholder. */
-  readonly url: string | null;
   readonly generate: SoundGenerator;
 }
 
@@ -83,7 +82,6 @@ function sound(
     refDistanceM: 30,
     maxDistanceM: 700,
     pitchJitter: 0.06,
-    url: null,
     generate,
     ...values,
   };
@@ -120,6 +118,16 @@ const MAJOR_VALUES = {
   refDistanceM: 60,
   maxDistanceM: 1200,
   minRetriggerS: 0.1,
+} as const;
+
+/** Wing beats: constant, quiet, short-range detail. */
+const FLAP_VALUES = {
+  priority: PRIORITY_DETAIL,
+  maxInstances: 3,
+  minRetriggerS: 0.08,
+  refDistanceM: 14,
+  maxDistanceM: 160,
+  pitchJitter: 0.12,
 } as const;
 
 export const SOUND_DEFS = {
@@ -382,15 +390,87 @@ export const SOUND_DEFS = {
       addNoise(o, sr, r, 0, 0.32, 1, 'bp', 320, 110, 0.8, 0.09, 2.5);
       addNoise(o, sr, r, 0.02, 0.2, 0.3, 'lp', 900, 300, 0.7, 0.06, 2);
     },
-    {
-      gain: 0.4,
-      priority: PRIORITY_DETAIL,
-      maxInstances: 3,
-      minRetriggerS: 0.08,
-      refDistanceM: 14,
-      maxDistanceM: 160,
-      pitchJitter: 0.12,
+    { ...FLAP_VALUES, gain: 0.4 },
+  ),
+
+  flapSmall: sound(
+    0.24,
+    (o, sr, r) => {
+      addNoise(o, sr, r, 0, 0.24, 1, 'bp', 520, 180, 0.8, 0.06, 2.5);
+      addNoise(o, sr, r, 0.01, 0.14, 0.3, 'lp', 1400, 500, 0.7, 0.04, 2);
     },
+    { ...FLAP_VALUES, gain: 0.32, refDistanceM: 12, maxDistanceM: 140 },
+  ),
+  flapLarge: sound(
+    0.44,
+    (o, sr, r) => {
+      addNoise(o, sr, r, 0, 0.44, 1, 'bp', 240, 70, 0.8, 0.13, 2.5);
+      addNoise(o, sr, r, 0.03, 0.26, 0.3, 'lp', 700, 220, 0.7, 0.08, 2);
+    },
+    { ...FLAP_VALUES, gain: 0.5, refDistanceM: 18, maxDistanceM: 200 },
+  ),
+  boostStart: sound(
+    0.7,
+    (o, sr, r) => {
+      addNoise(o, sr, r, 0, 0.3, 0.9, 'bp', 250, 3000, 1.3, 0.18, 0);
+      addNoise(o, sr, r, 0.22, 0.48, 0.6, 'bp', 2600, 500, 1.2, 0.04, 2.5);
+      addTone(o, sr, 0, 0.3, 0.5, 130, 50, 0.004, 4);
+    },
+    { gain: 0.5, maxInstances: 2, minRetriggerS: 0.3, maxDistanceM: 400 },
+  ),
+  veilOut: sound(
+    0.6,
+    (o, sr, r) => {
+      addTone(o, sr, 0, 0.5, 0.35, 330, 660, 0.02, 3);
+      addNoise(o, sr, r, 0, 0.6, 0.7, 'bp', 900, 5000, 1.2, 0.03, 2.5);
+    },
+    { gain: 0.5, maxDistanceM: 350 },
+  ),
+  deathFall: sound(
+    1.8,
+    (o, sr, r) => {
+      addTone(o, sr, 0, 1.8, 0.5, 300, 80, 0.05, 1.2, 28, 0.6, 3);
+      addNoise(o, sr, r, 0, 1.8, 0.5, 'bp', 2600, 700, 5, 0.6, 1);
+      addTail(o, sr, 0.25, 0.9);
+    },
+    { ...MAJOR_VALUES, gain: 0.7, maxInstances: 2 },
+  ),
+  roarTalon: sound(
+    1.2,
+    (o, sr, r) => {
+      addTone(o, sr, 0, 1.2, 0.6, 190, 150, 0.12, 1.2, 55, 0.5, 5);
+      addNoise(o, sr, r, 0, 1.2, 0.6, 'bp', 1400, 2400, 3, 0.15, 1.2);
+      addTail(o, sr, 0.25, 0.8);
+    },
+    { ...MAJOR_VALUES, gain: 0.7 },
+  ),
+  roarBastion: sound(
+    1.7,
+    (o, sr, r) => {
+      addTone(o, sr, 0, 1.7, 0.7, 62, 46, 0.2, 1, 23, 0.6, 6);
+      addNoise(o, sr, r, 0, 1.7, 0.6, 'bp', 400, 800, 2.5, 0.25, 1);
+      addTail(o, sr, 0.25, 1);
+    },
+    { ...MAJOR_VALUES, gain: 0.85 },
+  ),
+  roarTempest: sound(
+    1.4,
+    (o, sr, r) => {
+      addTone(o, sr, 0, 1.4, 0.6, 120, 85, 0.15, 1.1, 37, 0.55, 5);
+      addNoise(o, sr, r, 0, 1.4, 0.6, 'bp', 900, 1700, 3, 0.2, 1.1);
+      addCrackle(o, sr, r, 0.1, 1.1, 0.3, 60, 0.004, 5000);
+      addTail(o, sr, 0.25, 0.9);
+    },
+    { ...MAJOR_VALUES, gain: 0.75 },
+  ),
+  roarWraith: sound(
+    1.6,
+    (o, sr, r) => {
+      addTone(o, sr, 0, 1.6, 0.35, 150, 90, 0.3, 1, 9, 0.3, 2);
+      addNoise(o, sr, r, 0, 1.6, 0.8, 'bp', 1900, 2600, 4, 0.3, 1);
+      addTail(o, sr, 0.35, 1.2);
+    },
+    { ...MAJOR_VALUES, gain: 0.7 },
   ),
 
   // --- Local feedback (never positional) ---------------------------------------------------------
@@ -462,6 +542,23 @@ export const SOUND_DEFS = {
     {
       loop: true,
       gain: 0.5,
+      priority: PRIORITY_LOCAL,
+      maxInstances: 1,
+      minRetriggerS: 0,
+      pitchJitter: 0,
+    },
+  ),
+  diveLoop: sound(
+    1.8,
+    (o, sr, r) => {
+      addNoise(o, sr, r, 0, ALL, 1, 'bp', 2500, 2500, 6, 0.01, -1);
+      addNoise(o, sr, r, 0, ALL, 0.5, 'lp', 180, 180, 0.8, 0.01, -1);
+      wobble(o, sr, r, 9, 0.3);
+    },
+    {
+      loop: true,
+      bus: 'ambience',
+      gain: 0.4,
       priority: PRIORITY_LOCAL,
       maxInstances: 1,
       minRetriggerS: 0,

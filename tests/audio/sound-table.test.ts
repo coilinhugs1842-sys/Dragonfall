@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   ABILITY_SOUNDS,
   ASSIST_SOUND,
+  BOOST_START_SOUND,
   CHARGE_SOUNDS,
+  DEATH_FALL_SOUND,
+  FLAP_SOUNDS,
+  MUSIC_DUCKS,
+  ROAR_SOUNDS,
+  VEIL_OUT_SOUND,
   COUNTDOWN_TICK_SOUND,
   FLIGHT_SOUNDS,
   HIT_CONFIRM_SOUND,
@@ -220,6 +226,22 @@ describe('event tables', () => {
     expect(SOUND_DEFS[FLIGHT_SOUNDS.heartbeat].loop).toBe(false);
   });
 
+  it('the dive rush loops, every class has a roar and a wing beat, and ducks name real sounds', () => {
+    expect(SOUND_DEFS[FLIGHT_SOUNDS.dive].loop).toBe(true);
+    for (const classId of DRAGON_CLASS_IDS) {
+      expect(isSound(ROAR_SOUNDS[classId]), classId).toBe(true);
+      expect(isSound(FLAP_SOUNDS[classId]), classId).toBe(true);
+      expect(SOUND_DEFS[FLAP_SOUNDS[classId]].loop).toBe(false);
+    }
+    expect(new Set(Object.values(ROAR_SOUNDS)).size).toBe(DRAGON_CLASS_IDS.length);
+    for (const [id, duck] of Object.entries(MUSIC_DUCKS)) {
+      expect(isSound(id), id).toBe(true);
+      expect(duck.to).toBeGreaterThan(0);
+      expect(duck.to).toBeLessThan(1);
+      expect(duck.holdS).toBeGreaterThan(0);
+    }
+  });
+
   it('every sound in the library is reachable from some table', () => {
     const used = new Set<string>();
     for (const classId of DRAGON_CLASS_IDS) {
@@ -236,9 +258,12 @@ describe('event tables', () => {
       RESULT_SOUNDS,
       FLIGHT_SOUNDS,
       UI_SOUNDS,
+      ROAR_SOUNDS,
+      FLAP_SOUNDS,
     ];
     for (const table of tables) for (const sound of Object.values(table)) used.add(sound ?? '');
     for (const sound of SINGLE_SOUNDS) used.add(sound);
+    for (const sound of [DEATH_FALL_SOUND, VEIL_OUT_SOUND, BOOST_START_SOUND]) used.add(sound);
     for (const id of SOUND_IDS) expect(used.has(id), id).toBe(true);
   });
 });

@@ -6,7 +6,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ABILITY_SOUNDS,
+  FLAP_SOUNDS,
   MAX_VOICES,
+  ROAR_SOUNDS,
   RENDER_SAMPLE_RATE,
   SOUND_COUNT,
   SOUND_DEFS,
@@ -503,7 +505,10 @@ describe('playback', () => {
       for (const slot of ABILITY_SLOTS) {
         const { audio, ctx } = createRig();
         audio.onEvent(cast(classId, slot));
-        expect(ctx.startedSounds(), `${classId}.${slot}`).toEqual([ABILITY_SOUNDS[classId][slot]]);
+        // An ultimate is announced by the dragon's roar on top of its own sound.
+        const expected: SoundId[] = [ABILITY_SOUNDS[classId][slot]];
+        if (slot === 'ultimate') expected.push(ROAR_SOUNDS[classId]);
+        expect(ctx.startedSounds(), `${classId}.${slot}`).toEqual(expected);
       }
     }
   });
@@ -734,6 +739,7 @@ describe('events', () => {
     }
     expect(ctx.startedSounds(before)).toEqual([
       'takedownBoom',
+      'deathFall',
       'takedownConfirm',
       'assist',
       'spawnChime',
@@ -823,8 +829,10 @@ describe('world-driven sounds', () => {
     runFrames(rig, view, 10, build);
     expect(windGain.gain.value).toBeGreaterThan(slowGain * 1.5);
     expect(wind.playbackRate.value).toBeGreaterThan(slowRate * 1.3);
-    expect(ctx.startedSounds()).toEqual(['windLoop', 'boostLoop']);
-    const boost = ctx.sources[1] as FakeSource;
+    expect(ctx.startedSounds()).toEqual(['windLoop', 'boostStart', 'boostLoop']);
+    const kick = ctx.sources[1] as FakeSource;
+    const boost = ctx.sources[2] as FakeSource;
+    kick.finish();
     expect(audio.stats().activeVoices).toBe(2);
 
     flags = DRAGON_FLAG_ALIVE;
@@ -942,10 +950,11 @@ describe('world-driven sounds', () => {
     expect(rig.ctx.sources.length).toBe(0);
     anim = DRAGON_ANIM_FLAP;
     runFrames(rig, view, 180, build);
-    const flaps = rig.ctx.startedSounds().filter((id) => id === 'flap').length;
+    const flaps = rig.ctx.startedSounds().filter((id) => id === FLAP_SOUNDS.talon).length;
     expect(flaps).toBe(rig.ctx.sources.length);
-    expect(flaps).toBeGreaterThanOrEqual(4);
-    expect(flaps).toBeLessThanOrEqual(6);
+    // Three seconds of a Talon's quick beat (0.8 x the base period, +-10 %).
+    expect(flaps).toBeGreaterThanOrEqual(5);
+    expect(flaps).toBeLessThanOrEqual(8);
   });
 
   it('ticks once per countdown second', () => {

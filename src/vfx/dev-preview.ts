@@ -571,7 +571,10 @@ function main(): void {
   const camera = new PerspectiveCamera(55, 16 / 9, 0.5, 6000);
 
   const vfx = createVfx({ scene, quality: preset });
-  vfx.warmUp(renderer, camera);
+  // This preview draws straight to the canvas, so the plain compile builds the right programs.
+  vfx.warmUp(() => {
+    renderer.compile(scene, camera);
+  });
 
   const view = createWorldView();
   const world: World = {

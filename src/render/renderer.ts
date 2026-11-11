@@ -2,11 +2,13 @@
  * The app's one WebGLRenderer (docs/ARCHITECTURE.md: "one WebGLRenderer for its whole life"),
  * wrapped so quality presets and the dynamic render scale are applied in a single place.
  */
-import { ACESFilmicToneMapping, PCFShadowMap, SRGBColorSpace, WebGLRenderer } from 'three';
+import { NoToneMapping, PCFShadowMap, SRGBColorSpace, WebGLRenderer } from 'three';
 import type { Camera, Scene } from 'three';
 import { QUALITY_PRESETS } from '../shared/quality';
 import type { QualityPresetId } from '../shared/quality';
 import { DynamicResolution } from './dynamic-resolution';
+import { createPostPipeline } from './post';
+import type { PostPipeline } from './post';
 import { computePixelRatio } from './render-scale';
 
 /** Thrown by `createGameRenderer` when no WebGL2 context can be created; main shows a fallback. */
@@ -22,10 +24,21 @@ export class WebGL2UnavailableError extends Error {
 export interface RenderStats {
   /** Current dynamic render scale (fraction of the 1080p-referenced target). */
   readonly renderScale: number;
-  /** Pixel ratio handed to three.js: drawing buffer = floor(css size * pixelRatio). */
+  /**
+   * Pixel ratio handed to three.js: drawing buffer = floor(css size * pixelRatio). The canvas
+   * is always at display size (1080 lines at most); the render scale sizes the scene target.
+   */
   readonly pixelRatio: number;
+  /** The canvas drawing buffer: what the post pass writes. */
   readonly bufferWidth: number;
   readonly bufferHeight: number;
+  /** Pixels the scene itself is drawn at this frame: buffer size * render scale. */
+  readonly sceneWidth: number;
+  readonly sceneHeight: number;
+  /** Full-screen draw calls the post pass adds to every frame (1 on Low / Medium). */
+  readonly postPasses: number;
+  /** True when the scene target is half-float HDR, false on the 8-bit fallback. */
+  readonly hdr: boolean;
   /** True between webglcontextlost and webglcontextrestored; `render` is a no-op meanwhile. */
   readonly contextLost: boolean;
 }
@@ -34,6 +47,8 @@ export interface GameRenderer {
   /** The one renderer for the app's life. */
   readonly webgl: WebGLRenderer;
   readonly resolution: DynamicResolution;
+  /** The post pass: `post.settings` holds exposure, grade, vignette, bloom and the sun. */
+  readonly post: PostPipeline;
   readonly presetId: QualityPresetId;
   readonly stats: RenderStats;
   /**
@@ -52,8 +67,17 @@ export interface GameRenderer {
    * and a ResizeObserver callback runs after that frame was drawn but before it is shown.
    */
   resize(cssWidth: number, cssHeight: number, devicePixelRatio: number): void;
-  /** Feeds `frameMs` (previous frame's duration) to the scaler, then draws. */
+  /**
+   * Feeds `frameMs` (previous frame's duration) to the scaler, then draws the scene into the
+   * HDR target and the post pass onto the canvas.
+   */
   render(scene: Scene, camera: Camera, frameMs: number): void;
+  /**
+   * Compiles every program `scene` needs as it stands (visible objects only), against the
+   * target the scene is really drawn into. Resolves when they are linked; never rejects.
+   * Load-time: call it behind a loading screen or a cinematic, not in the frame loop.
+   */
+  precompile(scene: Scene, camera: Camera): Promise<void>;
   dispose(): void;
 }
 
@@ -64,12 +88,17 @@ interface MutableStats {
   pixelRatio: number;
   bufferWidth: number;
   bufferHeight: number;
+  sceneWidth: number;
+  sceneHeight: number;
+  postPasses: number;
+  hdr: boolean;
   contextLost: boolean;
 }
 
 class GameRendererImpl implements GameRenderer {
   readonly webgl: WebGLRenderer;
   readonly resolution = new DynamicResolution();
+  readonly post: PostPipeline;
   readonly stats: RenderStats;
 
   private readonly mutableStats: MutableStats = {
@@ -77,6 +106,10 @@ class GameRendererImpl implements GameRenderer {
     pixelRatio: 1,
     bufferWidth: 0,
     bufferHeight: 0,
+    sceneWidth: 0,
+    sceneHeight: 0,
+    postPasses: 1,
+    hdr: false,
     contextLost: false,
   };
   private readonly canvas: HTMLCanvasElement;
@@ -100,11 +133,10 @@ class GameRendererImpl implements GameRenderer {
 
     this.webgl = new WebGLRenderer({ canvas, context, ...CONTEXT_ATTRIBUTES });
     this.webgl.outputColorSpace = SRGBColorSpace;
-    // docs/ART_DIRECTION.md lighting recipe: ACES Filmic, exposure ~1.0. three.js applies this
-    // in the materials when drawing straight to the canvas (the Low preset's "tone-map in
-    // material") and skips it when drawing into a render target, so the Phase 4 post pass can
-    // tone-map there without double application.
-    this.webgl.toneMapping = ACESFilmicToneMapping;
+    // Tone mapping (filmic, docs/ART_DIRECTION.md lighting recipe) and the sRGB transfer happen
+    // in the post pass on every preset: the scene is drawn linear into the HDR target, where
+    // three.js never tone-maps. Nothing but the post pass draws to the canvas.
+    this.webgl.toneMapping = NoToneMapping;
     this.webgl.toneMappingExposure = 1.0;
     // PCFSoftShadowMap was removed from three.js; PCF is the cheapest filtered option.
     this.webgl.shadowMap.type = PCFShadowMap;
@@ -112,6 +144,8 @@ class GameRendererImpl implements GameRenderer {
     // default autoReset the perf HUD would only see the last call, so `render` resets the
     // counters once per frame instead and renderer.info holds whole-frame totals.
     this.webgl.info.autoReset = false;
+    this.post = createPostPipeline(this.webgl, QUALITY_PRESETS[id]);
+    this.mutableStats.hdr = this.post.stats.hdr;
 
     canvas.addEventListener('webglcontextlost', this.onContextLost);
     canvas.addEventListener('webglcontextrestored', this.onContextRestored);
@@ -131,6 +165,7 @@ class GameRendererImpl implements GameRenderer {
     this.webgl.shadowMap.enabled = preset.shadowMapSize > 0;
     this.resolution.setBounds(preset.renderScaleMin, preset.renderScaleMax);
     this.resolution.reset();
+    this.post.setPreset(preset);
     this.applyResolution();
     for (const listener of this.presetListeners) listener(id);
   }
@@ -163,26 +198,34 @@ class GameRendererImpl implements GameRenderer {
       this.applyResolution();
     }
     this.webgl.info.reset();
-    this.webgl.render(scene, camera);
+    this.post.render(scene, camera);
+  }
+
+  precompile(scene: Scene, camera: Camera): Promise<void> {
+    if (this.mutableStats.contextLost) return Promise.resolve();
+    return this.post.precompile(scene, camera);
   }
 
   dispose(): void {
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored);
+    this.post.dispose();
     this.webgl.dispose();
   }
 
-  /** Pushes css size + render scale to three.js, only when something changed. */
+  /**
+   * Pushes the css size to three.js (only when it changed) and the render scale to the post
+   * pass. The canvas stays at display size; a scale step only moves the scene viewport.
+   */
   private applyResolution(): void {
     this.resizePending = false;
     const scale = this.resolution.scale;
-    const pixelRatio = computePixelRatio(this.cssHeight, this.devicePixelRatio, scale);
+    const pixelRatio = computePixelRatio(this.cssHeight, this.devicePixelRatio, 1);
 
     // One call for size and ratio together: setPixelRatio followed by setSize would reallocate
     // the drawing buffer twice whenever both change (every resize of a window taller than 1080
     // lines, where the ratio depends on the height). It never touches the canvas's CSS size,
-    // which the stylesheet owns. Unlike setSize it does not resize the output of three's own
-    // `setEffects` chain, which this renderer does not use.
+    // which the stylesheet owns.
     if (
       this.cssWidth !== this.appliedWidth ||
       this.cssHeight !== this.appliedHeight ||
@@ -194,12 +237,16 @@ class GameRendererImpl implements GameRenderer {
     this.appliedWidth = this.cssWidth;
     this.appliedHeight = this.cssHeight;
     this.appliedPixelRatio = pixelRatio;
+    this.post.setSize(this.canvas.width, this.canvas.height, scale);
 
     const stats = this.mutableStats;
     stats.renderScale = scale;
     stats.pixelRatio = pixelRatio;
     stats.bufferWidth = this.canvas.width;
     stats.bufferHeight = this.canvas.height;
+    stats.sceneWidth = this.post.stats.sceneWidth;
+    stats.sceneHeight = this.post.stats.sceneHeight;
+    stats.postPasses = this.post.stats.passes;
   }
 
   private readonly onContextLost = (event: Event): void => {
@@ -218,7 +265,7 @@ class GameRendererImpl implements GameRenderer {
 }
 
 /**
- * antialias off: FXAA arrives with the Phase 4 post pass and MSAA costs too much at these
+ * antialias off: the post pass does FXAA (Medium / High) and MSAA costs too much at these
  * budgets. No alpha (the canvas is opaque behind the HTML UI) and no stencil (nothing uses it):
  * both save memory and bandwidth on shared-memory integrated GPUs.
  */

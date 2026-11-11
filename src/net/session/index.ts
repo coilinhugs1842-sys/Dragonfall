@@ -44,6 +44,8 @@ export type {
 } from './host-session';
 export {
   DEFAULT_MATCH_SEED,
+  createShatteredSpiresMatchWorldFactory,
+  matchWorldOf,
   createGreyboxMatchWorld,
   createOpenSkyMatchWorld,
   greyboxMatchWorldFactory,

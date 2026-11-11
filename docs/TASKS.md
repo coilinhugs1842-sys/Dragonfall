@@ -48,15 +48,15 @@ Ids are `T-<phase>.<n>`. Work top to bottom unless the user says otherwise. Each
 - [x] T-3.10 Simple bot pilots (fly, chase, shoot) for testing and slot fill
 
 ## Phase 4: Art pass (each generation batch needs the user's OK)
-- [ ] T-4.1 Style gate: user approves the STYLE FORMULA; 3 mood-board images
-- [ ] T-4.2 `tools/` wrappers: optimize (gltf-transform + KTX2), audio normalise (ffmpeg)
-- [ ] T-4.3 Dragons ×4: concept → 3D → procedural rig + clips → LODs → optimize → manifest
-- [ ] T-4.4 Dragon loader: GLB LODs + KTX2 + meshopt, animation blending, team tint on membrane/runes
-- [ ] T-4.5 Shattered Spires: hero rocks, props, tileable textures, sky panorama → optimize → manifest
-- [ ] T-4.6 Map renderer with real assets: instancing, LOD, chunk culling, vertex AO, light shafts
-- [ ] T-4.7 Post pass per preset (combined FXAA + grade + vignette + sharpen; half-res bloom on High)
-- [ ] T-4.8 Audio: SFX, ambience, lobby + match music, stings → normalise → wire up
-- [ ] T-4.9 Perf pass with real assets on U-series: hit the budgets; record `?bench`
+- [!] T-4.1 Style gate: user approves the STYLE FORMULA; 3 mood-board images. *Blocked: the free Higgsfield plan refuses or fails every image job (DECISIONS 39). The formula is in use as drafted (DECISIONS 37).*
+- [x] T-4.2 `tools/` wrappers: optimize (gltf-transform + KTX2), audio normalise (ffmpeg)
+- [x] T-4.3 Dragons ×4: concept → 3D → procedural rig + clips → LODs → optimize → manifest *(procedural, DECISIONS 36)*
+- [x] T-4.4 Dragon loader: GLB LODs + KTX2 + meshopt, animation blending, team tint on membrane/runes
+- [x] T-4.5 Shattered Spires: hero rocks, props, tileable textures, sky panorama → optimize → manifest *(procedural; the sky is the shader, no panorama)*
+- [x] T-4.6 Map renderer with real assets: instancing, LOD, chunk culling, vertex AO, light shafts
+- [x] T-4.7 Post pass per preset (combined FXAA + grade + vignette + sharpen; half-res bloom on High)
+- [x] T-4.8 Audio: SFX, ambience, lobby + match music, stings → normalise → wire up *(synthesised offline)*
+- [~] T-4.9 Perf pass with real assets on U-series: hit the budgets; record `?bench`. *`?bench` is built and recorded on the dev desktop, inside every budget. The U-series run is the user's gate.*
 
 ## Phase 5: Cinematics + lobby
 - [ ] T-5.1 Host-driven match phase timeline (intro → countdown → live → end → podium), synced to clients

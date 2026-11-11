@@ -3,9 +3,16 @@
  *
  *   voice[i]: source -> low-pass -> gain -> stereo pan ─┐
  *                                                       ├─> bus (sfx | ui | ambience) ─┐
- *   pad: 3 oscillators -> low-pass -> gain -> music bus ────────────────────────────────┤
- *                                                                                       ▼
+ *   music tracks -> duck ─┬─> music bus ────────────────────────────────────────────────┤
+ *   pad (fallback) ───────┘                                                             ▼
  *                                         master -> mute (hidden tab) -> limiter -> speakers
+ *
+ * Sounds (T-4.8): every sound has a procedural fallback rendered at init (`sounds.ts`). The real
+ * `.ogg` files are listed in the audio manifest, fetched after the first gesture in a small
+ * priority order (interface, then the local rider's own sounds, then the fight; a sound that is
+ * asked for early jumps the queue) and replace the fallback as they decode. A file that fails to
+ * load leaves its fallback in place. Music and ambience beds live in `tracks.ts`; the oscillator
+ * pad only sounds while no music track is playing.
  *
  * Rules it keeps:
  * - The voice chains are built once (MAX_VOICES of them) and reused. The only node made per
@@ -46,19 +53,37 @@ import {
   DRAGON_FLAG_FIRING,
   DRAGON_FLAG_IN_STORM,
   DRAGON_FLAG_SHIELDED,
+  DRAGON_FLAG_VEILED,
   FLIGHT_TUNING,
   MATCH_TUNING,
   NO_PLAYER,
   QUALITY_PRESETS,
 } from '../shared';
 import { Rng } from './dsp';
+import { MusicIntensity } from './intensity';
+import { AssetLoader } from './loader';
+import type { FetchLike } from './loader';
+import {
+  AUDIO_ASSET_BASE,
+  AUDIO_MANIFEST_FILE,
+  loadTier,
+  parseAudioManifest,
+} from './manifest';
+import type { AudioManifest } from './manifest';
 import {
   ABILITY_SOUNDS,
+  BOOST_START_SOUND,
   CHARGE_SOUNDS,
   COUNTDOWN_TICK_SOUND,
+  DEATH_FALL_SOUND,
+  FLAP_PERIOD_SCALE,
+  FLAP_SOUNDS,
   FLIGHT_SOUNDS,
+  MUSIC_DUCKS,
+  ROAR_SOUNDS,
   SUSTAIN_SOUNDS,
   UI_SOUNDS,
+  VEIL_OUT_SOUND,
   eventSound,
   localFeedbackSound,
 } from './sound-table';
@@ -80,6 +105,8 @@ import {
   writeListenerFrame,
 } from './spatial';
 import type { AudioListener } from './spatial';
+import { createTrackPlayer } from './tracks';
+import type { TrackPlayer } from './tracks';
 import { MAX_VOICES, NO_VOICE, VoiceAllocator } from './voices';
 
 export const AUDIO_SCENES = ['title', 'lobby', 'match'] as const;
@@ -131,6 +158,13 @@ export interface AudioTuning {
   localCastDedupeS: number;
   /** Placeholder rendering stops for the frame after this many milliseconds. */
   sliceBudgetMs: number;
+  /** Each play of a sound with variations is this fraction louder or quieter at most. */
+  gainJitter: number;
+  /** Own dive: the rush starts at this much of the speed pointing down, full `diveSpan` later. */
+  diveStart: number;
+  diveSpan: number;
+  /** Level of a dragon's roar on its ultimate, against the ultimate's own sound. */
+  roarGain: number;
   /** Seconds the pad takes to glide to another scene's notes. */
   padGlideS: number;
   pad: Record<AudioScene, PadTuning>;
@@ -154,6 +188,10 @@ export const AUDIO_TUNING: AudioTuning = {
   hitGainMax: 1.2,
   localCastDedupeS: 1,
   sliceBudgetMs: 3,
+  gainJitter: 0.07,
+  diveStart: 0.3,
+  diveSpan: 0.4,
+  roarGain: 0.85,
   padGlideS: 1.2,
   pad: {
     title: { gain: 0.16, cutoffHz: 700, notes: [110, 164.4, 220.7] },
@@ -176,6 +214,15 @@ export interface AudioStats {
   /** Placeholder sounds rendered so far, and the milliseconds that took in total. */
   soundsReady: number;
   initMs: number;
+  /** Sounds playing from real files (at least one variation decoded), and those whose files failed. */
+  samplesReady: number;
+  samplesFailed: number;
+  /** Music and ambience tracks sounding now. */
+  tracksPlaying: number;
+  /** Compressed audio bytes fetched so far. */
+  assetBytes: number;
+  /** Match intensity driving the music layers, 0..1. */
+  intensity: number;
   /** Errors swallowed so far. Not 0 = something is wrong; see the console warning. */
   errors: number;
   /**
@@ -198,6 +245,11 @@ export interface AudioOptions {
    * once, so loading never hitches. `now`: all inside `createAudio` (tests, loading screens).
    */
   readonly prerender?: 'sliced' | 'now';
+  /**
+   * Where the real sounds come from. Default: the manifest in `assets/audio/` next to the page,
+   * through `fetch`. null = procedural sounds only (tests, or a build without the files).
+   */
+  readonly assets?: { readonly baseUrl?: string; readonly fetch?: FetchLike } | null;
 }
 
 export interface AudioEngine {
@@ -236,10 +288,33 @@ const OPEN_CUTOFF_HZ = 20_000;
 const LOCAL_LOOP_WIND = 0;
 const LOCAL_LOOP_BOOST = 1;
 const LOCAL_LOOP_STORM = 2;
-const LOCAL_LOOP_COUNT = 3;
+const LOCAL_LOOP_DIVE = 3;
+const LOCAL_LOOP_COUNT = 4;
 const MAX_FRAME_DT_S = 0.1;
 /** After this many swallowed errors the engine stops trying. */
 const MAX_ERRORS = 25;
+
+/** A sound's files: not in the manifest / listed / being fetched / usable / all failed. */
+const SAMPLE_LISTED = 1;
+const SAMPLE_QUEUED = 2;
+const SAMPLE_READY = 3;
+const SAMPLE_FAILED = 4;
+/** Loader priorities by `loadTier`, and for a sound that was asked to play before it arrived. */
+const TIER_PRIORITY = [30, 20, 10] as const;
+const DEMAND_PRIORITY = 50;
+const TIER_COUNT = TIER_PRIORITY.length;
+
+/** Per sound: how far the music steps back while it plays (0 hold = it does not). */
+const DUCK_TO = new Float32Array(SOUND_COUNT).fill(1);
+const DUCK_HOLD_S = new Float32Array(SOUND_COUNT);
+for (let i = 0; i < SOUND_COUNT; i++) {
+  const id = SOUND_IDS[i];
+  const duck = id !== undefined ? MUSIC_DUCKS[id] : undefined;
+  if (duck !== undefined) {
+    DUCK_TO[i] = duck.to;
+    DUCK_HOLD_S[i] = duck.holdS;
+  }
+}
 
 /** 1 where a sound lives on the `ui` bus: those are never placed in the world. */
 const SOUND_IS_UI: Uint8Array = Uint8Array.from(SOUND_DEF_LIST, (def) =>
@@ -278,6 +353,11 @@ function createSilentAudio(): AudioEngine {
     ready: false,
     soundsReady: 0,
     initMs: 0,
+    samplesReady: 0,
+    samplesFailed: 0,
+    tracksPlaying: 0,
+    assetBytes: 0,
+    intensity: 0,
     errors: 0,
     masterGain: 0,
   };
@@ -318,9 +398,23 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     ready: false,
     soundsReady: 0,
     initMs: 0,
+    samplesReady: 0,
+    samplesFailed: 0,
+    tracksPlaying: 0,
+    assetBytes: 0,
+    intensity: 0,
     errors: 0,
     masterGain: 0,
   };
+  const assetOptions = options.assets === undefined ? {} : options.assets;
+  const assetBase = assetOptions?.baseUrl ?? AUDIO_ASSET_BASE;
+  const scopeFetch = (globalThis as { fetch?: FetchLike }).fetch;
+  const fetchImpl: FetchLike | null =
+    assetOptions === null
+      ? null
+      : (assetOptions.fetch ??
+        (typeof scopeFetch === 'function' ? (url: string) => scopeFetch(url) : null));
+  const intensity = new MusicIntensity();
 
   let disposed = false;
   let broken = false;
@@ -348,12 +442,23 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
   // --- Sounds ------------------------------------------------------------------------------------
   const pcm: (Float32Array | null)[] = [];
   const buffers: (AudioBuffer | null)[] = [];
-  /** 1 = a real asset was decoded for this sound: the placeholder must not replace it. */
-  const sampleLoaded = new Uint8Array(SOUND_COUNT);
+  /** The decoded real files of each sound (its variations); empty = play the placeholder. */
+  const samples: AudioBuffer[][] = [];
+  const sampleState = new Uint8Array(SOUND_COUNT);
+  const samplePending = new Uint8Array(SOUND_COUNT);
+  const sampleGain = new Float32Array(SOUND_COUNT).fill(1);
+  const sampleLoopStart = new Float32Array(SOUND_COUNT);
+  const sampleLoopEnd = new Float32Array(SOUND_COUNT);
+  const lastVariation = new Int8Array(SOUND_COUNT).fill(-1);
   for (let i = 0; i < SOUND_COUNT; i++) {
     pcm.push(null);
     buffers.push(null);
+    samples.push([]);
   }
+  let manifest: AudioManifest | null = null;
+  let loader: AssetLoader | null = null;
+  let tracks: TrackPlayer | null = null;
+  const tierQueued = new Uint8Array(TIER_COUNT);
   let nextToRender = 0;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let suspendTimer: ReturnType<typeof setTimeout> | null = null;
@@ -366,6 +471,8 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
   const vPos = new Float32Array(MAX_VOICES * 3);
   /** The sound's gain before distance. */
   const vGain = new Float32Array(MAX_VOICES);
+  /** The part of it that came from the file (base gain and per-play jitter), for the loops. */
+  const vSample = new Float32Array(MAX_VOICES).fill(1);
 
   // --- Per-dragon state (by player id) -----------------------------------------------------------
   let frame = 1;
@@ -394,6 +501,7 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     soundIndexOf(FLIGHT_SOUNDS.wind),
     soundIndexOf(FLIGHT_SOUNDS.boost),
     soundIndexOf(FLIGHT_SOUNDS.storm),
+    soundIndexOf(FLIGHT_SOUNDS.dive),
   ];
   const loopWant = new Uint8Array(LOCAL_LOOP_COUNT);
   const loopGain = new Float32Array(LOCAL_LOOP_COUNT);
@@ -403,7 +511,12 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
   let heartbeatS = 0;
   let lastCountdown = -1;
   let spatialAccS = 0;
-  const flapSound = soundIndexOf(FLIGHT_SOUNDS.flap);
+  const flapSounds: Record<DragonClassId, number> = {
+    talon: soundIndexOf(FLAP_SOUNDS.talon),
+    bastion: soundIndexOf(FLAP_SOUNDS.bastion),
+    tempest: soundIndexOf(FLAP_SOUNDS.tempest),
+    wraith: soundIndexOf(FLAP_SOUNDS.wraith),
+  };
   const heartbeatSound = soundIndexOf(FLIGHT_SOUNDS.heartbeat);
   const countdownSound = soundIndexOf(COUNTDOWN_TICK_SOUND);
 
@@ -418,11 +531,9 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
   function uploadBuffer(index: number): void {
     const data = pcm[index];
     if (ctx === null || data === null || data === undefined) return;
-    if (sampleLoaded[index] !== 1) {
-      const buffer = ctx.createBuffer(1, data.length, RENDER_SAMPLE_RATE);
-      buffer.getChannelData(0).set(data);
-      buffers[index] = buffer;
-    }
+    const buffer = ctx.createBuffer(1, data.length, RENDER_SAMPLE_RATE);
+    buffer.getChannelData(0).set(data);
+    buffers[index] = buffer;
     // The context has its own copy now.
     pcm[index] = null;
   }
@@ -453,18 +564,102 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     if (nextToRender < SOUND_COUNT) renderTimer = setTimeout(renderStep, 16);
   }
 
-  function loadSample(index: number, url: string): void {
-    const context = ctx;
-    if (context === null || typeof fetch !== 'function') return;
-    fetch(url)
-      .then((response) => (response.ok ? response.arrayBuffer() : Promise.reject(response.status)))
-      .then((data) => context.decodeAudioData(data))
-      .then((decoded) => {
-        if (disposed) return;
-        buffers[index] = decoded;
-        sampleLoaded[index] = 1;
+  // --- Real files --------------------------------------------------------------------------------
+
+  /** One variation of a sound arrived (or failed). Runs from a promise, never from the frame. */
+  function onSample(index: number, buffer: AudioBuffer | null): void {
+    if (disposed) return;
+    const left = (samplePending[index] ?? 1) - 1;
+    samplePending[index] = left > 0 ? left : 0;
+    const list = samples[index];
+    if (buffer !== null && list !== undefined) {
+      list.push(buffer);
+      if (list.length === 1) {
+        sampleState[index] = SAMPLE_READY;
+        stats.samplesReady++;
+        // A loop that is already running on its placeholder is restarted on the real thing: its
+        // owner sees the voice fade and asks again.
+        if (defs[index]?.loop === true) {
+          for (let v = 0; v < MAX_VOICES; v++) {
+            if (allocator.active[v] === 1 && allocator.sound[v] === index) fadeOutVoice(v);
+          }
+        }
+      }
+    }
+    if (left <= 0 && sampleState[index] === SAMPLE_QUEUED) {
+      sampleState[index] = SAMPLE_FAILED;
+      stats.samplesFailed++;
+    }
+  }
+
+  /** Asks for a sound's files, or moves them up the queue when they are already asked for. */
+  function requestSamples(index: number, priority: number): void {
+    const set = manifest !== null ? manifest.sounds[index] : null;
+    if (loader === null || set === null || set === undefined) return;
+    if (sampleState[index] === SAMPLE_QUEUED) {
+      loader.raise(index, priority);
+      return;
+    }
+    if (sampleState[index] !== SAMPLE_LISTED) return;
+    sampleState[index] = SAMPLE_QUEUED;
+    samplePending[index] = set.urls.length;
+    const done = (buffer: AudioBuffer | null): void => {
+      try {
+        onSample(index, buffer);
+      } catch (error) {
+        fail(error);
+      }
+    };
+    for (const url of set.urls) loader.request(url, priority, index, done);
+  }
+
+  function queueTier(tier: number): void {
+    if (manifest === null || tierQueued[tier] === 1) return;
+    tierQueued[tier] = 1;
+    for (let i = 0; i < SOUND_COUNT; i++) {
+      const def = defs[i];
+      if (def !== undefined && loadTier(def) === tier) {
+        requestSamples(i, TIER_PRIORITY[tier] ?? 0);
+      }
+    }
+  }
+
+  function onManifest(next: AudioManifest | null): void {
+    if (disposed || next === null || manifest !== null) return;
+    manifest = next;
+    for (let i = 0; i < SOUND_COUNT; i++) {
+      const set = next.sounds[i];
+      if (set === null || set === undefined) continue;
+      sampleState[i] = SAMPLE_LISTED;
+      sampleGain[i] = set.gain;
+      sampleLoopStart[i] = set.loop !== null ? set.loop.startS : 0;
+      sampleLoopEnd[i] = set.loop !== null ? set.loop.endS : 0;
+    }
+    tracks?.setTracks(next.tracks);
+    // The interface and the rider's own sounds at once; the fight when a lobby or match is near.
+    queueTier(0);
+    queueTier(1);
+    if (scene !== 'title') queueTier(2);
+  }
+
+  function startAssets(context: AudioContext): void {
+    const ambienceBus = buses[busIndex('ambience')];
+    if (fetchImpl === null || musicBus === null || ambienceBus === undefined) return;
+    if (typeof context.decodeAudioData !== 'function') return;
+    loader = new AssetLoader(fetchImpl, context);
+    tracks = createTrackPlayer(context, musicBus, ambienceBus, loader, applyScene);
+    tracks.setLowDetail(allocator.capacity <= QUALITY_PRESETS.low.audioVoices);
+    tracks.setScene(scene);
+    fetchImpl(assetBase + AUDIO_MANIFEST_FILE)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((json) => {
+        try {
+          onManifest(parseAudioManifest(json, assetBase));
+        } catch (error) {
+          fail(error);
+        }
       })
-      // The placeholder stays in place when the asset is missing or cannot be decoded.
+      // No manifest: every sound stays procedural and the pad stays the music.
       .catch(noop);
   }
 
@@ -566,10 +761,12 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     }
     applyVolumes(0);
     applyScene();
-    for (let i = 0; i < SOUND_COUNT; i++) {
-      uploadBuffer(i);
-      const url = defs[i]?.url ?? null;
-      if (url !== null) loadSample(i, url);
+    for (let i = 0; i < SOUND_COUNT; i++) uploadBuffer(i);
+    try {
+      if (ctx !== null) startAssets(ctx);
+    } catch (error) {
+      // The files are a bonus: without them the engine still plays its procedural sounds.
+      fail(error);
     }
     return true;
   }
@@ -594,7 +791,9 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     const pad = AUDIO_TUNING.pad[scene];
     const now = ctx.currentTime;
     const glide = AUDIO_TUNING.padGlideS;
-    padGain.gain.setTargetAtTime(pad.gain, now, glide);
+    // The pad is the fallback music: it rests while a real track plays.
+    const padLevel = tracks !== null && tracks.musicPlaying() ? 0 : pad.gain;
+    padGain.gain.setTargetAtTime(padLevel, now, glide);
     padFilter.frequency.setTargetAtTime(pad.cutoffHz, now, glide);
     for (let i = 0; i < pad.notes.length; i++) {
       padOscillators[i]?.frequency.setTargetAtTime(pad.notes[i] ?? 110, now, glide);
@@ -697,10 +896,41 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     const context = ctx;
     if (context === null || hidden || broken) return NO_VOICE;
     const def = defs[soundIndex];
-    const buffer = buffers[soundIndex];
+    let buffer = buffers[soundIndex];
+    // The real file when one is decoded (a different variation each time), else the placeholder.
+    let sampleScale = 1;
+    let real = false;
+    const variations = samples[soundIndex];
+    if (variations !== undefined && variations.length > 0) {
+      let pick = 0;
+      const count = variations.length;
+      if (count > 1) {
+        const last = lastVariation[soundIndex] ?? -1;
+        if (last < 0 || last >= count) {
+          pick = Math.floor(jitter.next() * count);
+        } else {
+          // Never the same one twice running.
+          pick = Math.floor(jitter.next() * (count - 1));
+          if (pick >= last) pick++;
+        }
+        if (pick >= count) pick = count - 1;
+      }
+      lastVariation[soundIndex] = pick;
+      buffer = variations[pick] ?? null;
+      real = true;
+      sampleScale = sampleGain[soundIndex] ?? 1;
+      if (def !== undefined && def.pitchJitter > 0) {
+        sampleScale *= 1 + AUDIO_TUNING.gainJitter * jitter.bipolar();
+      }
+    } else if (
+      sampleState[soundIndex] === SAMPLE_LISTED ||
+      sampleState[soundIndex] === SAMPLE_QUEUED
+    ) {
+      requestSamples(soundIndex, DEMAND_PRIORITY);
+    }
     if (def === undefined || buffer === null || buffer === undefined) return NO_VOICE;
     let distance = 0;
-    let level = def.gain * gainScale;
+    let level = def.gain * gainScale * sampleScale;
     let pan = 0;
     let cutoff = maxCutoffHz;
     if (positional) {
@@ -747,7 +977,8 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     vPositional[voice] = positional ? 1 : 0;
     vFading[voice] = 0;
     vFollow[voice] = followId;
-    vGain[voice] = def.gain * gainScale;
+    vGain[voice] = def.gain * gainScale * sampleScale;
+    vSample[voice] = sampleScale;
     vPos[voice * 3] = x;
     vPos[voice * 3 + 1] = y;
     vPos[voice * 3 + 2] = z;
@@ -762,13 +993,25 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
       source.playbackRate.value = rate > 0 ? rate * spread : spread;
       source.onended = endedHandlers[voice] ?? null;
       source.connect(filter);
-      source.start();
+      if (real && def.loop) {
+        // The file has a little pre- and post-roll round the loop (see tools/audio).
+        const loopStart = sampleLoopStart[soundIndex] ?? 0;
+        source.loopStart = loopStart;
+        source.loopEnd = sampleLoopEnd[soundIndex] ?? 0;
+        source.start(0, loopStart);
+      } else {
+        source.start();
+      }
     } catch (error) {
       // The voice must not stay taken by a sound that never started.
       allocator.release(voice);
       throw error;
     }
     sources[voice] = source;
+    const duckHoldS = DUCK_HOLD_S[soundIndex] ?? 0;
+    if (duckHoldS > 0 && tracks !== null && (!positional || spatial.gain > 0.5)) {
+      tracks.duck(DUCK_TO[soundIndex] ?? 1, duckHoldS);
+    }
     return voice;
   }
 
@@ -845,7 +1088,6 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
         continue;
       }
       const soundIndex = loopSound[i] ?? 0;
-      const level = (defs[soundIndex]?.gain ?? 0) * (loopGain[i] ?? 0);
       if (!alive) {
         voice = startVoice(
           soundIndex,
@@ -862,6 +1104,7 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
         if (voice !== NO_VOICE) loopGen[i] = allocator.generation[voice] ?? 0;
         continue;
       }
+      const level = (defs[soundIndex]?.gain ?? 0) * (loopGain[i] ?? 0) * (vSample[voice] ?? 1);
       gains[voice]?.gain.setTargetAtTime(level, now, smooth * 2);
       sources[voice]?.playbackRate.setTargetAtTime(loopRate[i] ?? 1, now, smooth * 2);
     }
@@ -891,6 +1134,7 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     let localBoosting = false;
     let localInStorm = false;
     let localSpeed = 0;
+    let localSink = 0;
     let localHealth = 1;
     let localX = listener.x;
     let localZ = listener.z;
@@ -915,12 +1159,27 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
         }
       }
 
+      if (alive && fresh) {
+        if ((flags & DRAGON_FLAG_BOOSTING) !== 0 && (before & DRAGON_FLAG_BOOSTING) === 0) {
+          if (isLocal) playFlat(BOOST_START_SOUND, 1);
+          else playAt(BOOST_START_SOUND, position, 1);
+        }
+        if ((flags & DRAGON_FLAG_VEILED) === 0 && (before & DRAGON_FLAG_VEILED) !== 0) {
+          if (isLocal) playFlat(VEIL_OUT_SOUND, 1);
+          else playAt(VEIL_OUT_SOUND, position, 1);
+        }
+      }
+
       let flapS = (dFlapS[id] ?? 0) - dt;
       if (flapS <= 0) {
         flapS = 0;
         if (alive && isFlapAnim(dragon.anim)) {
+          const flapSound = flapSounds[dragon.classId] ?? flapSounds.tempest;
           startVoice(flapSound, true, position.x, position.y, position.z, -1, 1, 1, false);
-          flapS = AUDIO_TUNING.flapPeriodS * (0.9 + 0.2 * jitter.next());
+          flapS =
+            AUDIO_TUNING.flapPeriodS *
+            (FLAP_PERIOD_SCALE[dragon.classId] ?? 1) *
+            (0.9 + 0.2 * jitter.next());
         }
       }
       dFlapS[id] = flapS;
@@ -973,6 +1232,7 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
         localSpeed = Math.sqrt(
           velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z,
         );
+        localSink = localSpeed > 1 ? -velocity.y / localSpeed : 0;
         localX = position.x;
         localZ = position.z;
       }
@@ -996,6 +1256,12 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     loopWant[LOCAL_LOOP_BOOST] = inMatch && localAlive && localBoosting ? 1 : 0;
     loopGain[LOCAL_LOOP_BOOST] = 1;
     loopRate[LOCAL_LOOP_BOOST] = 0.9 + 0.25 * speedT;
+    // A steep, fast dive adds the whistling rush.
+    const dive =
+      clamp01((localSink - AUDIO_TUNING.diveStart) / AUDIO_TUNING.diveSpan) * clamp01(speedT * 1.5);
+    loopWant[LOCAL_LOOP_DIVE] = inMatch && localAlive && dive > 0.05 ? 1 : 0;
+    loopGain[LOCAL_LOOP_DIVE] = dive;
+    loopRate[LOCAL_LOOP_DIVE] = 0.9 + 0.2 * speedT;
 
     // Storm wall: louder the closer the rider (or a spectator's camera) is to its edge.
     let storm = localInStorm ? 1 : 0;
@@ -1042,7 +1308,17 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
       lastCountdown = -1;
     }
 
-    if (spatialTick) refreshVoices();
+    // Music: how heated the match is picks the mix of the calm and battle layers.
+    stats.intensity = intensity.update(
+      dt,
+      inMatch ? clock.phase : 'lobby',
+      localAlive ? localHealth : 1,
+      clock.timeRemainingS,
+    );
+    if (spatialTick) {
+      if (tracks !== null) tracks.setIntensity(stats.intensity);
+      refreshVoices();
+    }
   }
 
   function handleEvent(event: GameEvent): void {
@@ -1065,6 +1341,11 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
         // pinned to where the dragon WAS would slide behind the listener.
         if (isLocal) playFlat(sound, 1);
         else playAt(sound, event.position, 1);
+        if (event.slot === 'ultimate') {
+          const roar = ROAR_SOUNDS[event.classId];
+          if (isLocal) playFlat(roar, AUDIO_TUNING.roarGain);
+          else playAt(roar, event.position, AUDIO_TUNING.roarGain);
+        }
         return;
       }
       case 'hit': {
@@ -1098,6 +1379,12 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
         if (sound !== null) {
           if (SOUND_IS_UI[soundIndexOf(sound)] === 1) playFlat(sound, 1);
           else playAt(sound, event.position, 1);
+        }
+        if (event.type === 'takedown') {
+          playAt(DEATH_FALL_SOUND, event.position, 1);
+          intensity.takedown(
+            localId !== NO_PLAYER && (event.killerId === localId || event.victimId === localId),
+          );
         }
         break;
       }
@@ -1212,6 +1499,7 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
         if ((localPending[index] ?? 0) < 255) localPending[index] = (localPending[index] ?? 0) + 1;
         localPendingAt[index] = now;
         playFlat(sound, 1);
+        if (slot === 'ultimate') playFlat(ROAR_SOUNDS[classId], AUDIO_TUNING.roarGain);
       } catch (error) {
         fail(error);
       }
@@ -1250,6 +1538,7 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
         const resolved = typeof preset === 'string' ? QUALITY_PRESETS[preset] : preset;
         if (resolved === undefined) return;
         allocator.setCapacity(resolved.audioVoices);
+        tracks?.setLowDetail(resolved.audioVoices <= QUALITY_PRESETS.low.audioVoices);
         for (let i = allocator.capacity; i < MAX_VOICES; i++) {
           if (allocator.active[i] === 1) killVoice(i);
         }
@@ -1271,7 +1560,11 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
           localTeam = null;
           heartbeatS = 0;
           lastCountdown = -1;
+          intensity.reset();
+          stats.intensity = 0;
         }
+        tracks?.setScene(next);
+        if (next !== 'title') queueTier(2);
         applyScene();
       } catch (error) {
         fail(error);
@@ -1285,6 +1578,8 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
       stats.capacity = allocator.capacity;
       stats.ready = ctx !== null && ctx.state === 'running';
       stats.masterGain = masterGain !== null ? masterGain.gain.value : 0;
+      stats.tracksPlaying = tracks !== null ? tracks.playingCount() : 0;
+      stats.assetBytes = loader !== null ? loader.stats.bytes : 0;
       return stats;
     },
 
@@ -1300,6 +1595,14 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
         renderTimer = null;
         suspendTimer = null;
         stopAllVoices(false);
+        tracks?.dispose();
+        loader?.dispose();
+        tracks = null;
+        loader = null;
+        for (let i = 0; i < SOUND_COUNT; i++) {
+          const list = samples[i];
+          if (list !== undefined) list.length = 0;
+        }
         for (const oscillator of padOscillators) {
           try {
             oscillator.stop();

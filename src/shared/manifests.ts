@@ -10,6 +10,7 @@
 
 import type { DragonClassId } from './classes';
 import type { TeamId } from './constants';
+import type { MapPlacement } from './maps/placements';
 import type { MapSolid } from './maps/solids';
 import type { MapId } from './match';
 import type { Quat, Vec3 } from './math-types';
@@ -92,9 +93,33 @@ export interface MapChunk {
 export interface MapPropSet {
   readonly id: string;
   readonly glb: string;
-  /** Binary instance transforms (layout TBD in T-4.x). */
+  /**
+   * Binary instance transforms: `count` 4x4 matrices, 16 little-endian float32 each, column-major
+   * (three.js `InstancedMesh.instanceMatrix`). Baked from `MapManifest.placements` for tools; at
+   * runtime `buildPlacementInstances(map.placements)` gives the same data without a fetch.
+   */
   readonly instances: string;
   readonly count: number;
+  /** `rock` | `prop` | `gate` | `backdrop` (T-4.5). Absent = prop. */
+  readonly kind?: string;
+  /** Triangles per LOD node (`LOD0`, `LOD1`, ...) of the GLB, nearest first. */
+  readonly lodTriangles?: readonly number[];
+  /** The GLB has a second material `TeamTint` that takes the instance's team colour. */
+  readonly hasTint?: boolean;
+  /** Bounding sphere radius of one instance at scale 1, metres. */
+  readonly radius?: number;
+}
+
+/** A shared tileable texture a map's materials use (public/assets/textures/textures.json). */
+export interface MapTexture {
+  readonly id: string;
+  /** KTX2, relative to `public/assets/`. */
+  readonly url: string;
+  /** World metres one repeat should cover (triplanar or UV scale). */
+  readonly tileMetres: number;
+  /** Mean colour, linear RGB: `texel / mean` is a detail factor for painted vertex colours. */
+  readonly meanLinear: readonly number[];
+  readonly colorSpace: 'srgb' | 'linear';
 }
 
 export interface MapColliders {
@@ -156,6 +181,20 @@ export interface MapManifest {
    * `colliders.terrain` and `chunks`.
    */
   readonly solids?: readonly MapSolid[];
+  /**
+   * Placed assets of a real map (T-4.5): hero rocks, props, gates and backdrop pieces, one entry
+   * per instance. When present, collision is built from the asset types' hulls at these
+   * transforms (`buildMapTriangles`, src/shared/maps) and the view draws the GLBs of `props` at
+   * the same transforms; `solids`, `chunks` and `colliders.terrain` are then unused.
+   */
+  readonly placements?: readonly MapPlacement[];
+  /**
+   * Gates for Duel, closer to the centre than `spawnGates` so the per-round storm fractions
+   * apply (DECISIONS 34). Indexed by TeamId; absent = Duel uses `spawnGates`.
+   */
+  readonly duelSpawnGates?: readonly SpawnGate[];
+  /** Shared tileable textures the map's materials use. */
+  readonly textures?: readonly MapTexture[];
   /** Edge of a world chunk in metres (about 250, docs/PERFORMANCE.md); the grid spans `size`. */
   readonly chunkSize?: number;
   /** Camera path for the match-intro flyby (format TBD in T-5.x). */

@@ -80,6 +80,7 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
   const webgl = renderer.webgl;
   const canvas = webgl.domElement;
   const info = webgl.info;
+  const renderStats = renderer.stats;
   const gl = webgl.getContext();
 
   // stats-gl adds the GPU panel whenever trackGPU is set, even without the timer extension, and
@@ -136,8 +137,10 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
       `  max ${summary.maxMs.toFixed(2)}\n` +
       `draw ${info.render.calls}  tri ${formatCount(info.render.triangles)}\n` +
       `geo ${info.memory.geometries}  tex ${info.memory.textures}  heap ${heapText}\n` +
-      `scale ${renderer.resolution.scale.toFixed(2)}  ${canvas.width}x${canvas.height}` +
-      `  ${renderer.presetId}\n` +
+      `scale ${renderer.resolution.scale.toFixed(2)}  ${renderStats.sceneWidth}x${renderStats.sceneHeight}` +
+      ` > ${canvas.width}x${canvas.height}  ${renderer.presetId}\n` +
+      `post ${renderStats.postPasses} pass${renderStats.postPasses === 1 ? '' : 'es'}` +
+      `  ${renderStats.hdr ? 'hdr16f' : 'ldr8'}\n` +
       `sim ${simText}
 ` +
       `${netText === '' ? `net ${NO_VALUE}` : netText}` +

@@ -5,13 +5,75 @@ up where the last one stopped.
 
 ## Current state
 
-- **Phase:** 3 (Combat + MVP modes) built; Phase 4 (art pass) is next. The user asked (2026-11-10) for all
-  remaining phases to be built back to back without stopping; gates for Phases 0-3 are still theirs to run on
-  real laptops.
-- **Next:** T-4.1.
+- **Phase:** 4 (art pass) built with procedural assets; Phase 5 (cinematics + lobby) is in progress. The user
+  asked (2026-11-11) for Phase 4 to be finished and Phases 5, 6 and 7 built, with the trailer first in Phase 7.
+  Gates for Phases 0-4 are still theirs to run on real laptops.
+- **Next:** T-5.1.
 - **Open issues:** see the latest entry.
 
 ## Log
+
+### 2026-11-11: Phase 4 art pass (T-4.2 to T-4.9; T-4.1 blocked)
+- The game now has its real look: four skinned dragons with riders, the Shattered Spires map built from 12
+  rock and 15 prop models, painted textures, sun shadows and light shafts, a post pass, and real sound effects,
+  ambience and music. Nothing was generated with Higgsfield: see "Higgsfield" below.
+- **T-4.2** `tools/pipeline`: optimize (gltf-transform, meshopt, KTX2), texture and audio encoders, a manifest
+  builder that enforces `budgets.json`, a GLB inspector.
+- **T-4.3 / T-4.4** Dragons built by Blender Python (`tools/blender/dragons`): one generator, four class
+  scripts, 12 clips each, 3 LODs. Loader with KTX2 + meshopt, clip blending, team tint on membranes, a cap on
+  skinned dragons per preset with the placeholder as the far tier. `?viewer=dragon:<class>` inspects one.
+- **T-4.5 / T-4.6** Map layout is data (`src/shared/maps/shattered-spires.ts`, 165 placements, half-turn
+  symmetric); the collision hulls are exported with the models, so the host, the worker and the clients collide
+  with what is drawn. Instanced props with 3 LOD tiers, far clusters, vertex AO, sun shadow map on High, blob
+  shadows on Medium, light shafts.
+- **T-4.7** One composite pass on every preset (tone map, grade, vignette; FXAA + sharpen on Medium and High;
+  3-level bloom and sun shafts on High). Low gets the pass too: DECISIONS 38.
+- **T-4.8** 123 audio files (6.2 MB) synthesised by `tools/audio`, loudness-normalised, with loop points in a
+  manifest. Two-layer match music follows the fight; the procedural sounds remain as the fallback.
+- **T-4.9** `?bench` (DECISIONS 41) and `node tools/capture/bench.mjs`. Headless capture tools in
+  `tools/capture` (screenshots, console errors, bench).
+- 1849 tests in 92 files; typecheck, test, build pass. Build: entry 654 kB (218 gzip), three 879 kB, host
+  worker 499 kB; `public/assets` is 17.9 MB.
+- **`?bench`, production build, headless Edge on the dev desktop (GTX 1660 SUPER, 1920 × 1080, 60 s, 5v5
+  bots). This is not the U-series target, and a headless browser is not held to 60 Hz:**
+
+  | | Low | Medium | High | Budget (L / M / H) |
+  | --- | --- | --- | --- | --- |
+  | Avg fps | 298.7 | 299.0 | 297.0 | 60 |
+  | 1 % low fps | 203.6 | 218.5 | 147.2 | |
+  | Slowest frame, ms | 53.4 | 26.6 | 30.1 | |
+  | Draw calls, max | 41 | 59 | 93 | 120 / 180 / 350 |
+  | Triangles, max | 82.2k | 144.0k | 308.2k | 250k / 450k / 1.2M |
+  | Particles, peak | 139 | 171 | 367 | 600 / 1200 / 3000 |
+  | Audio voices, peak | 16 | 23 | 25 | 16 / 24 / 32 |
+  | Render scale, min | 0.70 | 0.85 | 1.00 | |
+  | Host work per frame, ms | 0.217 | 0.253 | 0.298 | |
+
+  Before (Phase 3, greybox): 27 / 28 / 28 draw calls and 21.5k / 19.8k / 25.4k triangles. The 53 ms frame on
+  Low is one hitch in 60 s, most likely a shader compiling on first use (review finding 1 below).
+- **Higgsfield:** the account is on the free plan with 10 credits. GPT Image and Soul Location refuse free-plan
+  jobs; Z Image accepted two mood-board jobs and both failed and were refunded. Balance is still 10. All seven
+  attempts are in `art-source/LOG.md`; prompts come from `tools/pipeline/make-prompts.mjs`.
+- **Review of the Phase 4 code (11 findings).** Fixed here: shader warm-up now compiles against the real scene
+  target (`GameRenderer.precompile`, `Stage.warmUp`); `.pyc` files ignored. Recorded as a decision: Low's post
+  pass (38). Being fixed next, before Phase 5 lands: dragons and a late map are built mid-match; a failed map
+  load leaks and is not handled; a dragon class that fails to load is never retried; `PropField.dispose` leaves
+  instanced buffers to the GC; the shadow map survives a switch to Low; the skinned-dragon cap has no
+  hysteresis; map textures ignore the preset's `maxTextureSize`; no tests for the dragon animator, LOD pickers
+  and worker/main map parity. Left as is: sessions default to the greybox world when no factory is passed
+  (nothing does that today).
+- **Phase 4 gate for the user:**
+  1. `npm run dev`, then `http://localhost:5173/?solo&perf`: fly Shattered Spires. Does it look like the style
+     in `docs/ART_DIRECTION.md`? Say what to change; a restyle is a script edit and a rebuild.
+  2. On a U-series laptop: `http://<ip>:5173/?bench&quality=medium`, wait 70 s, read the box in the corner.
+     Pass = avg fps 60 and 1 % low above 50. Repeat with `quality=low`; send both rows.
+  3. Listen with speakers: lobby music, match music rising in a fight, each class's four abilities.
+  4. `?viewer=dragon:talon` (also `bastion`, `tempest`, `wraith`): check each dragon and its clips.
+- **Not verified:** anything on U-series hardware; nobody has listened to the audio; Low's composite pass cost
+  on integrated graphics.
+- **Incident:** a second dev server started by Claude wiped the Vite dependency cache of the user's running
+  one (`?perf` / `?debug` answered 504 until it re-optimised). Fixed with a separate cache folder
+  (DECISIONS 40).
 
 ### 2026-11-11: Phase 3 combat + MVP modes (T-3.1 to T-3.10)
 - A full Duel and a full Skirmish play start to finish against bots or a second player: countdown, rounds,

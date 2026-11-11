@@ -7,6 +7,7 @@
  * PeerJS chunk are fetched on demand (`?netsim` / `?debug`, and when the player hosts or joins).
  */
 import './style.css';
+import type { Bench } from './dev/bench';
 import { loadDevTools, loadNetsim } from './dev/boot';
 import type { PerfHud } from './dev/perf-hud';
 import { getQueryFlags } from './dev/query-flags';
@@ -87,19 +88,39 @@ function boot(): void {
   const renderer = createRendererOrFallback(canvas, pickQuality(flags.quality));
   if (renderer === null) return;
 
+  // `?viewer=dragon:<class>`: a dev asset viewer takes the page instead of the game.
+  if (flags.viewer.startsWith('dragon')) {
+    void import('./dev/dragon-viewer').then((m) =>
+      m.startDragonViewer({
+        canvas,
+        uiRoot: requireElement('ui', HTMLElement),
+        renderer,
+        spec: flags.viewer,
+      }),
+    );
+    return;
+  }
+
   const now = (): number => performance.now();
   // Fetched only with `?netsim` or `?debug`; the game waits for it before its first transport.
   const netsim = loadNetsim(flags, now);
 
+  // `?bench` is a whole set-up, not one switch: this page hosts a 5v5 Skirmish of bots that
+  // cannot end (no score or time limit), a bot flies the local dragon, and the room starts by
+  // itself. Explicit flags (`?mode=`, `?teamsize=`, `?botlevel=`) still win.
+  const bench = flags.bench;
   const game = createGame({
     canvas,
     uiRoot: requireElement('ui', HTMLElement),
     renderer,
     flags: {
-      autopilot: flags.autopilot,
-      autopilotBot: flags.autopilotBot,
+      autopilot: flags.autopilot || bench,
+      autopilotBot: flags.autopilotBot || bench,
       forcedQuality: flags.quality,
       autoSettings: {
+        ...(bench
+          ? { mode: 'skirmish' as const, teamSize: 5, scoreLimit: 200, timeLimitS: 0, fillBots: true }
+          : {}),
         ...(flags.mode !== null ? { mode: flags.mode } : {}),
         ...(flags.teamSize > 0 ? { teamSize: flags.teamSize } : {}),
         ...(flags.scoreLimit > 0 ? { scoreLimit: flags.scoreLimit } : {}),
@@ -108,14 +129,14 @@ function boot(): void {
         ...(flags.fillBots ? { fillBots: true } : {}),
       },
       lagCompensation: flags.lagCompensation,
-      joinCode: flags.joinCode,
+      joinCode: bench ? '' : flags.joinCode,
       skipSeconds: flags.skipSeconds,
       bots: flags.bots,
       lan: flags.lan,
-      solo: flags.solo,
-      autostart: flags.autostart,
+      solo: flags.solo && !bench,
+      autostart: flags.autostart || bench,
       noWorker: flags.noWorker,
-      measure: flags.perf || flags.debug || import.meta.env.DEV,
+      measure: flags.perf || flags.debug || bench || import.meta.env.DEV,
     },
     storage: { local: storageOrNull('localStorage'), session: storageOrNull('sessionStorage') },
     pageHostname: window.location.hostname,
@@ -142,6 +163,28 @@ function boot(): void {
 
   // Filled in when the `?perf` chunk arrives; stays null in normal play.
   let perfHud: PerfHud | null = null;
+  // Filled in when the `?bench` chunk arrives.
+  let benchRun: Bench | null = null;
+  if (bench) {
+    import('./dev/bench').then(
+      (m) => {
+        benchRun = m.createBench({
+          renderer,
+          seconds: flags.benchSeconds,
+          focus: game.arenaFocus,
+          inMatch: () => game.inMatch,
+          getSimMs: () => game.getSimMs(),
+          getPeaks: () => game.getPeaks(),
+          setCameraDirector: (director) => {
+            game.setDevCameraDirector(director);
+          },
+        });
+      },
+      (error: unknown) => {
+        console.warn('Bench failed to load', error);
+      },
+    );
+  }
 
   const driver = new FrameDriver({
     loop,
@@ -150,6 +193,7 @@ function boot(): void {
       perfHud?.begin(frameMs);
       game.frame(alpha, frameMs);
       perfHud?.end();
+      benchRun?.frame(frameMs);
     },
     // The "30 / 45 fps" setting: callbacks it turns down neither step nor draw.
     shouldRender: (timeMs) => game.shouldRender(timeMs),

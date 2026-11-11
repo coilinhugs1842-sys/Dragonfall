@@ -6,7 +6,8 @@
 
 # Binary game assets go through Git LFS
 *.glb filter=lfs diff=lfs merge=lfs -text
-*.gltf.bin filter=lfs diff=lfs merge=lfs -text
+# Every .bin: glTF buffers and the map instance-transform files (MapPropSet.instances)
+*.bin filter=lfs diff=lfs merge=lfs -text
 *.ktx2 filter=lfs diff=lfs merge=lfs -text
 *.png filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
@@ -21,3 +22,8 @@
 *.wav filter=lfs diff=lfs merge=lfs -text
 *.fbx filter=lfs diff=lfs merge=lfs -text
 *.blend filter=lfs diff=lfs merge=lfs -text
+*.flac filter=lfs diff=lfs merge=lfs -text
+*.tga filter=lfs diff=lfs merge=lfs -text
+*.tif filter=lfs diff=lfs merge=lfs -text
+*.tiff filter=lfs diff=lfs merge=lfs -text
+*.ktx filter=lfs diff=lfs merge=lfs -text

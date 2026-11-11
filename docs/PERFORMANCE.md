@@ -34,7 +34,7 @@
 | Draw calls | ≤ 120 | ≤ 180 | ≤ 350 |
 | Triangles on screen | ≤ 250k | ≤ 450k | ≤ 1.2M |
 | Shadow map (sun, near cascade only) | none (blob shadows) | none for world, 1024 for dragons only | 2048 |
-| Post-processing | none (tone-map in material) | one combined pass: FXAA + colour grade + vignette | + half-res bloom |
+| Post-processing | one pass: tone map + grade + vignette (DECISIONS 38) | one combined pass: FXAA + colour grade + vignette | + half-res bloom |
 | Max particles alive | 600 | 1,200 | 3,000 |
 | Dragon LOD distances (LOD0/LOD1/LOD2) | 25/70/200 m | 40/120/320 m | 80/220/600 m |
 | Prop draw distance | 500 m | 800 m | 1,500 m |

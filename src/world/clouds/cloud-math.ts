@@ -2,12 +2,17 @@
 import { fogDistanceForOpacity } from '../sky/sky-math';
 
 // --- Cloud palette (sRGB hex), derived from the sky colours in docs/ART_DIRECTION.md -------------
-/** Sunlit cloud: the palette cream, a touch brighter. */
-export const CLOUD_LIT_COLOR = 0xfbeed6;
+// These are the colours wanted ON SCREEN; the views convert them with `setPaintedColor`.
+/** Sunlit cloud: a warm peach-cream. */
+export const CLOUD_LIT_COLOR = 0xf6cfa2;
+/** The brightest crests and rims, facing the sun. */
+export const CLOUD_CREST_COLOR = 0xfaecd2;
 /** Shaded cloud: the dusk violet lifted toward the haze, so shadows stay airy. */
-export const CLOUD_SHADOW_COLOR = 0xa893b0;
-/** Deep folds of the cloud sea. */
-export const CLOUD_SEA_SHADOW_COLOR = 0x9a86a8;
+export const CLOUD_SHADOW_COLOR = 0xa189b4;
+/** Shaded folds of the cloud sea. */
+export const CLOUD_SEA_SHADOW_COLOR = 0x957fab;
+/** The deepest valleys of the cloud sea, and the underside of a puff. */
+export const CLOUD_SEA_DEEP_COLOR = 0x6c6599;
 
 /** Nearest multiple of `step` to `value`. A non-positive step returns `value` unchanged. */
 export function snapToGrid(value: number, step: number): number {

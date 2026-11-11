@@ -1,7 +1,19 @@
 /**
- * Greybox map renderer (T-1.6, view half): turns the shared map solids into chunked, merged,
- * vertex-coloured meshes. It calls the same `buildMapTriangles` as the sim's collision world
- * at full prism detail, so what is drawn is exactly what is hit.
+ * Map renderer.
+ *
+ * REAL MAPS (T-4.6, `map.placements`): the placed GLB assets drawn by `createPropField`
+ * (src/world/props: instanced LODs, merged far clusters, the painterly world material). The
+ * geometries and textures load asynchronously (`loadMapAssets`, cached per page; the stage
+ * starts the load when it is created, so a match normally finds them ready). Until they are
+ * there, and for good if the load fails (logged once), the view shows the STAND-IN below built
+ * from the map's collision hulls: the map is always flyable and what is drawn is never less
+ * than what is hit. `loadState` / `ready` tell the caller which of the two is on screen.
+ *
+ * GREYBOX / STAND-IN (T-1.6): the shared map triangles (`buildMapTriangles`, the same call as
+ * the sim's collision world, at full prism detail) as chunked, merged, vertex-coloured meshes.
+ *
+ * DEBUG (`?debug`): gate and storm markers; with `&collision` also the collision triangles
+ * over the visuals (map-collision-overlay.ts).
  *
  * COST: one draw call per non-empty world chunk that is on screen (the greybox has about 48
  * chunks of 250 m and about 5k triangles in total), ONE shared `MeshLambertMaterial`, no
@@ -17,8 +29,16 @@
  */
 
 import { BufferAttribute, BufferGeometry, Group, Mesh, MeshLambertMaterial, Sphere } from 'three';
+import type { Camera, WebGLRenderer } from 'three';
 import { buildMapTriangles, sliceMapChunk } from '../../shared';
 import type { MapManifest, QualityPreset, Vec3 } from '../../shared';
+import { useWorldLight } from '../light';
+import { createPropField, loadMapAssets, loadedMapAssets } from '../props';
+import type { MapAssetBundle, PropField, PropFieldStats } from '../props';
+import { createMapCollisionOverlay } from './map-collision-overlay';
+import type { MapCollisionOverlay } from './map-collision-overlay';
+import { createMapDebugMarkers } from './map-debug-markers';
+import type { MapDebugMarkers } from './map-debug-markers';
 import {
   DEFAULT_MAP_SHADE,
   bakeMapVertexColors,
@@ -44,6 +64,43 @@ export interface MapViewOptions {
   readonly fogDensity?: number;
   /** Overrides for the baked height/underside shade. `baseY` defaults to the cloud-sea surface. */
   readonly shade?: Partial<MapShadeOptions>;
+  /**
+   * The renderer the map's GLBs and KTX2 textures are loaded for. Without it (and without
+   * `assets`) a map with placements stays on its hull stand-in: node tests, tools.
+   */
+  readonly renderer?: WebGLRenderer | null;
+  /** An already loaded bundle (tools, tests); skips the loader. */
+  readonly assets?: MapAssetBundle;
+  /** Debug overlays. Default: read from the page URL (`?debug`, `&collision`). */
+  readonly debug?: MapDebugOptions;
+}
+
+export interface MapDebugOptions {
+  /** Gate, slot and storm-wall markers. */
+  readonly markers?: boolean;
+  /** The collision triangles over the visuals. */
+  readonly collision?: boolean;
+}
+
+/**
+ * What the view is drawing:
+ * - `static`: a greybox map (solids); nothing to load.
+ * - `loading`: the hull stand-in, while the real assets are on their way.
+ * - `ready`: the real assets.
+ * - `fallback`: the hull stand-in for good (no renderer given, or the load failed).
+ */
+export type MapLoadState = 'static' | 'loading' | 'ready' | 'fallback';
+
+/** `?debug` / `&collision` of the page URL; all off where there is no page (node). */
+export function mapDebugFromLocation(): MapDebugOptions {
+  const search = (globalThis as { location?: { search?: string } }).location?.search;
+  if (typeof search !== 'string' || search.length === 0) return {};
+  const params = new URLSearchParams(search);
+  const debug = params.has('debug');
+  return {
+    markers: debug,
+    collision: debug && (params.has('collision') || params.get('debug') === 'collision'),
+  };
 }
 
 /** Numbers for the perf HUD and the budget report. One object, mutated in place by `update`. */
@@ -57,14 +114,24 @@ export interface MapViewStats {
   readonly chunksInRange: number;
   /** Metres; Infinity when distance culling is off. */
   readonly drawDistance: number;
+  /** Counters of the real assets; null while the stand-in (or a greybox) is drawn. */
+  readonly props: PropFieldStats | null;
+  /** Milliseconds the asset load took (0 from the cache), -1 before it finished. */
+  readonly loadMs: number;
 }
 
 export interface MapView {
   /** Add to the scene once. Static: its matrices are never recomputed. */
   readonly object: Group;
   readonly stats: MapViewStats;
-  /** Per frame, before rendering: distance-culls chunks around the camera. Allocation-free. */
-  update(cameraPosition: Vec3): void;
+  readonly loadState: MapLoadState;
+  /** Settles (never rejects) once the view shows what it will keep showing. */
+  readonly ready: Promise<MapLoadState>;
+  /**
+   * Per frame, before rendering: LOD buckets, culling, the material clock. `camera` adds
+   * frustum culling of the instanced assets; `timeS` drives pulses and cloth. Allocation-free.
+   */
+  update(cameraPosition: Vec3, camera?: Camera | null, timeS?: number): void;
   setQuality(preset: QualityPreset): void;
   dispose(): void;
 }
@@ -76,6 +143,17 @@ interface MutableStats {
   maxChunkTriangles: number;
   chunksInRange: number;
   drawDistance: number;
+  props: PropFieldStats | null;
+  loadMs: number;
+}
+
+/**
+ * Starts loading a real map's assets (no-op for a greybox, and when already loaded or loading).
+ * Never rejects: a failure is reported by the map view that needs the assets.
+ */
+export function preloadMapAssets(map: MapManifest, renderer: WebGLRenderer): void {
+  if (map.placements === undefined || map.placements.length === 0) return;
+  loadMapAssets(map, renderer).catch(() => undefined);
 }
 
 /**
@@ -92,7 +170,7 @@ export function mapDrawDistance(fogDensity: number): number {
  */
 export function createMapView(
   map: MapManifest,
-  preset: QualityPreset,
+  initialPreset: QualityPreset,
   options: MapViewOptions = {},
 ): MapView {
   const fogDensity = options.fogDensity ?? map.sky.fogDensity;
@@ -102,75 +180,135 @@ export function createMapView(
     ...options.shade,
   };
 
-  // Full prism detail (no maxPrismSides): identical to the collision mesh.
-  const triangles = buildMapTriangles(
-    map,
-    options.chunkSize === undefined ? {} : { chunkSize: options.chunkSize },
-  );
-  const palette = createRolePalette();
-  const glowMask = createGlowRoleMask();
-
   const object = new Group();
   object.name = 'map';
   object.matrixAutoUpdate = false;
 
-  // Baked face normals and baked colours: no flatShading derivative work, no textures.
-  const material = new MeshLambertMaterial({ vertexColors: true });
-  material.name = 'map-greybox';
+  const placed = map.placements !== undefined && map.placements.length > 0;
+  const renderer = options.renderer ?? null;
+  const readyBundle =
+    options.assets ?? (placed && renderer !== null ? loadedMapAssets(map.id, renderer) : null);
 
-  const chunkCount = triangles.chunks.length;
+  // Baked face normals and baked colours: no flatShading derivative work, no textures.
+  let material: MeshLambertMaterial | null = null;
   const meshes: Mesh<BufferGeometry, MeshLambertMaterial>[] = [];
   // xyz + radius per chunk, read by `update` without touching the meshes' objects.
-  const spheres = new Float32Array(chunkCount * 4);
+  let spheres = new Float32Array(0);
   let maxChunkTriangles = 0;
+  let standInTriangles = 0;
+  let standInVertices = 0;
 
-  for (let i = 0; i < chunkCount; i++) {
-    const chunk = triangles.chunks[i];
-    if (chunk === undefined) continue;
-    const slice = sliceMapChunk(triangles, chunk);
-
-    const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new BufferAttribute(slice.positions, 3));
-    geometry.setAttribute('normal', new BufferAttribute(slice.normals, 3));
-    geometry.setAttribute(
-      'color',
-      new BufferAttribute(
-        bakeMapVertexColors(slice.positions, slice.normals, slice.roles, palette, glowMask, shade),
-        3,
-      ),
+  /** The greybox itself, or a real map's hulls as a stand-in. */
+  function buildChunks(): void {
+    // Full prism detail (no maxPrismSides): identical to the collision mesh.
+    const triangles = buildMapTriangles(
+      map,
+      options.chunkSize === undefined ? {} : { chunkSize: options.chunkSize },
     );
-    geometry.setIndex(new BufferAttribute(slice.indices, 1));
-    // World-space vertices under an identity matrix: the chunk's sphere IS the culling sphere.
-    const radius = chunk.radius + BOUNDS_MARGIN;
-    geometry.boundingSphere = new Sphere(undefined, radius);
-    geometry.boundingSphere.center.set(chunk.center.x, chunk.center.y, chunk.center.z);
+    const palette = createRolePalette();
+    const glowMask = createGlowRoleMask();
+    const chunkMaterial = new MeshLambertMaterial({ vertexColors: true });
+    chunkMaterial.name = 'map-greybox';
+    // A real map's stand-in sits in the same fog and takes the same dragon shadows as the
+    // assets that replace it; the greybox keeps three's plain fog (and its tests).
+    if (placed) useWorldLight(chunkMaterial);
+    material = chunkMaterial;
+    const chunkCount = triangles.chunks.length;
+    spheres = new Float32Array(chunkCount * 4);
+    for (let i = 0; i < chunkCount; i++) {
+      const chunk = triangles.chunks[i];
+      if (chunk === undefined) continue;
+      const slice = sliceMapChunk(triangles, chunk);
 
-    const mesh = new Mesh(geometry, material);
-    mesh.name = `map-chunk-${chunk.id}`;
-    mesh.matrixAutoUpdate = false;
-    object.add(mesh);
-    meshes.push(mesh);
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new BufferAttribute(slice.positions, 3));
+      geometry.setAttribute('normal', new BufferAttribute(slice.normals, 3));
+      geometry.setAttribute(
+        'color',
+        new BufferAttribute(
+          bakeMapVertexColors(slice.positions, slice.normals, slice.roles, palette, glowMask, shade),
+          3,
+        ),
+      );
+      geometry.setIndex(new BufferAttribute(slice.indices, 1));
+      // World-space vertices under an identity matrix: the chunk's sphere IS the culling sphere.
+      const radius = chunk.radius + BOUNDS_MARGIN;
+      geometry.boundingSphere = new Sphere(undefined, radius);
+      geometry.boundingSphere.center.set(chunk.center.x, chunk.center.y, chunk.center.z);
 
-    spheres[i * 4] = chunk.center.x;
-    spheres[i * 4 + 1] = chunk.center.y;
-    spheres[i * 4 + 2] = chunk.center.z;
-    spheres[i * 4 + 3] = radius;
-    const chunkTriangles = chunk.indexCount / 3;
-    if (chunkTriangles > maxChunkTriangles) maxChunkTriangles = chunkTriangles;
+      const mesh = new Mesh(geometry, chunkMaterial);
+      mesh.name = `map-chunk-${chunk.id}`;
+      mesh.matrixAutoUpdate = false;
+      object.add(mesh);
+      meshes.push(mesh);
+
+      spheres[i * 4] = chunk.center.x;
+      spheres[i * 4 + 1] = chunk.center.y;
+      spheres[i * 4 + 2] = chunk.center.z;
+      spheres[i * 4 + 3] = radius;
+      const chunkTriangles = chunk.indexCount / 3;
+      if (chunkTriangles > maxChunkTriangles) maxChunkTriangles = chunkTriangles;
+    }
+    standInTriangles = triangles.triangleCount;
+    standInVertices = triangles.vertexCount;
   }
 
+  function disposeChunks(): void {
+    for (let i = 0; i < meshes.length; i++) {
+      const mesh = meshes[i];
+      if (mesh === undefined) continue;
+      object.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    meshes.length = 0;
+    material?.dispose();
+    material = null;
+  }
+
+  let preset = initialPreset;
+  let disposed = false;
+  let field: PropField | null = null;
+  let loadState: MapLoadState = placed ? 'fallback' : 'static';
+
   const stats: MutableStats = {
-    chunkCount: meshes.length,
-    triangleCount: triangles.triangleCount,
-    vertexCount: triangles.vertexCount,
-    maxChunkTriangles,
-    chunksInRange: meshes.length,
+    chunkCount: 0,
+    triangleCount: 0,
+    vertexCount: 0,
+    maxChunkTriangles: 0,
+    chunksInRange: 0,
     drawDistance: mapDrawDistance(fogDensity),
+    props: null,
+    loadMs: -1,
   };
 
-  function setQuality(next: QualityPreset): void {
-    const castShadow = next.shadowCasters === 'all';
-    const receiveShadow = next.shadowMapSize > 0;
+  /** Swaps the stand-in for the real assets. False when the bundle does not fit the map. */
+  function showAssets(bundle: MapAssetBundle, loadMs: number): boolean {
+    let built: PropField;
+    try {
+      built = createPropField(map.placements ?? [], bundle, preset);
+    } catch (error) {
+      console.warn('[map] the loaded assets do not match the map; keeping the hull stand-in.', error);
+      return false;
+    }
+    disposeChunks();
+    field = built;
+    object.add(built.object);
+    stats.props = built.stats;
+    stats.chunkCount = built.stats.meshCount;
+    stats.chunksInRange = 0;
+    stats.triangleCount = built.stats.lod0Triangles;
+    stats.vertexCount = 0;
+    stats.maxChunkTriangles = 0;
+    stats.loadMs = loadMs;
+    loadState = 'ready';
+    return true;
+  }
+
+  function applyQuality(): void {
+    field?.setQuality(preset);
+    const castShadow = preset.shadowCasters === 'all';
+    // The stand-in of a real map takes shadows through `useWorldLight`, not three's lookup.
+    const receiveShadow = !placed && preset.shadowMapSize > 0;
     for (let i = 0; i < meshes.length; i++) {
       const mesh = meshes[i];
       if (mesh === undefined) continue;
@@ -179,7 +317,62 @@ export function createMapView(
     }
   }
 
-  function update(cameraPosition: Vec3): void {
+  let ready: Promise<MapLoadState>;
+  if (readyBundle !== null && showAssets(readyBundle, 0)) {
+    ready = Promise.resolve<MapLoadState>('ready');
+  } else {
+    buildChunks();
+    stats.chunkCount = meshes.length;
+    stats.triangleCount = standInTriangles;
+    stats.vertexCount = standInVertices;
+    stats.maxChunkTriangles = maxChunkTriangles;
+    stats.chunksInRange = meshes.length;
+    if (placed && renderer !== null && readyBundle === null) {
+      loadState = 'loading';
+      ready = loadMapAssets(map, renderer).then(
+        (bundle): MapLoadState => {
+          if (disposed) return loadState;
+          if (showAssets(bundle, bundle.loadMs)) applyQuality();
+          else loadState = 'fallback';
+          return loadState;
+        },
+        (error: unknown): MapLoadState => {
+          loadState = 'fallback';
+          console.warn('[map] asset load failed; flying on the collision-hull stand-in.', error);
+          return loadState;
+        },
+      );
+    } else {
+      ready = Promise.resolve(loadState);
+    }
+  }
+
+  // --- Debug overlays (never built in normal play) -------------------------------------------------
+  const debug = options.debug ?? mapDebugFromLocation();
+  let markers: MapDebugMarkers | null = null;
+  let collision: MapCollisionOverlay | null = null;
+  if (debug.markers === true) {
+    markers = createMapDebugMarkers(map);
+    markers.setVisible(true);
+    object.add(markers.object);
+  }
+  if (debug.collision === true) {
+    collision = createMapCollisionOverlay(map);
+    collision.setVisible(true);
+    object.add(collision.object);
+  }
+
+  function setQuality(next: QualityPreset): void {
+    preset = next;
+    applyQuality();
+  }
+
+  function update(cameraPosition: Vec3, camera: Camera | null = null, timeS = 0): void {
+    if (field !== null) {
+      field.update(cameraPosition, camera, timeS);
+      stats.chunksInRange = field.stats.meshesDrawn;
+      return;
+    }
     const distance = stats.drawDistance;
     const eyeX = cameraPosition.x;
     const eyeY = cameraPosition.y;
@@ -206,13 +399,26 @@ export function createMapView(
   }
 
   function dispose(): void {
-    for (let i = 0; i < meshes.length; i++) meshes[i]?.geometry.dispose();
-    material.dispose();
+    disposed = true;
+    disposeChunks();
+    field?.dispose();
+    field = null;
+    markers?.dispose();
+    collision?.dispose();
     object.clear();
-    meshes.length = 0;
   }
 
-  setQuality(preset);
+  applyQuality();
 
-  return { object, stats, update, setQuality, dispose };
+  return {
+    object,
+    stats,
+    get loadState() {
+      return loadState;
+    },
+    ready,
+    update,
+    setQuality,
+    dispose,
+  };
 }

@@ -4,6 +4,7 @@
  * Load-time only.
  */
 import { createSeededRandom } from '../../shared';
+import { addBillowNoise, addValueNoise, normalizeField } from '../sky/noise-fields';
 
 /** Byte that decodes to zero for the signed channels: shaders use `(texel - 128/255) * 2`. */
 export const SIGNED_ZERO_BYTE = 128;
@@ -18,61 +19,30 @@ function encodeUnit(value: number): number {
   return byte < 0 ? 0 : byte > 255 ? 255 : byte;
 }
 
-function fade(t: number): number {
-  return t * t * t * (t * (t * 6 - 15) + 10);
-}
-
-/** Lattice periods (cells across the texture) and weights of the octaves baked into the map. */
-const SEA_NOISE_PERIODS: readonly number[] = [4, 8, 16];
-const SEA_NOISE_WEIGHTS: readonly number[] = [0.56, 0.29, 0.15];
-
 /**
  * A `size` x `size` RGBA8 map that tiles in both directions:
  * R = billow height 0..1, G / B = its slope along +u / +v (signed, see `SIGNED_ZERO_BYTE`,
- * scaled so the steepest texel is +-1), A = 255.
+ * scaled so the steepest texel is +-1), A = an independent fine billow field 0..1 (detail).
  * One fetch gives the cloud-sea shader a height and a normal, with no derivatives.
+ *
+ * The height is broad swells (value noise) carrying round cauliflower bumps (inverted Worley):
+ * swells alone read as fog, bumps alone as pebbles.
  */
 export function generateCloudSeaNoise(size: number, seed: number): Uint8Array<ArrayBuffer> {
   if (!Number.isInteger(size) || size < 16) throw new Error('cloud noise size must be >= 16');
   const random = createSeededRandom(seed);
   const height = new Float32Array(size * size);
+  const detail = new Float32Array(size * size);
 
-  for (let octave = 0; octave < SEA_NOISE_PERIODS.length; octave++) {
-    const period = SEA_NOISE_PERIODS[octave] ?? 1;
-    const weight = SEA_NOISE_WEIGHTS[octave] ?? 0;
-    const lattice = new Float32Array(period * period);
-    for (let i = 0; i < lattice.length; i++) lattice[i] = random();
-
-    for (let y = 0; y < size; y++) {
-      const fy = (y * period) / size;
-      const y0 = Math.floor(fy);
-      const y1 = (y0 + 1) % period;
-      const ty = fade(fy - y0);
-      for (let x = 0; x < size; x++) {
-        const fx = (x * period) / size;
-        const x0 = Math.floor(fx);
-        const x1 = (x0 + 1) % period;
-        const tx = fade(fx - x0);
-        const a = lattice[y0 * period + x0] ?? 0;
-        const b = lattice[y0 * period + x1] ?? 0;
-        const c = lattice[y1 * period + x0] ?? 0;
-        const d = lattice[y1 * period + x1] ?? 0;
-        const top = a + (b - a) * tx;
-        const bottom = c + (d - c) * tx;
-        height[y * size + x] = (height[y * size + x] ?? 0) + weight * (top + (bottom - top) * ty);
-      }
-    }
-  }
-
-  let min = Infinity;
-  let max = -Infinity;
-  for (let i = 0; i < height.length; i++) {
-    const h = height[i] ?? 0;
-    if (h < min) min = h;
-    if (h > max) max = h;
-  }
-  const range = max > min ? max - min : 1;
-  for (let i = 0; i < height.length; i++) height[i] = ((height[i] ?? 0) - min) / range;
+  addValueNoise(height, size, 3, 3, 0.34, random);
+  addValueNoise(height, size, 7, 7, 0.14, random);
+  addBillowNoise(height, size, 5, 0.3, random);
+  addBillowNoise(height, size, 11, 0.16, random);
+  addBillowNoise(height, size, 23, 0.06, random);
+  normalizeField(height);
+  addBillowNoise(detail, size, 9, 0.6, random);
+  addBillowNoise(detail, size, 19, 0.4, random);
+  normalizeField(detail);
 
   // Central differences with wrap-around, so the slopes tile like the heights do.
   const slopeU = new Float32Array(size * size);
@@ -97,7 +67,7 @@ export function generateCloudSeaNoise(size: number, seed: number): Uint8Array<Ar
     out[i * 4] = encodeUnit(height[i] ?? 0);
     out[i * 4 + 1] = encodeSigned((slopeU[i] ?? 0) / steepest);
     out[i * 4 + 2] = encodeSigned((slopeV[i] ?? 0) / steepest);
-    out[i * 4 + 3] = 255;
+    out[i * 4 + 3] = encodeUnit(detail[i] ?? 0);
   }
   return out;
 }

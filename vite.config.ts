@@ -65,9 +65,18 @@ function copyVendorDecoders(): Plugin {
 // import basicSsl from '@vitejs/plugin-basic-ssl';
 // const httpsPlugins = process.env['DRAGONFALL_HTTPS'] === '1' ? [basicSsl()] : [];
 
+/**
+ * A second dev server on the same checkout (headless captures, load tests) must not share the
+ * dependency cache with the first: whichever starts last wipes it, and the other then answers
+ * "504 Outdated Optimize Dep" for stats-gl / lil-gui. Give the extra server its own folder with
+ * `DRAGONFALL_VITE_CACHE=node_modules/.vite-capture`.
+ */
+const CACHE_DIR = process.env['DRAGONFALL_VITE_CACHE'];
+
 export default defineConfig({
   // Relative base so the same build works at a domain root and under a GitHub Pages sub-path.
   base: './',
+  ...(CACHE_DIR !== undefined && CACHE_DIR !== '' ? { cacheDir: CACHE_DIR } : {}),
   plugins: [
     copyVendorDecoders(),
     // ...httpsPlugins,

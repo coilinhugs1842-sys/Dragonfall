@@ -19,6 +19,8 @@
 
 import type { MapManifest } from '../manifests';
 import type { Vec3 } from '../math-types';
+import { countPlacementTriangles, writePlacementTriangles } from './placements';
+import type { MapPlacement } from './placements';
 import type { MapSolid } from './solids';
 import {
   MAX_PRISM_SIDES,
@@ -43,7 +45,10 @@ export interface MapTriangleOptions {
 }
 
 /** What `buildMapTriangles` needs from a map; a MapManifest with `solids` fits. */
-export type MapTriangleSource = Pick<MapManifest, 'size' | 'solids' | 'chunkSize'> & {
+export type MapTriangleSource = Pick<
+  MapManifest,
+  'size' | 'solids' | 'chunkSize' | 'placements'
+> & {
   readonly colliders: Pick<MapManifest['colliders'], 'stormCenter'>;
 };
 
@@ -402,11 +407,19 @@ function boundChunk(
  * Builds the triangle soup for every solid of `map`, grouped by world chunk. The chunk grid
  * spans `map.size` around `map.colliders.stormCenter`; solids outside it land in the edge cells.
  * A map without `solids` gives an empty result.
+ *
+ * A map with `placements` (a real map, T-4.5) gives the collision hulls of its placed assets
+ * instead, in the same layout: flat-shaded, grouped by the chunk of each placement's position,
+ * role `moss` on up-facing hull faces and `stone` elsewhere. That mesh is what the sim collides
+ * with; a view may draw it as a stand-in, the real look is the assets' GLBs.
  */
 export function buildMapTriangles(
   map: MapTriangleSource,
   options: MapTriangleOptions = {},
 ): MapTriangles {
+  if (map.placements !== undefined && map.placements.length > 0) {
+    return buildPlacementMapTriangles(map, map.placements, options);
+  }
   const solids = map.solids ?? [];
   const maxPrismSides = options.maxPrismSides ?? MAX_PRISM_SIDES;
   const chunkSize = options.chunkSize ?? map.chunkSize ?? DEFAULT_MAP_CHUNK_SIZE;
@@ -477,6 +490,98 @@ export function buildMapTriangles(
     normals: writer.normals,
     roles: writer.roles ?? new Uint8Array(0),
     indices: writer.indices,
+    vertexCount: vertexTotal,
+    triangleCount: triangleTotal,
+    chunks,
+  };
+}
+
+function buildPlacementMapTriangles(
+  map: MapTriangleSource,
+  placements: readonly MapPlacement[],
+  options: MapTriangleOptions,
+): MapTriangles {
+  const chunkSize = options.chunkSize ?? map.chunkSize ?? DEFAULT_MAP_CHUNK_SIZE;
+  const cellsPerSide = Math.max(1, Math.ceil(map.size / chunkSize));
+  const minX = map.colliders.stormCenter.x - map.size * 0.5;
+  const minZ = map.colliders.stormCenter.z - map.size * 0.5;
+  const triangleTotal = countPlacementTriangles(placements);
+  const vertexTotal = triangleTotal * 3;
+
+  const cells = new Int32Array(placements.length);
+  const order = new Int32Array(placements.length);
+  for (let i = 0; i < placements.length; i++) {
+    const placement = placements[i];
+    if (placement === undefined) continue;
+    const cellX = Math.floor((placement.position.x - minX) / chunkSize);
+    const cellZ = Math.floor((placement.position.z - minZ) / chunkSize);
+    const clampedX = Math.min(Math.max(cellX, 0), cellsPerSide - 1);
+    const clampedZ = Math.min(Math.max(cellZ, 0), cellsPerSide - 1);
+    cells[i] = clampedZ * cellsPerSide + clampedX;
+    order[i] = i;
+  }
+  order.sort((a, b) => (cells[a] ?? 0) - (cells[b] ?? 0) || a - b);
+
+  const positions = new Float32Array(vertexTotal * 3);
+  const normals = new Float32Array(vertexTotal * 3);
+  const roles = new Uint8Array(vertexTotal);
+  const indices = new Uint32Array(triangleTotal * 3);
+  const stone = mapSurfaceRoleIndex('stone');
+  const moss = mapSurfaceRoleIndex('moss');
+
+  const chunks: MapTriangleChunk[] = [];
+  let vertex = 0;
+  let index = 0;
+  let start = 0;
+  while (start < order.length) {
+    const cell = cells[order[start] ?? 0] ?? 0;
+    const vertexStart = vertex;
+    const indexStart = index;
+    let end = start;
+    while (end < order.length && (cells[order[end] ?? 0] ?? 0) === cell) {
+      const placement = placements[order[end] ?? 0];
+      if (placement !== undefined) {
+        const written = writePlacementTriangles(
+          placement,
+          positions,
+          normals,
+          indices,
+          vertex,
+          index,
+          roles,
+        );
+        vertex += written * 3;
+        index += written * 3;
+      }
+      end++;
+    }
+    const vertexCount = vertex - vertexStart;
+    if (vertexCount > 0) {
+      // `writePlacementTriangles` left 1 (up-facing) or 0 in `roles`: turn that into role ids.
+      for (let v = vertexStart; v < vertex; v++) roles[v] = roles[v] === 1 ? moss : stone;
+      const cellX = cell % cellsPerSide;
+      const cellZ = (cell - cellX) / cellsPerSide;
+      const bounds = boundChunk(positions, vertexStart, vertexCount);
+      chunks.push({
+        id: `${cellX}_${cellZ}`,
+        cellX,
+        cellZ,
+        indexStart,
+        indexCount: index - indexStart,
+        vertexStart,
+        vertexCount,
+        center: bounds.center,
+        radius: bounds.radius,
+      });
+    }
+    start = end;
+  }
+
+  return {
+    positions,
+    normals,
+    roles,
+    indices,
     vertexCount: vertexTotal,
     triangleCount: triangleTotal,
     chunks,

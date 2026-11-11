@@ -22,8 +22,13 @@
  * `renderOrder`), so particles and effects always composite over the clouds.
  *
  * Billboarding happens in the vertex shader around the world up axis (so a banking camera
- * does not roll the clouds). Per frame the CPU writes one float. Colours are painted and
- * `toneMapped = false`, like the sky; three's fog chunks fade the puffs into `scene.fog`.
+ * does not roll the clouds). Per frame the CPU writes one float.
+ *
+ * Shading (T-4.7): the baked normals give a wrapped sun term that runs through a painted ramp
+ * (violet shade -> warm peach -> cream crest), undersides sink toward the sea's valley colour,
+ * and thin edges glow when the sun is behind the puff. Colours are scene-linear values authored
+ * through `setPaintedColor`; `wlApplyFog` fades the puffs into the same haze as the sky and the
+ * sea, and its sea-haze layer melts the bases of the low banks into the sea.
  */
 import {
   BufferAttribute,
@@ -38,13 +43,20 @@ import {
   RGBAFormat,
   ShaderMaterial,
   UnsignedByteType,
-  Vector3,
   Vector4,
 } from 'three';
 import type { QualityPreset, QualityPresetId } from '../../shared';
+import { WORLD_LIGHT_FOG_PARS_FRAGMENT } from '../light/light-glsl';
+import { setPaintedColor } from '../light/light-math';
+import { createHazeUniforms } from '../light/light-setup';
 import { GOLDEN_HOUR_SKY, fogDistanceForOpacity } from '../sky/sky-math';
 import type { SkySetup } from '../sky/sky-math';
-import { CLOUD_LIT_COLOR, CLOUD_SHADOW_COLOR } from './cloud-math';
+import {
+  CLOUD_CREST_COLOR,
+  CLOUD_LIT_COLOR,
+  CLOUD_SEA_DEEP_COLOR,
+  CLOUD_SHADOW_COLOR,
+} from './cloud-math';
 import { PUFF_ATLAS_GRID, PUFF_CONTENT_RADIUS, generatePuffAtlas } from './cloud-noise';
 import {
   CLOUD_DEFAULT_SEED,
@@ -93,7 +105,7 @@ const SWAY_AMPLITUDE = 5;
 const SWAY_RATE = 0.125;
 const TWO_PI = Math.PI * 2;
 /** Texels per sprite; the atlas is twice this. Soft shapes need no more. */
-const PUFF_CELL_SIZE = 64;
+const PUFF_CELL_SIZE = 128;
 const PUFF_ATLAS_SEED = 0xb111;
 /** Layer i draws at CLOUD_RENDER_ORDER_BASE + i: all negative, before other transparents. */
 export const CLOUD_RENDER_ORDER_BASE = -8;
@@ -103,11 +115,11 @@ attribute vec4 aPuff;     // x: atlas sprite, y: flip (+1 / -1), z: sway phase 0
 uniform vec4 uFade;       // x, y: near fade in half-widths; z, w: far fade in metres
 uniform float uMaxScreen; // on-screen half-size cap (fraction of the screen half-height)
 uniform float uSway;      // wrapped angle, radians
-uniform vec3 uSunDir;
+uniform vec3 uWlSunDir;
 varying vec2 vUv;
 varying vec3 vSun;        // sun direction in the sprite's (right, up, toward-camera) frame
-varying float vAlpha;
-#include <fog_pars_vertex>
+varying vec3 vWorld;
+varying vec2 vFade;       // x: opacity, y: how directly the sun is behind the puff (0..1)
 
 void main() {
   // The instance matrix only carries the centre and the half-size (scale x / y).
@@ -127,12 +139,15 @@ void main() {
   // Fade in with distance (never a big quad near the lens), fade out where the fog takes over.
   float fade = smoothstep(uFade.x * radius, uFade.y * radius, dist)
              * (1.0 - smoothstep(uFade.z, uFade.w, dist));
-  vAlpha = fade * aPuff.w;
+  float against = max(dot(-forward, uWlSunDir), 0.0);
+  against *= against;
+  vFade = vec2(fade * aPuff.w, against * against);
 
   // On-screen size cap: shrink the puff when it would cover too much of the screen.
   float cap = min(1.0, uMaxScreen * dist / (radius * projectionMatrix[1][1]));
   vec2 corner = position.xy * halfSize * cap;
   vec3 worldPosition = centre.xyz + right * corner.x + up * corner.y;
+  vWorld = worldPosition;
 
   // Atlas cell + mirrored u. position.xy spans the cell as -1..1.
   float sprite = aPuff.x;
@@ -140,38 +155,46 @@ void main() {
   vec2 local = vec2(position.x * aPuff.y, position.y) * 0.5 + 0.5;
   vUv = (cell + local) / ${PUFF_ATLAS_GRID.toFixed(1)};
   // Mirroring the sprite mirrors its baked normals, so mirror the sun's x to match.
-  vSun = vec3(dot(uSunDir, right) * aPuff.y, dot(uSunDir, up), dot(uSunDir, forward));
+  vSun = vec3(dot(uWlSunDir, right) * aPuff.y, dot(uWlSunDir, up), dot(uWlSunDir, forward));
 
-  vec4 mvPosition = viewMatrix * vec4(worldPosition, 1.0);
-  gl_Position = projectionMatrix * mvPosition;
+  gl_Position = projectionMatrix * (viewMatrix * vec4(worldPosition, 1.0));
   // Invisible puffs leave the clip volume: zero fragments, zero overdraw.
-  if (vAlpha < 0.004) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-  #include <fog_vertex>
+  if (vFade.x < 0.004) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 }
 `;
 
 const FRAGMENT_SHADER = /* glsl */ `
 uniform sampler2D uAtlas; // rg: normal xy (zero at 128/255), b: thickness, a: alpha
+uniform vec3 uCrest;
 uniform vec3 uLit;
 uniform vec3 uShadow;
+uniform vec3 uDeep;
+uniform vec3 uSunGlow;    // linear sun colour
 varying vec2 vUv;
 varying vec3 vSun;
-varying float vAlpha;
-#include <fog_pars_fragment>
+varying vec3 vWorld;
+varying vec2 vFade;
+${WORLD_LIGHT_FOG_PARS_FRAGMENT}
 
 void main() {
   vec4 texel = texture2D(uAtlas, vUv);
   vec3 normal;
   normal.xy = (texel.rg - 0.50196) * 2.0;
   normal.z = sqrt(max(1.0 - dot(normal.xy, normal.xy), 0.0));
-  // Half-Lambert so the shaded side keeps its colour; thick cores read a little denser.
-  float lit = smoothstep(0.1, 0.95, dot(normal, vSun) * 0.5 + 0.5);
-  lit *= 1.0 - 0.2 * texel.b;
-  gl_FragColor = vec4(mix(uShadow, uLit, lit), texel.a * vAlpha);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
-  #include <fog_fragment>
-  #include <premultiplied_alpha_fragment>
+  // Wrapped sun term: the flank that faces the sun goes warm, the far flank keeps its violet.
+  float lit = smoothstep(-0.2, 0.85, dot(normal, vSun));
+  // Thick cores read a little denser, and the underside sinks toward the valley colour.
+  lit *= 1.0 - 0.22 * texel.b;
+  float under = smoothstep(0.15, -0.75, normal.y) * (1.0 - lit);
+  vec3 col = mix(uShadow, uLit, smoothstep(0.08, 0.7, lit));
+  col = mix(col, uCrest, smoothstep(0.68, 1.0, lit));
+  col = mix(col, uDeep, under * 0.5);
+  // Silver lining: thin edges glow when the sun is behind the puff.
+  float thin = 1.0 - texel.b;
+  col += uSunGlow * (thin * thin * vFade.y * 0.85);
+
+  float alpha = texel.a * vFade.x;
+  gl_FragColor = vec4(wlApplyFog(col, vWorld) * alpha, alpha);
 }
 `;
 
@@ -263,22 +286,19 @@ export function createCloudBillboards(options: CloudBillboardsOptions): CloudBil
       },
       uMaxScreen: maxScreen,
       uSway: sway,
-      uSunDir: {
-        value: new Vector3(sky.sunDirection.x, sky.sunDirection.y, sky.sunDirection.z).normalize(),
-      },
-      uLit: { value: new Color(CLOUD_LIT_COLOR) },
-      uShadow: { value: new Color(CLOUD_SHADOW_COLOR) },
-      // Filled by the renderer from scene.fog (material.fog = true).
-      fogColor: { value: new Color(sky.fogColor) },
-      fogDensity: { value: sky.fogDensity },
-      fogNear: { value: 1 },
-      fogFar: { value: 2000 },
+      // The puffs rest on the sea, so the sea haze softens their bases into it.
+      ...createHazeUniforms(sky, options.field.cloudSeaY),
+      uCrest: { value: setPaintedColor(new Color(), CLOUD_CREST_COLOR) },
+      uLit: { value: setPaintedColor(new Color(), CLOUD_LIT_COLOR) },
+      uShadow: { value: setPaintedColor(new Color(), CLOUD_SHADOW_COLOR) },
+      uDeep: { value: setPaintedColor(new Color(), CLOUD_SEA_DEEP_COLOR) },
+      uSunGlow: { value: new Color(sky.sunColor) },
     },
     transparent: true,
     premultipliedAlpha: true,
     depthTest: true,
     depthWrite: false,
-    fog: true,
+    fog: false,
     toneMapped: false,
   });
 

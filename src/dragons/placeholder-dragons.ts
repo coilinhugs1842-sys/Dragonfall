@@ -88,6 +88,12 @@ export interface PlaceholderDragonsOptions {
    * hint until respawn). Default false: only living dragons are drawn.
    */
   readonly showDead?: boolean;
+  /**
+   * 256 bytes indexed by player id, owned and rewritten each frame by the caller: a dragon
+   * whose byte is non-zero is not drawn here (the skinned renderer in dragons.ts draws it).
+   * This is how the placeholder doubles as the far representation and the loading fallback.
+   */
+  readonly skipIds?: Uint8Array;
 }
 
 /** Live numbers for the perf HUD. One object, mutated in place by `update`. */
@@ -145,6 +151,7 @@ export function createPlaceholderDragons(
   options: PlaceholderDragonsOptions = {},
 ): PlaceholderDragons {
   const showDead = options.showDead ?? false;
+  const skipIds = options.skipIds ?? null;
 
   const object = new Group();
   object.name = 'dragons';
@@ -241,6 +248,7 @@ export function createPlaceholderDragons(
       if ((flags & DRAGON_FLAG_ALIVE) === 0 && !showDead) continue;
       const veiled = (flags & DRAGON_FLAG_VEILED) !== 0;
       if (veiled && localTeam !== NO_TEAM && dragon.team !== localTeam) continue;
+      if (skipIds !== null && skipIds[dragon.id & (ID_SLOTS - 1)] !== 0) continue;
       const batch = batches[classIndex[dragon.classId]];
       if (batch === undefined || batch.count >= MAX_PLAYERS) continue;
       const slot = batch.count++;

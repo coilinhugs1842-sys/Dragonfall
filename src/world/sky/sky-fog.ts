@@ -1,15 +1,21 @@
 /**
  * Scene fog for the golden-hour sky. The sky dome's horizon band and the cloud sea both resolve
  * to this fog's colour, which is what hides the far plane.
+ *
+ * The fog colour is stored SCENE-linear (`fogSceneColor`): the value that the post pass's tone
+ * curve shows as the map's `fogColor`. It is not the hex itself.
  */
 import { FogExp2 } from 'three';
 import type { Scene } from 'three';
+import { fogSceneColor } from '../light/light-setup';
 import { GOLDEN_HOUR_SKY } from './sky-math';
 import type { SkySetup } from './sky-math';
 
-/** A FogExp2 with the setup's colour and density. Colour management converts the sRGB hex. */
+/** A FogExp2 with the setup's density and its colour as shown through the post pass. */
 export function createSkyFog(setup: SkySetup = GOLDEN_HOUR_SKY): FogExp2 {
-  return new FogExp2(setup.fogColor, setup.fogDensity);
+  const fog = new FogExp2(setup.fogColor, setup.fogDensity);
+  fogSceneColor(setup, fog.color);
+  return fog;
 }
 
 /**
@@ -19,7 +25,7 @@ export function createSkyFog(setup: SkySetup = GOLDEN_HOUR_SKY): FogExp2 {
 export function applySkyFog(scene: Scene, setup: SkySetup = GOLDEN_HOUR_SKY): FogExp2 {
   const existing = scene.fog;
   if (existing instanceof FogExp2) {
-    existing.color.setHex(setup.fogColor);
+    fogSceneColor(setup, existing.color);
     existing.density = setup.fogDensity;
     return existing;
   }

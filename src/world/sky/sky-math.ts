@@ -11,14 +11,24 @@ export type SkySetup = Pick<MapSky, 'sunDirection' | 'sunColor' | 'fogColor' | '
 export const SKY_CREAM = 0xf4e6cc;
 export const SKY_PEACH = 0xf2b984;
 export const SKY_DUSK_VIOLET = 0x5b4c7a;
+/** Derived sky tones: the horizon and mid sky on the side away from the sun. */
+export const SKY_ROSE = 0xeac3b2;
+export const SKY_MAUVE = 0xa58cb4;
+/** High cloud sheets and far cloud banks painted into the sky. */
+export const SKY_CLOUD_LIT = 0xffe6bf;
+export const SKY_CLOUD_SHADOW = 0x8d78a6;
 
 // --- Lighting recipe, Shattered Spires (golden hour) ---------------------------------------------
 export const SUN_COLOR = 0xffd9a0;
-export const SUN_INTENSITY = 2.2;
+/**
+ * The recipe's "~2.2" predates three's physical light units; the same brightness is 2.2 * pi.
+ * Tuned by eye against the painted sky through the post pass's tone curve.
+ */
+export const SUN_INTENSITY = 5.0;
 export const SUN_ELEVATION_DEG = 18;
 export const HEMISPHERE_SKY_COLOR = 0x9fb7d9;
 export const HEMISPHERE_GROUND_COLOR = 0x3f5a55;
-export const HEMISPHERE_INTENSITY = 1.0;
+export const HEMISPHERE_INTENSITY = 2.2;
 export const FOG_COLOR = 0xe9d9c0;
 /** "Density tuned so 1.2 km fades out". */
 export const FOG_FADE_DISTANCE = 1200;

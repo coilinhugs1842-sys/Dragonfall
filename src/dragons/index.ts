@@ -1,4 +1,75 @@
-/** Barrel for the dragon views. Phase 1: the instanced placeholder dragon. */
+/**
+ * Barrel for the dragon views: the skinned, animated dragons (T-4.4) and the instanced
+ * placeholder they fall back to (loading, far distance).
+ */
+
+export {
+  ANIM_BLEND_RATE,
+  BREATH_SCALE,
+  DRAGON_CLIP_COUNT,
+  advanceDragonAnim,
+  breathScale,
+  createDragonAnimInput,
+  createDragonAnimState,
+  resetDragonAnimState,
+  writeDragonPose,
+  writeLocomotionTargets,
+} from './dragon-animator';
+export type {
+  DragonAnimBones,
+  DragonAnimInput,
+  DragonAnimRig,
+  DragonAnimState,
+} from './dragon-animator';
+export {
+  CLOAK_UV_RECT,
+  DRAGON_BAKE_FPS,
+  buildDragonAsset,
+  cloakFlutterWeight,
+  createDragonAssetLibrary,
+  parseDragonManifest,
+  sharedDragonAssetLibrary,
+} from './dragon-assets';
+export type {
+  DragonAsset,
+  DragonAssetLibrary,
+  DragonAssetLibraryOptions,
+  DragonAssetStatus,
+  DragonManifestExtras,
+  DragonManifestFile,
+} from './dragon-assets';
+export {
+  DRAGON_LOD_FAR,
+  LOD_HYSTERESIS,
+  LOD_REFERENCE_FOV_DEG,
+  dragonLodPolicy,
+  lodForDistance,
+  lodFovScale,
+  selectDragonLods,
+} from './dragon-lod';
+export type { DragonLodLevel, DragonLodPolicy } from './dragon-lod';
+export {
+  DRAGON_SHADER_SOURCE,
+  MEMBRANE_GLOW,
+  RUNE_GLOW,
+  createDragonMaterial,
+  setDragonMaterialQuality,
+} from './dragon-material';
+export type { DragonMaterial, DragonUniforms } from './dragon-material';
+export { createDragons } from './dragons';
+export type { Dragons, DragonsDebug, DragonsOptions, DragonsStats } from './dragons';
+export {
+  accumulateClip,
+  applyLocalDelta,
+  bodyAngularVelocity,
+  clipTime,
+  createPoseAccumulator,
+  finishPose,
+  resetPose,
+  rotateBoneModelSpace,
+} from './pose-math';
+export type { BakedClip, PoseAccumulator } from './pose-math';
+
 
 export {
   DRAGON_MAX_TRIANGLES,

@@ -71,6 +71,30 @@ export const CHARGE_SOUNDS: Readonly<Record<DragonClassId, SoundId | null>> = {
   wraith: 'windup',
 };
 
+/** A dragon's roar, on top of its ultimate's own sound: the "something big just happened" cue. */
+export const ROAR_SOUNDS: Readonly<Record<DragonClassId, SoundId>> = {
+  talon: 'roarTalon',
+  bastion: 'roarBastion',
+  tempest: 'roarTempest',
+  wraith: 'roarWraith',
+};
+
+/** Wing beats by build: the lean classes beat fast and light, Bastion slow and heavy. */
+export const FLAP_SOUNDS: Readonly<Record<DragonClassId, SoundId>> = {
+  talon: 'flapSmall',
+  bastion: 'flapLarge',
+  tempest: 'flap',
+  wraith: 'flapSmall',
+};
+
+/** Seconds between wing beats, as a multiple of AUDIO_TUNING.flapPeriodS. */
+export const FLAP_PERIOD_SCALE: Readonly<Record<DragonClassId, number>> = {
+  talon: 0.8,
+  bastion: 1.35,
+  tempest: 1,
+  wraith: 0.9,
+};
+
 /** `hit`, by what dealt the damage. */
 export const HIT_SOUNDS: Readonly<Record<DamageSource, SoundId>> = {
   primary: 'hitFlesh',
@@ -90,6 +114,12 @@ export const TAKEDOWN_CONFIRM_SOUND: SoundId = 'takedownConfirm';
 /** The local rider got an assist. Other riders' assists are silent. */
 export const ASSIST_SOUND: SoundId = 'assist';
 export const SPAWN_SOUND: SoundId = 'spawnChime';
+/** The cry of the dragon that was taken down, at the same place as TAKEDOWN_SOUND. */
+export const DEATH_FALL_SOUND: SoundId = 'deathFall';
+/** A dragon in view dropping its veil (DRAGON_FLAG_VEILED goes off). */
+export const VEIL_OUT_SOUND: SoundId = 'veilOut';
+/** A dragon starting to boost (DRAGON_FLAG_BOOSTING goes on). */
+export const BOOST_START_SOUND: SoundId = 'boostStart';
 
 /** `statusApplied`. Self-buffs are null: their cast sound already said it. */
 export const STATUS_SOUNDS: Readonly<Record<StatusKind, SoundId | null>> = {
@@ -145,10 +175,25 @@ export const RESULT_SOUNDS: Readonly<Record<'won' | 'lost' | 'draw', SoundId>> =
 export const FLIGHT_SOUNDS = {
   wind: 'windLoop',
   boost: 'boostLoop',
+  dive: 'diveLoop',
   storm: 'stormLoop',
   flap: 'flap',
   heartbeat: 'heartbeat',
 } as const satisfies Record<string, SoundId>;
+
+/**
+ * Sounds the music steps back for: the music bus drops to `to` (linear) while the sting plays
+ * and comes back over about a second after `holdS`.
+ */
+export const MUSIC_DUCKS: Readonly<Partial<Record<SoundId, { to: number; holdS: number }>>> = {
+  victory: { to: 0.08, holdS: 6 },
+  defeat: { to: 0.08, holdS: 6.5 },
+  roundEnd: { to: 0.3, holdS: 2 },
+  countdownGo: { to: 0.45, holdS: 1.2 },
+  takedownConfirm: { to: 0.55, holdS: 1 },
+  nightTerror: { to: 0.5, holdS: 2.4 },
+  thunder: { to: 0.6, holdS: 2 },
+};
 
 /** What the UI may ask for through `playUi` (wired by `src/game`; the UI never imports audio). */
 export const UI_SOUND_IDS = ['hover', 'click', 'ready', 'error'] as const;

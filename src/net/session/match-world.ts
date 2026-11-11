@@ -9,8 +9,13 @@
  * travels in MATCH_START.
  */
 
-import { GREYBOX_SPIRES_DEFAULT_SEED, createGreyboxSpires } from '../../shared';
-import type { HostSettings, Quat, SpawnGate, TeamId, Vec3 } from '../../shared';
+import {
+  GREYBOX_SPIRES_DEFAULT_SEED,
+  createGreyboxSpires,
+  createShatteredSpires,
+  spawnGatesForMode,
+} from '../../shared';
+import type { ArenaMap, HostSettings, Quat, SpawnGate, TeamId, Vec3 } from '../../shared';
 import { NULL_COLLISION_WORLD, createMapCollisionWorld } from '../../sim';
 import type { SimCollisionWorld } from '../../sim';
 
@@ -54,6 +59,47 @@ export function createGreyboxMatchWorld(seed: number = DEFAULT_MATCH_SEED): Matc
 /** `MatchWorldFactory` form of `createGreyboxMatchWorld`: the default of both sessions. */
 export const greyboxMatchWorldFactory: MatchWorldFactory = (_settings, seed) =>
   createGreyboxMatchWorld(seed);
+
+/**
+ * The MatchWorld of a built map for a mode: the same collision world for every mode, the gate
+ * set the mode launches from (Duel uses the closer perches of a real map, DECISIONS 34).
+ */
+export function matchWorldOf(
+  map: ArenaMap,
+  collisionWorld: SimCollisionWorld,
+  mode: HostSettings['mode'],
+): MatchWorld {
+  return {
+    collisionWorld,
+    spawnGates: spawnGatesForMode(map, mode),
+    centerX: map.colliders.stormCenter.x,
+    centerZ: map.colliders.stormCenter.z,
+    radius: map.colliders.stormRadius,
+    floorY: map.colliders.floorY,
+    ceilingY: map.colliders.ceilingY,
+  };
+}
+
+/**
+ * A `MatchWorldFactory` for the real Shattered Spires (T-4.5): what matches fly on. It builds
+ * the map and its BVH once per layout seed (about 70 ms, allocates) and keeps the latest, so a
+ * rematch or a mode change costs nothing. Every map id flies Shattered Spires until the second
+ * map ships.
+ */
+export function createShatteredSpiresMatchWorldFactory(): MatchWorldFactory {
+  let seedOf = -1;
+  let map: ArenaMap | null = null;
+  let collision: SimCollisionWorld | null = null;
+  return (settings, seed) => {
+    const key = seed >>> 0;
+    if (map === null || collision === null || seedOf !== key) {
+      map = createShatteredSpires(key);
+      collision = createMapCollisionWorld(map);
+      seedOf = key;
+    }
+    return matchWorldOf(map, collision, settings.mode);
+  };
+}
 
 const OPEN_SKY_GATE_DISTANCE = 300;
 const OPEN_SKY_ALTITUDE = 320;

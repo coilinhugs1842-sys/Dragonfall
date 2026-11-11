@@ -142,3 +142,35 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
     800 m of a 1000 m radius) that clamps rounds 2+ to 861 m, so the per-round fractions barely show. The real
     map (T-4.5) places Duel gates closer in so the fractions apply.
 35. **Placeholder sounds are synthesised in code** (no audio files yet); real audio lands in T-4.8.
+
+## 2026-11-11: Phase 4
+
+36. **Phase 4 art is authored procedurally, not generated with Higgsfield.** The Higgsfield workspace is on the
+    free plan with 10 credits, far short of a dragon/map/audio batch, and buying credits is the user's call.
+    No credits were spent. Dragons, rocks, props and textures are built by Blender Python scripts under
+    `tools/blender/` (the "build in parts" fallback of ASSET_PIPELINE.md), audio is synthesised offline, and
+    everything still goes through the optimize step into `public/assets`. If the user tops up, generated
+    assets can replace any of these through the same manifests.
+37. **STYLE FORMULA adopted as drafted (provisional).** The user asked for the remaining phases without
+    approval stops, so the draft in ART_DIRECTION.md is the working style. The mood-board step is skipped
+    (needs credits). The user can still ask for a restyle after seeing the result.
+38. **Low runs one composite pass too** (tone map + grade + vignette; no FXAA, no sharpen, no bloom).
+    PERFORMANCE.md used to say "none (tone-map in material)" for Low. Since T-4.7 every preset draws the scene
+    into an HDR target at the render scale and one fullscreen pass puts it on a display-size canvas, so the
+    three presets share one tone curve and one grade, and the render scale never resizes the canvas. The cost
+    on Low is one half-float target and one fullscreen triangle at display size. It has only been measured on
+    the dev desktop: **check Low on the U-series laptop** (`?bench&quality=low`), and if the pass costs more
+    than about 1 ms there, Low goes back to drawing straight to a smaller canvas. `QUALITY_PRESETS.low`'s
+    `postPass` / `toneMapInMaterial` / `colorGrade` / `vignette` fields are not read at the moment.
+39. **Higgsfield on the free plan cannot make the Phase 4 or Phase 7 assets.** Tried on 2026-11-11: GPT Image
+    and Soul Location refuse free-plan jobs (`job_minimum_basic_plan_required`), Z Image accepted two jobs and
+    both failed (refunded), and one 5 s video clip costs 7.5 to 35 credits against a balance of 10. Every
+    attempt is in `art-source/LOG.md`. Until the user upgrades or tops up, art stays procedural (decision 36)
+    and the trailer is cut from real in-game captures.
+40. **A second dev server needs its own Vite cache.** Two `vite` processes on one checkout share
+    `node_modules/.vite`; the one that starts last wipes it and the other answers 504 for `stats-gl` and
+    `lil-gui`. Capture and load-test runs start theirs with `DRAGONFALL_VITE_CACHE=node_modules/.vite-capture`
+    on another port (`vite.config.ts`).
+41. **`?bench` is a whole set-up, not a camera toggle.** It hosts a 5v5 bot Skirmish that cannot end, hands the
+    camera to a fixed path round the map centre, skips 10 s of warm-up and measures the next 60 s
+    (`?bench=20` for a shorter run). `node tools/capture/bench.mjs` runs it headless on all three presets.

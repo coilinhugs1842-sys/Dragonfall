@@ -2,7 +2,7 @@
  * Dev/test switches read from the page URL (`?perf`, `?debug`, `?bench`, `?autopilot`, `?skip=20`,
  * `?quality=low`, `?netsim=bad`, `?bots=8`, `?lan`, `?solo`, `?autostart`, `?noworker`, and the
  * match set-up switches `?mode=duel`, `?score=5`, `?time=0`, `?teamsize=2`, `?botlevel=hard`,
- * `?fill`, `?lagcomp=0`, `?join=CODE`).
+ * `?fill`, `?lagcomp=0`, `?join=CODE`), and `?viewer=dragon:<class>` for the asset viewer.
  * This module is deliberately tiny and dependency-free (shared types and the pure netsim profile
  * table only): main.ts imports it statically to decide whether the heavy dev chunks (stats-gl,
  * lil-gui) get fetched at all.
@@ -22,8 +22,13 @@ export interface QueryFlags {
   readonly perf: boolean;
   /** `?debug`: show the lil-gui debug panel. */
   readonly debug: boolean;
-  /** `?bench`: run the fixed benchmark flight and print a summary. */
+  /**
+   * `?bench`: host a 5v5 bot Skirmish, fly the fixed camera path and print a summary
+   * (docs/PERFORMANCE.md, "How we measure"; src/dev/bench.ts).
+   */
   readonly bench: boolean;
+  /** `?bench=20`: seconds measured (after the warm-up). A bare `?bench` is 60. */
+  readonly benchSeconds: number;
   /**
    * `?autopilot`: a scripted pilot flies the local dragon instead of the mouse and keyboard, so
    * headless screenshots and soak tests show real flight without pointer lock.
@@ -92,6 +97,11 @@ export interface QueryFlags {
   readonly lagCompensation: boolean;
   /** `?join=CODE`: skip the title and join this room at once (two-page tests). '' = off. */
   readonly joinCode: string;
+  /**
+   * `?viewer=dragon:<class>`: open a dev viewer instead of the game (src/dev/dragon-viewer.ts).
+   * Lower-cased; '' = off.
+   */
+  readonly viewer: string;
 }
 
 /** A bare `?perf` or `?perf=1` turns a flag on; `?perf=0|false|off|no` keeps it off. */
@@ -110,6 +120,18 @@ function parseSeconds(value: string | null, max: number): number {
   const seconds = Number(value);
   if (!(seconds > 0)) return 0;
   return seconds < max ? seconds : max;
+}
+
+export const DEFAULT_BENCH_SECONDS = 60;
+const MIN_BENCH_SECONDS = 5;
+
+/** `?bench` / `?bench=1` = the default length; `?bench=20` = 20 s; off = 0. */
+function parseBenchSeconds(params: URLSearchParams): number {
+  if (!isOn(params, 'bench')) return 0;
+  const seconds = Number(params.get('bench'));
+  if (!(seconds > 1)) return DEFAULT_BENCH_SECONDS;
+  if (seconds < MIN_BENCH_SECONDS) return MIN_BENCH_SECONDS;
+  return seconds < MAX_SKIP_SECONDS ? seconds : MAX_SKIP_SECONDS;
 }
 
 /** Every seat that is not the host's can be a bot. */
@@ -152,6 +174,7 @@ export function parseQueryFlags(search: string): QueryFlags {
     perf: isOn(params, 'perf'),
     debug: isOn(params, 'debug'),
     bench: isOn(params, 'bench'),
+    benchSeconds: parseBenchSeconds(params),
     autopilot: isOn(params, 'autopilot'),
     autopilotBot,
     skipSeconds: parseSeconds(params.get('skip'), MAX_SKIP_SECONDS),
@@ -170,6 +193,7 @@ export function parseQueryFlags(search: string): QueryFlags {
     fillBots: isOn(params, 'fill'),
     lagCompensation: params.get('lagcomp') === null || isOn(params, 'lagcomp'),
     joinCode: (params.get('join') ?? '').trim().toUpperCase().slice(0, 12),
+    viewer: (params.get('viewer') ?? '').trim().toLowerCase().slice(0, 32),
   };
 }
 

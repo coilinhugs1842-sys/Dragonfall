@@ -13,6 +13,7 @@ describe('parseQueryFlags', () => {
       perf: false,
       debug: false,
       bench: false,
+      benchSeconds: 0,
       autopilot: false,
       skipSeconds: 0,
       quality: null,
@@ -31,6 +32,7 @@ describe('parseQueryFlags', () => {
       fillBots: false,
       lagCompensation: true,
       joinCode: '',
+      viewer: '',
     };
     expect(parseQueryFlags('')).toEqual(off);
     expect(parseQueryFlags('?')).toEqual(off);
@@ -42,6 +44,16 @@ describe('parseQueryFlags', () => {
     expect(parseQueryFlags('perf&debug')).toMatchObject({ perf: true, debug: true });
     expect(parseQueryFlags('?bench&perf=1')).toMatchObject({ perf: true, bench: true });
     expect(parseQueryFlags('?perf&autopilot')).toMatchObject({ perf: true, autopilot: true });
+  });
+
+  it('reads ?bench as a length in seconds, 60 by default', () => {
+    expect(parseQueryFlags('?bench').benchSeconds).toBe(60);
+    expect(parseQueryFlags('?bench=1').benchSeconds).toBe(60);
+    expect(parseQueryFlags('?bench=20').benchSeconds).toBe(20);
+    expect(parseQueryFlags('?bench=2').benchSeconds).toBe(5);
+    expect(parseQueryFlags('?bench=99999').benchSeconds).toBe(MAX_SKIP_SECONDS);
+    expect(parseQueryFlags('?bench=0')).toMatchObject({ bench: false, benchSeconds: 0 });
+    expect(parseQueryFlags('?bench=junk').benchSeconds).toBe(60);
   });
 
   it('treats 0 / false / off / no as off', () => {
@@ -164,6 +176,7 @@ describe('getQueryFlags', () => {
       perf: false,
       debug: false,
       bench: false,
+      benchSeconds: 0,
       autopilot: false,
       skipSeconds: 0,
       quality: null,
@@ -182,6 +195,7 @@ describe('getQueryFlags', () => {
       fillBots: false,
       lagCompensation: true,
       joinCode: '',
+      viewer: '',
     });
   });
 });

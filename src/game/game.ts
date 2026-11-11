@@ -109,6 +109,7 @@ import type {
   UiError,
   UiIntent,
   Unsubscribe,
+  Vec3,
   WorldView,
 } from '../shared';
 import { fireDirectionOf } from '../sim';
@@ -130,7 +131,7 @@ import type { HudBuilder } from './hud-builder';
 import { createMatchAssetsCache } from './match-assets';
 import type { MatchAssets } from './match-assets';
 import { createStage } from './stage';
-import type { Stage } from './stage';
+import type { CameraDirector, Stage } from './stage';
 import {
   FrameCap,
   bindSettingsTargets,
@@ -285,6 +286,12 @@ export interface GameReport {
     /** The master gain node's live value (the master volume squared). */
     readonly masterGain: number;
     readonly errors: number;
+    /** Sounds playing from decoded .ogg files / whose files failed (those stay procedural). */
+    readonly samplesReady: number;
+    readonly samplesFailed: number;
+    /** Music and ambience tracks sounding, and the 0..1 intensity mixing the music layers. */
+    readonly tracksPlaying: number;
+    readonly intensity: number;
   } | null;
   readonly render: {
     readonly calls: number;
@@ -380,6 +387,17 @@ export interface Game {
   handleIntent(intent: UiIntent): void;
   /** Averaged cost of the fixed-step work in ms, for the perf HUD's `sim` line. */
   getSimMs(): number;
+  /** A match is on screen (its views are loaded and a picture was built this frame). */
+  readonly inMatch: boolean;
+  /** The middle of the arena at fight height: what a fly-round camera circles. */
+  readonly arenaFocus: Readonly<Vec3>;
+  /** Most particles alive and most voices playing in one frame so far (needs `flags.measure`). */
+  getPeaks(): { readonly particles: number; readonly voices: number };
+  /**
+   * Hands the camera to a dev tool (`?bench`, the trailer capture) or takes it back with null.
+   * The game's own cinematics give way while one is set.
+   */
+  setDevCameraDirector(director: CameraDirector | null): void;
   /** The perf HUD's network lines ('' with no session). Builds strings: call at text rate. */
   getNetText(): string;
   /** A copy of the current state for tests. Allocates: never call it per frame. */
@@ -460,6 +478,7 @@ export function createGame(options: GameOptions): Game {
     map: assets.defaultMap,
     events: bus,
     webgl: renderer.webgl,
+    precompile: (scene, camera) => renderer.precompile(scene, camera),
   });
   const probe = flags.measure ? createDebugProbe() : null;
   const tokenStore: ReconnectTokenStore = createStorageTokenStore(storage.session);
@@ -557,6 +576,11 @@ export function createGame(options: GameOptions): Game {
     radius: AUTOPILOT_RADIUS,
     altitude: AUTOPILOT_ALTITUDE,
   };
+  const arenaFocus: Vec3 = { x: course.centerX, y: AUTOPILOT_ALTITUDE, z: course.centerZ };
+  /** A dev tool holds the camera (`setDevCameraDirector`). */
+  let devDirector: CameraDirector | null = null;
+  /** `buildView` gave a match picture this frame. */
+  let matchOnScreen = false;
   /** The local player's latest steer, for the camera's look-ahead. */
   let aimX = 0;
   let aimY = 0;
@@ -1428,7 +1452,8 @@ export function createGame(options: GameOptions): Game {
     // events and the frame then draws what they started.
     bus.flush();
 
-    if (buildView(alpha, nowMs)) {
+    matchOnScreen = buildView(alpha, nowMs);
+    if (matchOnScreen) {
       if (current !== null && current.kind === 'client') showLocalCasts(current.session);
       stage.updateMatch(worldView, aimX, aimY, dtS);
       const camera = stage.camera;
@@ -1548,6 +1573,10 @@ export function createGame(options: GameOptions): Game {
       ready: stats.ready,
       masterGain: stats.masterGain,
       errors: stats.errors,
+      samplesReady: stats.samplesReady,
+      samplesFailed: stats.samplesFailed,
+      tracksPlaying: stats.tracksPlaying,
+      intensity: stats.intensity,
     };
   }
 
@@ -1610,6 +1639,7 @@ export function createGame(options: GameOptions): Game {
         stats === null
           ? 'audio —'
           : `audio ${stats.activeVoices}/${stats.capacity} voices (peak ${voicePeak})` +
+            `  ${stats.tracksPlaying} tracks  mix ${stats.intensity.toFixed(2)}` +
             (stats.ready ? '' : '  loading');
       return `${fx}\n${sound}`;
     },
@@ -1619,6 +1649,21 @@ export function createGame(options: GameOptions): Game {
       return current !== null && current.kind !== 'client'
         ? current.session.metrics.stepMs
         : stepMs;
+    },
+
+    get inMatch() {
+      return matchOnScreen;
+    },
+
+    arenaFocus,
+
+    getPeaks() {
+      return { particles: particlePeak, voices: voicePeak };
+    },
+
+    setDevCameraDirector(director: CameraDirector | null): void {
+      devDirector = director;
+      stage.setCameraDirector(director);
     },
 
     getNetText(): string {

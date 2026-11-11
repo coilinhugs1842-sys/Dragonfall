@@ -1,4 +1,4 @@
-/** Barrel for the greybox map view: chunked render meshes and the optional debug overlay. */
+/** Barrel for the map view: real assets or greybox chunks, and the optional debug overlays. */
 
 export {
   DEFAULT_MAP_SHADE,
@@ -14,5 +14,18 @@ export {
 export type { MapShadeOptions } from './map-colors';
 export { createMapDebugMarkers } from './map-debug-markers';
 export type { MapDebugMarkers } from './map-debug-markers';
-export { createMapView, mapDrawDistance } from './map-view';
-export type { MapView, MapViewOptions, MapViewStats } from './map-view';
+export { createMapCollisionOverlay } from './map-collision-overlay';
+export type { MapCollisionOverlay } from './map-collision-overlay';
+export {
+  createMapView,
+  mapDebugFromLocation,
+  mapDrawDistance,
+  preloadMapAssets,
+} from './map-view';
+export type {
+  MapDebugOptions,
+  MapLoadState,
+  MapView,
+  MapViewOptions,
+  MapViewStats,
+} from './map-view';

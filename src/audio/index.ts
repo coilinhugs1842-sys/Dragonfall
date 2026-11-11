@@ -26,12 +26,38 @@ export type {
   AudioVolumes,
   PadTuning,
 } from './engine';
+export { INTENSITY_TUNING, MusicIntensity, layerGains } from './intensity';
+export type { IntensityTuning } from './intensity';
+export { AssetLoader, LOAD_CONCURRENCY } from './loader';
+export type { AudioDecoder, FetchLike, LoadCallback, LoaderStats } from './loader';
+export {
+  AUDIO_ASSET_BASE,
+  AUDIO_MANIFEST_FILE,
+  AUDIO_MANIFEST_VERSION,
+  FIRST_AMBIENCE_TRACK,
+  MAX_VARIATIONS,
+  TRACK_COUNT,
+  TRACK_IDS,
+  loadTier,
+  parseAudioManifest,
+  sampleLoadOrder,
+} from './manifest';
+export type { AudioLoop, AudioManifest, AudioTrack, SampleSet, TrackId } from './manifest';
+export { TRACK_TUNING, createTrackPlayer } from './tracks';
+export type { TrackPlayer, TrackScene, TrackTuning } from './tracks';
 export {
   ABILITY_SOUNDS,
   ASSIST_SOUND,
+  BOOST_START_SOUND,
   CHARGE_SOUNDS,
   COUNTDOWN_TICK_SOUND,
+  DEATH_FALL_SOUND,
+  FLAP_PERIOD_SCALE,
+  FLAP_SOUNDS,
   FLIGHT_SOUNDS,
+  MUSIC_DUCKS,
+  ROAR_SOUNDS,
+  VEIL_OUT_SOUND,
   HIT_CONFIRM_SOUND,
   HIT_SHIELD_SOUND,
   HIT_SOUNDS,

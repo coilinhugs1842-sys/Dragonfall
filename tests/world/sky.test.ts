@@ -1,12 +1,16 @@
 import { Color, FogExp2, Scene } from 'three';
+import type { Vector4 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { QUALITY_PRESETS, createGreyboxSpires } from '../../src/shared';
+import { srgbDecode, tonemapFilmic } from '../../src/render/post';
+import { setPaintedColor } from '../../src/world/light';
 import {
   FOG_COLOR,
   FOG_FADE_DISTANCE,
   GOLDEN_HOUR_SKY,
   HEMISPHERE_GROUND_COLOR,
   HEMISPHERE_SKY_COLOR,
+  SKY_NOISE_SIZE,
   SKY_RENDER_ORDER,
   SUN_COLOR,
   SUN_ELEVATION_DEG,
@@ -18,6 +22,7 @@ import {
   fogDensityForFade,
   fogDistanceForOpacity,
   fogOpacityAt,
+  generateSkyNoise,
   sunDirectionFromAngles,
 } from '../../src/world/sky';
 
@@ -83,7 +88,11 @@ describe('sky fog', () => {
   it('creates exp2 fog with the setup colour and density', () => {
     const fog = createSkyFog();
     expect(fog).toBeInstanceOf(FogExp2);
-    expect(fog.color.getHex()).toBe(FOG_COLOR);
+    // Stored scene-linear: through the post pass's tone curve it comes out as FOG_COLOR.
+    expect(fog.color.equals(setPaintedColor(new Color(), FOG_COLOR))).toBe(true);
+    expect(tonemapFilmic(fog.color.r)).toBeCloseTo(srgbDecode(((FOG_COLOR >> 16) & 0xff) / 255), 6);
+    expect(tonemapFilmic(fog.color.g)).toBeCloseTo(srgbDecode(((FOG_COLOR >> 8) & 0xff) / 255), 6);
+    expect(tonemapFilmic(fog.color.b)).toBeCloseTo(srgbDecode((FOG_COLOR & 0xff) / 255), 6);
     expect(fog.density).toBe(GOLDEN_HOUR_SKY.fogDensity);
   });
 
@@ -93,7 +102,7 @@ describe('sky fog', () => {
     expect(scene.fog).toBe(first);
     const second = applySkyFog(scene, { ...GOLDEN_HOUR_SKY, fogColor: 0x112233, fogDensity: 0.01 });
     expect(second).toBe(first);
-    expect(first.color.getHex()).toBe(0x112233);
+    expect(first.color.equals(setPaintedColor(new Color(), 0x112233))).toBe(true);
     expect(first.density).toBe(0.01);
   });
 });
@@ -141,15 +150,34 @@ describe('sky dome', () => {
     sky.dispose();
   });
 
-  it('puts the fog colour on the horizon without tone mapping it', () => {
+  it('puts the scene fog colour on the horizon and leaves the tone map to the post pass', () => {
     const map = createGreyboxSpires();
     const sky = createSkyDome(map.sky);
     const material = sky.object.material;
-    // Fog is never tone-mapped by three, so the band that must match it cannot be either.
+    // The post pass tone-maps and encodes: the sky writes scene-linear values like everything else.
     expect(material.toneMapped).toBe(false);
-    expect(material.fragmentShader).toContain('#include <colorspace_fragment>');
-    const horizon = material.uniforms['uHorizon']?.value as Color;
+    expect(material.fragmentShader).not.toContain('colorspace_fragment');
+    expect(material.fragmentShader).not.toContain('tonemapping_fragment');
+    expect(material.fragmentShader).toContain('wlHaze(dir)');
+    const horizon = material.uniforms['uWlFogColor']?.value as Color;
     expect(horizon.equals(createSkyFog(map.sky).color)).toBe(true);
+    sky.dispose();
+  });
+
+  it('drifts the cloud sheets with a wrapped offset', () => {
+    const sky = createSkyDome();
+    const drift = sky.object.material.uniforms['uDrift']?.value as Vector4;
+    for (const time of [0, 12.5, 4000, 1e6]) {
+      sky.update(time);
+      for (const offset of [drift.x, drift.y, drift.z, drift.w]) {
+        expect(offset).toBeGreaterThanOrEqual(0);
+        expect(offset).toBeLessThan(1);
+      }
+    }
+    sky.update(100);
+    const before = drift.x;
+    sky.update(160);
+    expect(drift.x).not.toBe(before);
     sky.dispose();
   });
 
@@ -173,11 +201,61 @@ describe('sky dome', () => {
     sky.setQuality(QUALITY_PRESETS.low);
     expect(material.version).toBe(afterLow);
     sky.setQuality(QUALITY_PRESETS.medium);
-    expect(Object.keys(material.defines).sort()).toEqual(['SKY_DITHER', 'SKY_HALO']);
+    expect(Object.keys(material.defines).sort()).toEqual(['SKY_DETAIL']);
     const afterMedium = material.version;
     expect(afterMedium).toBeGreaterThan(afterLow);
     sky.setQuality(QUALITY_PRESETS.high);
     expect(material.version).toBe(afterMedium);
     sky.dispose();
+  });
+});
+
+describe('sky noise', () => {
+  const size = 64;
+  const noise = generateSkyNoise(size, 3);
+
+  it('is deterministic per seed and sized for the dome by default', () => {
+    expect(noise.length).toBe(size * size * 4);
+    expect(generateSkyNoise(size, 3)).toEqual(noise);
+    expect(generateSkyNoise(size, 4)).not.toEqual(noise);
+    expect(generateSkyNoise().length).toBe(SKY_NOISE_SIZE * SKY_NOISE_SIZE * 4);
+    expect(() => generateSkyNoise(8, 1)).toThrow();
+  });
+
+  it('uses the whole range in every channel', () => {
+    for (let channel = 0; channel < 4; channel++) {
+      let min = 255;
+      let max = 0;
+      for (let i = 0; i < size * size; i++) {
+        const v = noise[i * 4 + channel] ?? 0;
+        min = Math.min(min, v);
+        max = Math.max(max, v);
+      }
+      expect(min).toBe(0);
+      expect(max).toBe(255);
+    }
+  });
+
+  it('tiles: the step across the wrap edge is no bigger than steps inside', () => {
+    for (let channel = 0; channel < 4; channel++) {
+      const at = (x: number, y: number): number => noise[(y * size + x) * 4 + channel] ?? 0;
+      let inside = 0;
+      let across = 0;
+      for (let i = 0; i < size; i++) {
+        for (let j = 0; j < size - 1; j++) {
+          inside = Math.max(
+            inside,
+            Math.abs(at(j + 1, i) - at(j, i)),
+            Math.abs(at(i, j + 1) - at(i, j)),
+          );
+        }
+        across = Math.max(
+          across,
+          Math.abs(at(0, i) - at(size - 1, i)),
+          Math.abs(at(i, 0) - at(i, size - 1)),
+        );
+      }
+      expect(across).toBeLessThanOrEqual(inside);
+    }
   });
 });

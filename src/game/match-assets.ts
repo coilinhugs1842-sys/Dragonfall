@@ -4,22 +4,24 @@
  * `MatchWorldFactory`, the views get the map data, and the camera gets the terrain query. One
  * BVH per page, not one per user.
  *
- * Every map id flies the greybox until real maps ship (Phase 4); the layout seed travels in
- * MATCH_START, so host and clients build the same world.
+ * Every map id flies Shattered Spires (the real map, T-4.5) until the second map ships; the
+ * layout seed travels in MATCH_START, so host and clients build the same world. `?map=greybox`
+ * is not wired: the greybox generator stays for tests.
  */
 
-import { GREYBOX_SPIRES_DEFAULT_SEED, createGreyboxSpires } from '../shared';
-import type { GreyboxMap } from '../shared';
+import { SHATTERED_SPIRES_DEFAULT_SEED, createShatteredSpires } from '../shared';
+import type { ArenaMap } from '../shared';
+import { matchWorldOf } from '../net';
 import type { MatchWorld, MatchWorldFactory } from '../net';
 import { createMapCollisionWorld } from '../sim';
 import type { MapCollisionWorld } from '../sim';
 
 export interface MatchAssets {
   readonly seed: number;
-  readonly map: GreyboxMap;
+  readonly map: ArenaMap;
   /** Sim collision, camera terrain query and the storm wall the views draw, in one object. */
   readonly collision: MapCollisionWorld;
-  /** What the sessions step dragons against and spawn them from. */
+  /** What the sessions step dragons against and spawn them from (the Skirmish gate set). */
   readonly world: MatchWorld;
 }
 
@@ -32,43 +34,34 @@ export interface MatchAssetsCache {
   /** Hand this to `createHostSession` / `createClientSession` as `createMatchWorld`. */
   readonly factory: MatchWorldFactory;
   /** The map the title and lobby backdrop take their sky from (the default layout's data). */
-  readonly defaultMap: GreyboxMap;
+  readonly defaultMap: ArenaMap;
 }
 
-function buildAssets(seed: number, map: GreyboxMap): MatchAssets {
+function buildAssets(seed: number, map: ArenaMap): MatchAssets {
   const collision = createMapCollisionWorld(map);
-  return {
-    seed,
-    map,
-    collision,
-    world: {
-      collisionWorld: collision,
-      spawnGates: map.spawnGates,
-      centerX: map.colliders.stormCenter.x,
-      centerZ: map.colliders.stormCenter.z,
-      radius: map.colliders.stormRadius,
-      floorY: map.colliders.floorY,
-      ceilingY: map.colliders.ceilingY,
-    },
-  };
+  return { seed, map, collision, world: matchWorldOf(map, collision, 'skirmish') };
 }
 
 export function createMatchAssetsCache(): MatchAssetsCache {
-  const defaultSeed = GREYBOX_SPIRES_DEFAULT_SEED >>> 0;
-  const defaultMap = createGreyboxSpires(defaultSeed);
+  const defaultSeed = SHATTERED_SPIRES_DEFAULT_SEED >>> 0;
+  const defaultMap = createShatteredSpires(defaultSeed);
   let cached: MatchAssets | null = null;
 
   function get(seed: number): MatchAssets {
     const key = seed >>> 0;
     if (cached === null || cached.seed !== key) {
-      cached = buildAssets(key, key === defaultSeed ? defaultMap : createGreyboxSpires(key));
+      cached = buildAssets(key, key === defaultSeed ? defaultMap : createShatteredSpires(key));
     }
     return cached;
   }
 
   return {
     get,
-    factory: (_settings, seed) => get(seed).world,
+    // Same collision world for every mode; Duel launches from the map's closer gate set.
+    factory: (settings, seed) => {
+      const assets = get(seed);
+      return matchWorldOf(assets.map, assets.collision, settings.mode);
+    },
     defaultMap,
   };
 }

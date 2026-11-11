@@ -7,6 +7,7 @@ import {
   CLOUD_QUALITY_LIMITS,
   CLOUD_RENDER_ORDER_BASE,
   CLOUD_SEA_MAX_HALF_EXTENT,
+  CLOUD_SEA_QUALITY,
   CLOUD_SEA_RENDER_ORDER,
   CLOUD_SEA_SNAP_STEP,
   PUFF_ATLAS_GRID,
@@ -23,6 +24,7 @@ import {
   PUFF_X,
   PUFF_Y,
   PUFF_Z,
+  SEA_FOG_DENSITY_SCALE,
   SIGNED_ZERO_BYTE,
   cloudFieldFromMap,
   cloudSeaHalfExtent,
@@ -44,12 +46,14 @@ import { SKY_RENDER_ORDER, fogDistanceForOpacity, fogOpacityAt } from '../../src
 const map = createGreyboxSpires();
 const field = cloudFieldFromMap(map);
 
-function declaredUniforms(glsl: string): string[] {
-  return [...glsl.matchAll(/uniform\s+\w+\s+(\w+)\s*;/g)].map((match) => match[1] ?? '');
+/** Uniform names a vertex + fragment pair declares, each once, sorted. */
+function declaredUniforms(...glsl: string[]): string[] {
+  const names = new Set<string>();
+  for (const source of glsl) {
+    for (const match of source.matchAll(/uniform\s+\w+\s+(\w+)\s*;/g)) names.add(match[1] ?? '');
+  }
+  return [...names].sort();
 }
-
-/** three's fog chunks declare these themselves. */
-const FOG_UNIFORMS = ['fogColor', 'fogDensity', 'fogFar', 'fogNear'];
 
 function at(placement: CloudLayerPlacement, index: number, field_: number): number {
   return placement.data[index * CLOUD_PUFF_STRIDE + field_] ?? Number.NaN;
@@ -132,11 +136,13 @@ describe('cloud sea noise', () => {
     expect(() => generateCloudSeaNoise(4, 1)).toThrow();
   });
 
-  it('uses the whole height range, with centred slopes and opaque alpha', () => {
+  it('uses the whole height and detail range, with centred slopes', () => {
     let min = 255;
     let max = 0;
     let slopeSum = 0;
     let steepest = 0;
+    let detailMin = 255;
+    let detailMax = 0;
     for (let i = 0; i < size * size; i++) {
       const h = noise[i * 4] ?? 0;
       min = Math.min(min, h);
@@ -145,8 +151,11 @@ describe('cloud sea noise', () => {
       const dv = (noise[i * 4 + 2] ?? 0) - SIGNED_ZERO_BYTE;
       slopeSum += du + dv;
       steepest = Math.max(steepest, Math.abs(du), Math.abs(dv));
-      expect(noise[i * 4 + 3]).toBe(255);
+      detailMin = Math.min(detailMin, noise[i * 4 + 3] ?? 0);
+      detailMax = Math.max(detailMax, noise[i * 4 + 3] ?? 0);
     }
+    expect(detailMin).toBe(0);
+    expect(detailMax).toBe(255);
     expect(min).toBe(0);
     expect(max).toBe(255);
     expect(steepest).toBe(127);
@@ -413,18 +422,19 @@ describe('cloud billboards', () => {
     expect(material.premultipliedAlpha).toBe(true);
     expect(material.depthWrite).toBe(false);
     expect(material.depthTest).toBe(true);
-    expect(material.fog).toBe(true);
+    // Fogged by wlApplyFog (same haze as the sky), not by three's fog chunks.
+    expect(material.fog).toBe(false);
+    expect(material.fragmentShader).toContain('wlApplyFog(col, vWorld)');
     const version = material.version;
     clouds.setQuality(QUALITY_PRESETS.low);
     clouds.setQuality(QUALITY_PRESETS.high);
     // Quality changes are uniforms and counts only: no shader recompile.
     expect(material.version).toBe(version);
-    const declared = [
-      ...declaredUniforms(material.vertexShader),
-      ...declaredUniforms(material.fragmentShader),
-      ...FOG_UNIFORMS,
-    ].sort();
-    expect(declared).toEqual(Object.keys(material.uniforms).sort());
+    expect(declaredUniforms(material.vertexShader, material.fragmentShader)).toEqual(
+      Object.keys(material.uniforms).sort(),
+    );
+    // The sea haze softens the bases of the banks: the puffs know where the sea is.
+    expect((material.uniforms['uWlFogParams']?.value as { y: number }).y).toBe(field.cloudSeaY);
     clouds.dispose();
   });
 
@@ -524,18 +534,23 @@ describe('cloud sea', () => {
     const material = sea.object.material;
     expect(material.transparent).toBe(false);
     expect(material.depthWrite).toBe(true);
-    expect(material.fog).toBe(true);
+    expect(material.fog).toBe(false);
+    expect(material.fragmentShader).toContain('wlApplyFog(col, vWorld)');
     expect(sea.object.position.y).toBe(field.cloudSeaY);
     expect(sea.object.geometry.getIndex()?.count).toBe(6);
     expect(sea.object.renderOrder).toBe(CLOUD_SEA_RENDER_ORDER);
     expect(CLOUD_SEA_RENDER_ORDER).toBeGreaterThan(0);
     expect(CLOUD_SEA_RENDER_ORDER).toBeLessThan(SKY_RENDER_ORDER);
-    const declared = [
-      ...declaredUniforms(material.vertexShader),
-      ...declaredUniforms(material.fragmentShader),
-      ...FOG_UNIFORMS,
-    ].sort();
-    expect(declared).toEqual(Object.keys(material.uniforms).sort());
+    expect(declaredUniforms(material.vertexShader, material.fragmentShader)).toEqual(
+      Object.keys(material.uniforms).sort(),
+    );
+    // Its own, thinner fog; the quad still reaches to where that fog has hidden it.
+    const density = (material.uniforms['uWlFogParams']?.value as { x: number }).x;
+    expect(density).toBeCloseTo(map.sky.fogDensity * SEA_FOG_DENSITY_SCALE, 12);
+    const position = sea.object.geometry.getAttribute('position');
+    expect(fogOpacityAt(density, Math.abs(position.getX(0)) - CLOUD_SEA_SNAP_STEP)).toBeGreaterThan(
+      0.999,
+    );
     sea.dispose();
   });
 
@@ -566,24 +581,28 @@ describe('cloud sea', () => {
     sea.dispose();
   });
 
-  it('uses 1 octave on Low, 2 on Medium, and adds the rim on High', () => {
+  it('picks the shader variant from the preset and only recompiles on a change', () => {
     const sea = createCloudSea({ cloudSeaY: 0 });
     const material = sea.object.material;
-    sea.setQuality(QUALITY_PRESETS.low);
-    expect(material.defines['SEA_OCTAVES']).toBe(1);
-    expect('SEA_RIM' in material.defines).toBe(false);
-    const lowBump = material.uniforms['uBump']?.value as number;
-    sea.setQuality(QUALITY_PRESETS.medium);
-    expect(material.defines['SEA_OCTAVES']).toBe(2);
-    expect('SEA_RIM' in material.defines).toBe(false);
-    expect(material.uniforms['uBump']?.value as number).toBeGreaterThan(lowBump);
-    const version = material.version;
-    sea.setQuality(QUALITY_PRESETS.medium);
-    expect(material.version).toBe(version);
-    sea.setQuality(QUALITY_PRESETS.high);
-    expect(material.defines['SEA_OCTAVES']).toBe(2);
-    expect('SEA_RIM' in material.defines).toBe(true);
-    expect(material.version).toBeGreaterThan(version);
+    for (const id of ['low', 'medium', 'high'] as const) {
+      const want = CLOUD_SEA_QUALITY[id];
+      sea.setQuality(QUALITY_PRESETS[id]);
+      expect(material.defines['SEA_OCTAVES']).toBe(want.octaves);
+      expect(material.defines['SEA_PARALLAX']).toBe(want.parallaxSteps);
+      expect(material.defines['SEA_SHADOW_TAPS']).toBe(want.shadowTaps);
+      expect('SEA_RIM' in material.defines).toBe(want.rim);
+      expect(material.uniforms['uBump']?.value).toBe(want.bump);
+      const version = material.version;
+      sea.setQuality(QUALITY_PRESETS[id]);
+      expect(material.version).toBe(version);
+    }
+    // Low never marches or looks for shadows: 2 fetches per pixel.
+    expect(CLOUD_SEA_QUALITY.low.parallaxSteps + CLOUD_SEA_QUALITY.low.shadowTaps).toBe(0);
+    // The march stays "a few steps" on every preset.
+    expect(CLOUD_SEA_QUALITY.high.parallaxSteps).toBeLessThanOrEqual(3);
+    expect(CLOUD_SEA_QUALITY.medium.parallaxSteps).toBeLessThanOrEqual(
+      CLOUD_SEA_QUALITY.high.parallaxSteps,
+    );
     sea.dispose();
   });
 });

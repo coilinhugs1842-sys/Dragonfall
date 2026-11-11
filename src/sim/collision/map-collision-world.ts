@@ -95,7 +95,10 @@ const PITCH_HARD_LIMIT = 1.5;
 const TWO_PI = Math.PI * 2;
 
 /** What the collision world needs from a map; a MapManifest (greybox or not) fits. */
-export type CollisionMapSource = Pick<MapManifest, 'size' | 'solids' | 'chunkSize' | 'colliders'>;
+export type CollisionMapSource = Pick<
+  MapManifest,
+  'size' | 'solids' | 'placements' | 'chunkSize' | 'colliders'
+>;
 
 /**
  * Called for every bounce of a LIVING dragon that was moving into the surface (not for resting
@@ -181,7 +184,9 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
     this.ceilingY = colliders.ceilingY;
     this.floorY = colliders.floorY;
 
-    if (map.solids !== undefined && map.solids.length > 0) {
+    const hasSolids = map.solids !== undefined && map.solids.length > 0;
+    const hasPlacements = map.placements !== undefined && map.placements.length > 0;
+    if (hasSolids || hasPlacements) {
       const triangles = buildMapTriangles(
         map,
         options.maxPrismSides === undefined ? {} : { maxPrismSides: options.maxPrismSides },

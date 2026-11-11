@@ -23,7 +23,7 @@ import {
   RGFormat,
   UnsignedByteType,
 } from 'three';
-import type { Camera, Scene, WebGLRenderer } from 'three';
+import type { Camera, Scene } from 'three';
 import {
   ABILITY_SLOTS,
   ABILITY_TABLE,
@@ -202,8 +202,13 @@ export interface Vfx {
   setQuality(preset: QualityPreset): void;
   /** Drops every live effect (scene change, round reset). */
   clear(): void;
-  /** Compiles the effect shaders now (loading screen), so the first shot does not hitch. */
-  warmUp(renderer: WebGLRenderer, camera: Camera): void;
+  /**
+   * Shows every effect mesh (they are hidden until first used), runs `compile` and hides them
+   * again, so the caller's shader compile covers them and the first shot does not hitch.
+   * `compile` must take its program keys before it returns (three's `compile` / `compileAsync`
+   * do), against the target the scene is really drawn into (`GameRenderer.precompile`).
+   */
+  warmUp(compile: () => void): void;
   dispose(): void;
 }
 
@@ -1041,12 +1046,12 @@ export function createVfx(options: VfxOptions): Vfx {
       zCount = 0;
     },
 
-    warmUp(renderer: WebGLRenderer, camera: Camera): void {
+    warmUp(compile: () => void): void {
       if (disposed) return;
       const meshes = [particles.mesh, frameSprites.mesh, beams.mesh, shells.mesh];
       const shown = meshes.map((mesh) => mesh.visible);
       for (const mesh of meshes) mesh.visible = true;
-      renderer.compile(scene, camera);
+      compile();
       meshes.forEach((mesh, i) => {
         mesh.visible = shown[i] ?? false;
       });

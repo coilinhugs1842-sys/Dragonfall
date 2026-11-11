@@ -20,7 +20,7 @@ export type {
 export { createMatchAssetsCache } from './match-assets';
 export type { MatchAssets, MatchAssetsCache } from './match-assets';
 export { STAGE_MAP_CHUNK_SIZE, createStage } from './stage';
-export type { Stage, StageOptions } from './stage';
+export type { CameraDirector, Stage, StageOptions } from './stage';
 export {
   RECONNECT_TOKEN_KEY_PREFIX,
   REJOIN_STORAGE_KEY,

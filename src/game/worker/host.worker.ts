@@ -10,8 +10,7 @@
  * when the host's tab is hidden.
  */
 
-import { greyboxMatchWorldFactory } from '../../net/session';
-import type { MatchWorld, MatchWorldFactory } from '../../net/session';
+import { createShatteredSpiresMatchWorldFactory } from '../../net/session';
 import { createHostWorkerServer } from '../../net/worker/host-worker-server';
 import type { FromWorkerMessage, ToWorkerMessage } from '../../net/worker/messages';
 import { writeAutopilotFrame } from '../autopilot';
@@ -23,19 +22,6 @@ interface WorkerScope {
 }
 
 const scope = self as unknown as WorkerScope;
-
-/** One collision world (a BVH, tens of ms to build) per layout seed, kept across matches. */
-function cachedMatchWorld(): MatchWorldFactory {
-  let seedOf = -1;
-  let world: MatchWorld | null = null;
-  return (settings, seed) => {
-    if (world === null || seedOf !== seed) {
-      world = greyboxMatchWorldFactory(settings, seed);
-      seedOf = seed;
-    }
-    return world;
-  };
-}
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -51,7 +37,8 @@ const server = createHostWorkerServer({
     if (timer !== null) clearTimeout(timer);
     timer = null;
   },
-  createMatchWorld: cachedMatchWorld(),
+  // One collision world (a BVH, about 70 ms to build) per layout seed, kept across matches.
+  createMatchWorld: createShatteredSpiresMatchWorldFactory(),
   createPilot: (course) => ({
     sample: (tick, subject, out) => {
       writeAutopilotFrame(tick, subject, course, out);

@@ -15,10 +15,10 @@
 
 import { PerspectiveCamera, Scene } from 'three';
 import type { WebGLRenderer } from 'three';
-import { createPlaceholderDragons } from '../dragons';
-import type { PlaceholderDragons } from '../dragons';
+import { createDragons, sharedDragonAssetLibrary } from '../dragons';
+import type { Dragons } from '../dragons';
 import { createCameraRig } from '../render';
-import type { CameraRig } from '../render';
+import type { CameraDirector, CameraRig } from '../render';
 import {
   DRAGON_FLAG_ALIVE,
   DRAGON_FLAG_VEILED,
@@ -29,7 +29,7 @@ import {
 import type {
   DragonView,
   GameEventSource,
-  GreyboxMap,
+  ArenaMap,
   PlayerId,
   QualityPresetId,
   Unsubscribe,
@@ -38,8 +38,10 @@ import type {
 import { createVfx } from '../vfx';
 import type { Vfx, VfxStats } from '../vfx';
 import { cloudFieldFromMap, createCloudBillboards, createCloudSea } from '../world/clouds';
-import { createMapView } from '../world/map';
-import type { MapView } from '../world/map';
+import { createMapView, preloadMapAssets } from '../world/map';
+import { loadMapAssets } from '../world/props';
+import type { MapLoadState, MapView } from '../world/map';
+import { createWorldLighting } from '../world/light';
 import { applySkyFog, createSkyDome, createSkyLights } from '../world/sky';
 import { createStormWallView } from '../world/storm';
 import type { StormWallView } from '../world/storm';
@@ -74,14 +76,22 @@ const BACKDROP_SUN_OFFSET = -0.42;
 const BACKDROP_LOOK_DISTANCE = 1000;
 const BACKDROP_LOOK_RISE = 70;
 
+export type { CameraDirector };
+
 export interface StageOptions {
   readonly quality: QualityPresetId;
   /** The sky, fog and cloud field come from this map's data (every map shares them for now). */
-  readonly map: GreyboxMap;
+  readonly map: ArenaMap;
   /** The match's GameEvents: the effects subscribe while a match is loaded. */
   readonly events?: GameEventSource | null;
-  /** Compiles the effect shaders at match load, so the first shot does not hitch. */
+  /** The loaders need it (KTX2 support detection). Null in tests: no assets are fetched. */
   readonly webgl?: WebGLRenderer | null;
+  /**
+   * `GameRenderer.precompile`: builds the scene's shader programs against the real scene target
+   * without drawing. The stage calls it whenever a load put new materials into the scene, so
+   * the first frame that shows them does not stop to compile.
+   */
+  readonly precompile?: ((scene: Scene, camera: PerspectiveCamera) => Promise<void>) | null;
 }
 
 export interface Stage {
@@ -91,6 +101,8 @@ export interface Stage {
   readonly matchLoaded: boolean;
   /** Seed of the loaded match map, or -1. */
   readonly matchSeed: number;
+  /** What the map view draws: `ready` = the real assets; null with no match loaded. */
+  readonly mapLoadState: MapLoadState | null;
   /** Builds the map view, the dragons and the chase camera. Load-time: allocates. */
   loadMatch(assets: MatchAssets): void;
   /** Frees what `loadMatch` built. Safe to call when nothing is loaded. */
@@ -119,6 +131,22 @@ export interface Stage {
   clearEffects(): void;
   /** Place the camera directly on the next match frame (spawn, scene cut). */
   snapCamera(): void;
+  /**
+   * Who places the camera, or null for the chase rig / backdrop drift. The chase rig keeps
+   * following underneath, so handing the camera back is seamless.
+   */
+  setCameraDirector(director: CameraDirector | null): void;
+  /** True on a frame the director placed the camera. */
+  readonly directed: boolean;
+  /** Seconds this stage has been drawing (the clock of the sky, the sea and the clouds). */
+  readonly timeS: number;
+  /**
+   * Compiles the shaders of everything in the scene now, hidden effect meshes included. Runs by
+   * itself at match load and when late assets arrive; resolves when the GPU is done.
+   */
+  warmUp(): Promise<void>;
+  /** True while a `warmUp` is still linking programs (the loading screen stays up). */
+  readonly warming: boolean;
   setAspect(aspect: number): void;
   /** Forwards a preset change to every view. Not per frame: sky and sea recompile a shader. */
   setQuality(id: QualityPresetId): void;
@@ -128,7 +156,7 @@ export interface Stage {
 interface MatchViews {
   readonly seed: number;
   readonly mapView: MapView;
-  readonly dragons: PlaceholderDragons;
+  readonly dragons: Dragons;
   readonly rig: CameraRig;
   readonly vfx: Vfx;
   readonly storm: StormWallView;
@@ -150,10 +178,41 @@ export function createStage(options: StageOptions): Stage {
   const cloudSeaY = map.colliders.cloudSeaY ?? map.colliders.floorY;
   const sea = createCloudSea({ cloudSeaY, sky: map.sky });
   const clouds = createCloudBillboards({ field: cloudFieldFromMap(map), sky: map.sky });
-  scene.add(sky.object, lights.sun, lights.hemisphere, sea.object);
+  // Shared sun / fog / shadow uniforms for every `useWorldLight` material, and the light shafts.
+  const lighting = createWorldLighting({
+    sky: map.sky,
+    lights,
+    cloudSeaY,
+    shafts: {
+      center: map.colliders.stormCenter,
+      radius: map.colliders.stormRadius,
+      topY: map.colliders.ceilingY + 200,
+    },
+  });
+  scene.add(sky.object, lights.sun, lights.hemisphere, sea.object, lighting.object);
   for (const layer of clouds.objects) scene.add(layer);
 
   const backdropCamera = new PerspectiveCamera(BACKDROP_FOV, 1, 0.5, 6000);
+  // The camera a CameraDirector places. Its own object, so the chase rig's smoothing state and
+  // the backdrop's drift are untouched while a cinematic runs.
+  const directedCamera = new PerspectiveCamera(BACKDROP_FOV, 1, 0.5, 6000);
+  let director: CameraDirector | null = null;
+  let directed = false;
+  let directedFov = BACKDROP_FOV;
+
+  /** Runs the director for this frame; true when it placed `directedCamera`. */
+  function runDirector(view: WorldView | null, dtS: number): boolean {
+    if (director === null || !director.direct(directedCamera, view, dtS)) return false;
+    // Above the cloud sea whatever the path says: under it the screen is one flat colour.
+    const minY = cloudSeaY + CAMERA_SEA_CLEARANCE;
+    if (directedCamera.position.y < minY) directedCamera.position.y = minY;
+    if (directedCamera.fov !== directedFov) {
+      directedFov = directedCamera.fov;
+      directedCamera.updateProjectionMatrix();
+    }
+    directedCamera.updateMatrixWorld();
+    return true;
+  }
   const centerX = map.colliders.stormCenter.x;
   const centerZ = map.colliders.stormCenter.z;
   const sunYaw = Math.atan2(map.sky.sunDirection.x, map.sky.sunDirection.z);
@@ -161,6 +220,41 @@ export function createStage(options: StageOptions): Stage {
   let match: MatchViews | null = null;
   const events = options.events ?? null;
   const webgl = options.webgl ?? null;
+  const precompile = options.precompile ?? null;
+  /** Warm-ups still waiting for the GPU. */
+  let warmingCount = 0;
+  const warmDone = (): void => {
+    warmingCount--;
+  };
+
+  function warmUp(): Promise<void> {
+    if (disposed || precompile === null) return Promise.resolve();
+    const camera = match !== null ? match.rig.camera : backdropCamera;
+    let pending: Promise<void> | null = null;
+    const compile = (): void => {
+      pending = precompile(scene, camera);
+    };
+    // The effect meshes are hidden until first used; the compile skips what is not visible.
+    if (match !== null) match.vfx.warmUp(compile);
+    else compile();
+    const started: Promise<void> = pending ?? Promise.resolve();
+    warmingCount++;
+    return started.then(warmDone, warmDone);
+  }
+  // Fetch and decode the map's GLBs and textures now, behind the title: a match that starts
+  // later builds its map view from the cache (until then it flies on the hull stand-in).
+  if (webgl !== null) preloadMapAssets(map, webgl);
+  // The dragon GLBs start loading now (title screen), long before the first match needs them.
+  // They queue behind the map's assets: one KTX2 transcoder pool at a time.
+  const dragonAssets =
+    webgl !== null
+      ? sharedDragonAssetLibrary(
+          webgl,
+          map.placements !== undefined && map.placements.length > 0
+            ? loadMapAssets(map, webgl)
+            : undefined,
+        )
+      : null;
   let cameraFov = Number.NaN;
   let cameraShake = 1;
   let cameraReduceMotion = false;
@@ -174,6 +268,7 @@ export function createStage(options: StageOptions): Stage {
   function applyQuality(): void {
     sky.setQuality(preset);
     lights.setQuality(preset);
+    lighting.setQuality(preset);
     sea.setQuality(preset);
     clouds.setQuality(preset);
     match?.mapView.setQuality(preset);
@@ -204,8 +299,10 @@ export function createStage(options: StageOptions): Stage {
   }
 
   function updateSky(camera: PerspectiveCamera): void {
+    sky.update(timeS);
     sea.update(camera.position, timeS);
     clouds.update(timeS);
+    lighting.update(camera, timeS);
   }
 
   /** The rider a spectator watches: the chosen one while it is in the view, else the first. */
@@ -272,13 +369,31 @@ export function createStage(options: StageOptions): Stage {
   return {
     scene,
     get camera() {
+      if (directed) return directedCamera;
       return match !== null && chasing ? match.rig.camera : backdropCamera;
+    },
+    get directed() {
+      return directed;
+    },
+    get timeS() {
+      return timeS;
+    },
+    warmUp,
+    get warming() {
+      return warmingCount > 0;
+    },
+    setCameraDirector(next: CameraDirector | null): void {
+      director = next;
+      if (next === null) directed = false;
     },
     get matchLoaded() {
       return match !== null;
     },
     get matchSeed() {
       return match === null ? -1 : match.seed;
+    },
+    get mapLoadState() {
+      return match === null ? null : match.mapView.loadState;
     },
 
     loadMatch(assets: MatchAssets): void {
@@ -287,9 +402,13 @@ export function createStage(options: StageOptions): Stage {
         if (match.seed === assets.seed) return;
         unloadMatch();
       }
-      const mapView = createMapView(assets.map, preset, { chunkSize: STAGE_MAP_CHUNK_SIZE });
+      const mapView = createMapView(assets.map, preset, {
+        chunkSize: STAGE_MAP_CHUNK_SIZE,
+        renderer: webgl,
+      });
       // The dead are drawn: there is no death cam yet, so the fall is the only feedback.
-      const dragons = createPlaceholderDragons(preset, { showDead: true });
+      // Skinned dragons from the GLBs; the placeholder shows while a class is still loading.
+      const dragons = createDragons(preset, { showDead: true, library: dragonAssets });
       const rig = createCameraRig({
         terrain: assets.collision,
         minY: cloudSeaY + CAMERA_SEA_CLEARANCE,
@@ -309,9 +428,9 @@ export function createStage(options: StageOptions): Stage {
         terrain: assets.collision,
         seed: assets.seed,
       });
-      if (webgl !== null) vfx.warmUp(webgl, rig.camera);
       const unsubscribe = events !== null ? vfx.connect(events) : null;
       match = { seed: assets.seed, mapView, dragons, rig, vfx, storm, unsubscribe };
+      void warmUp();
       watchedId = NO_PLAYER;
       downForS = 0;
       spectateId = NO_PLAYER;
@@ -327,7 +446,8 @@ export function createStage(options: StageOptions): Stage {
       timeS += dtS;
       chasing = false;
       placeBackdropCamera();
-      updateSky(backdropCamera);
+      directed = runDirector(null, dtS);
+      updateSky(directed ? directedCamera : backdropCamera);
     },
 
     updateMatch(view: WorldView, steerX: number, steerY: number, dtS: number): void {
@@ -337,7 +457,8 @@ export function createStage(options: StageOptions): Stage {
       if (views === null) {
         chasing = false;
         placeBackdropCamera();
-        updateSky(backdropCamera);
+        directed = runDirector(null, dtS);
+        updateSky(directed ? directedCamera : backdropCamera);
         return;
       }
       const rig = views.rig;
@@ -391,10 +512,13 @@ export function createStage(options: StageOptions): Stage {
           if (!chasing) placeBackdropCamera();
         }
       }
-      const camera = chasing ? rig.camera : backdropCamera;
+      // After the chase rig: it keeps following underneath, so the cut back is seamless.
+      directed = runDirector(view, dtS);
+      const camera = directed ? directedCamera : chasing ? rig.camera : backdropCamera;
       updateSky(camera);
-      views.mapView.update(camera.position);
-      views.dragons.update(view, dtS);
+      views.mapView.update(camera.position, camera, timeS);
+      views.dragons.update(view, dtS, camera);
+      lighting.setBlobCasters(view.dragons, view.dragonCount, camera.position);
       views.storm.update(view, camera.position, timeS);
       // Last: the effects read the placed camera (billboards, near fade).
       camera.updateMatrixWorld();
@@ -444,6 +568,8 @@ export function createStage(options: StageOptions): Stage {
       if (backdropCamera.aspect !== next) {
         backdropCamera.aspect = next;
         backdropCamera.updateProjectionMatrix();
+        directedCamera.aspect = next;
+        directedCamera.updateProjectionMatrix();
       }
       match?.rig.setAspect(next);
     },
@@ -461,6 +587,7 @@ export function createStage(options: StageOptions): Stage {
       scene.clear();
       scene.fog = null;
       sky.dispose();
+      lighting.dispose();
       lights.dispose();
       sea.dispose();
       clouds.dispose();
