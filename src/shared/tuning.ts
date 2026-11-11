@@ -262,6 +262,11 @@ export interface MatchTuning {
   deathCamS: number;
   /** Approximate; the intro is skippable after the first match. */
   matchIntroS: number;
+  /**
+   * Seconds between the host pressing Start and the match beginning: the lobby is in its
+   * `starting` phase and every browser plays the aerie take-off.
+   */
+  lobbyLaunchS: number;
   countdownS: number;
   /** Duel is best of this many rounds. */
   duelRounds: number;
@@ -276,6 +281,7 @@ export const MATCH_TUNING: MatchTuning = {
   spawnProtectionS: 2, // doc
   deathCamS: 3, // doc
   matchIntroS: 6, // doc (~6 s)
+  lobbyLaunchS: 3, // the aerie take-off (T-5.2)
   countdownS: 3, // doc (3-2-1)
   duelRounds: 5, // doc
   stormDamagePerS: 10, // PLACEHOLDER (T-3.x)

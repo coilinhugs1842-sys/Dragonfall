@@ -30,8 +30,11 @@ import type {
  * `intro` phase.
  */
 export interface MatchIntro extends CameraDirector {
-  /** A match's views were loaded: read the flyby path of this map. Load-time. */
-  begin(map: ArenaMap): void;
+  /**
+   * A match's views were loaded: read the flyby path of this map. `terrain` (when there is
+   * one) keeps the gate shots out of the rock. Load-time.
+   */
+  begin(map: ArenaMap, terrain: TerrainQuery | null): void;
   /** Title-card opacity for this frame, 0..1; 0 outside the intro. Valid after `direct`. */
   readonly cardOpacity: number;
   /** Accessibility: slower, straighter moves and no roll. */
@@ -47,6 +50,8 @@ export interface MatchIntro extends CameraDirector {
  * that is veiled, a spectator).
  */
 export interface DeathCam extends CameraDirector {
+  /** A match's views were loaded. `terrain` pulls the orbit in where rock is in the way. */
+  begin(terrain: TerrainQuery | null): void;
   /** Forget the current orbit (round reset, match unload). */
   reset(): void;
   setReduceMotion(on: boolean): void;
