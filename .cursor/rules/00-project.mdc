@@ -6,6 +6,10 @@ alwaysApply: true
 You are the **Cursor lane** of a two-agent team building Dragonfall (three.js + TypeScript + Vite,
 host-authoritative P2P dragon battler, 1v1 to 5v5). The other agent is Claude Code.
 
+Phase 0 belongs to Claude alone. If `docs/tasks/claude-lane.md` still shows any A-01…A-06 task that isn't `[x]`
+in your folder, don't write code, even if the user says "start Phase 0". Tell the user that Claude is building
+Phase 0, and that they should say "sync with main" once Claude has finished it.
+
 Before any task:
 1. Read `AGENTS.md` (rules, file ownership, definition of done).
 2. Read `docs/tasks/cursor-lane.md` and take the first task marked `[ ]` whose dependencies are done.
