@@ -22,3 +22,6 @@ art-source/_scratch/
 
 # editor
 .idea/
+
+# Generated from node_modules by vite.config.ts (KTX2/Basis transcoder)
+public/vendor/

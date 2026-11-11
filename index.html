@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b1020" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Dragonfall: a browser dragon-riding team battler, 1v1 to 5v5."
+    />
+    <title>Dragonfall</title>
+    <!-- Inline so the very first paint is dark, before the bundled CSS arrives (no white flash). -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #0b1020;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <!-- HTML overlay root: UI renders here at full resolution, independent of render scale. -->
+    <div id="ui"></div>
+
+    <!-- Shown by the boot code (remove the `hidden` attribute) when WebGL2 is unavailable. -->
+    <div id="fallback" role="alert" hidden>
+      <h1>Dragonfall can't start</h1>
+      <p>
+        This game needs WebGL2 with hardware acceleration. Update your browser and graphics driver,
+        then check that hardware acceleration is turned on in the browser settings.
+      </p>
+    </div>
+
+    <noscript>
+      <div id="noscript" role="alert">
+        <h1>Dragonfall needs JavaScript</h1>
+        <p>Enable JavaScript in your browser and reload the page.</p>
+      </div>
+    </noscript>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

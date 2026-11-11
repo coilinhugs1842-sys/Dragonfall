@@ -1,0 +1,113 @@
+/* Base page styles: reset, full-window canvas, and the HTML overlay root. UI modules own the rest. */
+
+:root {
+  /* Keep in sync with the inline style and theme-color in index.html. */
+  --df-bg: #0b1020;
+  --df-fg: #e8ecf5;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  /* The game owns the whole window: no scrollbars, no rubber-band scrolling. */
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--df-bg);
+  color: var(--df-fg);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/*
+ * CSS size is always the full window. The renderer changes only the drawing-buffer size
+ * (dynamic resolution), so the canvas must never take its layout size from its width/height.
+ */
+#game {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  /* Stop touch gestures (scroll, pinch-zoom) from stealing flight input. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/*
+ * Overlay root above the canvas. It ignores the pointer so empty areas (and the HUD) fall through
+ * to the canvas; anything clickable opts back in with .df-interactive or its own pointer-events.
+ */
+#ui {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#ui .df-interactive {
+  pointer-events: auto;
+}
+
+/* Full-screen messages for "no WebGL2" and "no JavaScript". */
+#fallback,
+#noscript {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: var(--df-bg);
+  color: var(--df-fg);
+  text-align: center;
+}
+
+#fallback p,
+#noscript p {
+  max-width: 480px;
+}
+
+/* `display: flex` above would otherwise override the hidden attribute. */
+[hidden] {
+  display: none !important;
+}
