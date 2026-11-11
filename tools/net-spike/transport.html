@@ -1,0 +1,11 @@
+<!doctype html>
+<!--
+  Exercises the real PeerJS transport (src/net/transport/peerjs.ts) between two browser pages.
+  Serve the repo with Vite (`npx vite --host --port 5199`) and open
+  /tools/net-spike/transport.html?role=host|client&code=ABCDE&mode=lan|cloud
+  Results end up in window.spike, like index.html.
+-->
+<meta charset="utf-8" />
+<title>Dragonfall transport check</title>
+<pre id="out"></pre>
+<script type="module" src="./transport-page.ts"></script>

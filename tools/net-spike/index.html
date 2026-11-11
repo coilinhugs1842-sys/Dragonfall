@@ -1,0 +1,245 @@
+<!doctype html>
+<!--
+  T-2.1 spike page (throwaway). Served by serve.mjs over plain HTTP on the LAN IP.
+  ?role=host|client &code=ABCDE &mode=lan|cloud
+  Results end up in window.spike (read by run-spike.mjs over the DevTools protocol).
+-->
+<meta charset="utf-8" />
+<title>Dragonfall net spike</title>
+<pre id="out"></pre>
+<script src="/peerjs.min.js"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  const role = q.get('role') ?? 'host';
+  const code = q.get('code') ?? 'SPIKE';
+  const mode = q.get('mode') ?? 'lan';
+  const hostId = 'dragonfall-' + code;
+  const FAST_ID = 2;
+  const PINGS = 50;
+
+  const spike = (window.spike = { role, mode, done: false, error: null, log: [], result: {} });
+  const log = (...a) => {
+    const line = a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ');
+    spike.log.push(line);
+    document.getElementById('out').textContent += line + '\n';
+  };
+  const fail = (e) => {
+    spike.error = String(e?.type ? e.type + ': ' + e.message : e);
+    spike.done = true;
+    log('ERROR', spike.error);
+  };
+
+  function env() {
+    let storage = 'ok';
+    try {
+      sessionStorage.setItem('df-spike', '1');
+      if (sessionStorage.getItem('df-spike') !== '1') storage = 'readback failed';
+    } catch (e) {
+      storage = 'throws: ' + e;
+    }
+    return {
+      origin: location.origin,
+      isSecureContext,
+      userAgent: navigator.userAgent,
+      rtcPeerConnection: typeof RTCPeerConnection,
+      cryptoRandomUUID: typeof crypto.randomUUID,
+      cryptoGetRandomValues: typeof crypto.getRandomValues,
+      cryptoSubtle: typeof crypto.subtle,
+      sessionStorage: storage,
+      requestPointerLock: typeof Element.prototype.requestPointerLock,
+      peerjsSupports: peerjs.util.supports,
+    };
+  }
+
+  const props = (dc) => ({
+    label: dc.label,
+    id: dc.id,
+    ordered: dc.ordered,
+    maxRetransmits: dc.maxRetransmits,
+    maxPacketLifeTime: dc.maxPacketLifeTime,
+    negotiated: dc.negotiated,
+    binaryType: dc.binaryType,
+    readyState: dc.readyState,
+  });
+
+  async function pairInfo(pc) {
+    const stats = await pc.getStats();
+    let pair = null;
+    const byId = new Map();
+    stats.forEach((s) => byId.set(s.id, s));
+    stats.forEach((s) => {
+      if (s.type === 'transport' && s.selectedCandidatePairId)
+        pair = byId.get(s.selectedCandidatePairId);
+    });
+    if (!pair) return null;
+    const l = byId.get(pair.localCandidateId);
+    const r = byId.get(pair.remoteCandidateId);
+    const c = (x) =>
+      x && { type: x.candidateType, protocol: x.protocol, address: x.address, port: x.port };
+    return { local: c(l), remote: c(r), rttMs: (pair.currentRoundTripTime ?? 0) * 1000 };
+  }
+
+  const peerOptions = {
+    debug: 1,
+    config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+  };
+  if (mode === 'lan') {
+    Object.assign(peerOptions, {
+      host: location.hostname,
+      port: 9000,
+      path: '/dragonfall',
+      secure: false,
+    });
+  }
+
+  spike.result.env = env();
+  log('env', spike.result.env);
+
+  function makeNegotiated(pc) {
+    const dc = pc.createDataChannel('fast', {
+      negotiated: true,
+      id: FAST_ID,
+      ordered: false,
+      maxRetransmits: 0,
+    });
+    dc.binaryType = 'arraybuffer';
+    return dc;
+  }
+
+  if (role === 'host') {
+    const peer = new Peer(hostId, peerOptions);
+    spike.result.connections = [];
+    peer.on('error', fail);
+    peer.on('open', (id) => {
+      log('host open', id);
+      spike.hostOpen = true;
+    });
+    peer.on('connection', (conn) => {
+      const info = {
+        label: conn.label,
+        reliable: conn.reliable,
+        serialization: conn.serialization,
+      };
+      spike.result.connections.push(info);
+      log('incoming', info);
+      conn.on('open', () => {
+        info.channel = props(conn.dataChannel);
+        log('open', info);
+      });
+      conn.on('data', (d) => conn.send(d)); // echo
+      if (conn.label === 'ctrl') {
+        const fast = makeNegotiated(conn.peerConnection);
+        fast.onopen = () => {
+          spike.result.negotiatedFast = props(fast);
+          log('negotiated fast open', spike.result.negotiatedFast);
+        };
+        fast.onmessage = (e) => fast.send(e.data);
+      }
+    });
+  } else {
+    const peer = new Peer(peerOptions);
+    peer.on('error', fail);
+    peer.on('open', async (id) => {
+      try {
+        log('client open', id);
+        const t0 = performance.now();
+        const ctrl = peer.connect(hostId, { label: 'ctrl', reliable: true, serialization: 'raw' });
+        const fastPeerJs = peer.connect(hostId, {
+          label: 'fast-peerjs',
+          reliable: false,
+          serialization: 'raw',
+        });
+        const neg = makeNegotiated(ctrl.peerConnection);
+        const opened = (target, isDc) =>
+          new Promise((res, rej) => {
+            if (isDc) {
+              target.onopen = res;
+              target.onerror = (e) => rej(e.error ?? e);
+            } else {
+              target.on('open', res);
+              target.on('error', rej);
+            }
+          });
+        await Promise.all([opened(ctrl), opened(fastPeerJs), opened(neg, true)]);
+        spike.result.connectMs = performance.now() - t0;
+        spike.result.twoPeerJsConnections = {
+          bothOpen: ctrl.open && fastPeerJs.open,
+          samePeerConnection: ctrl.peerConnection === fastPeerJs.peerConnection,
+        };
+        spike.result.channels = {
+          ctrl: props(ctrl.dataChannel),
+          fastPeerJs: props(fastPeerJs.dataChannel),
+          fastNegotiated: props(neg),
+        };
+        log('channels', spike.result.channels);
+
+        // Echo round trips: 50 binary pings per channel (u32 seq + f64 send time).
+        const ping = (send, subscribe) =>
+          new Promise((res) => {
+            let got = 0;
+            let sum = 0;
+            let allBinary = true;
+            let inOrder = true;
+            let last = -1;
+            subscribe((d) => {
+              if (!(d instanceof ArrayBuffer) || d.byteLength !== 12) {
+                allBinary = false;
+                return;
+              }
+              const v = new DataView(d);
+              const seq = v.getUint32(0);
+              if (seq < last) inOrder = false;
+              last = seq;
+              sum += performance.now() - v.getFloat64(4);
+              got++;
+            });
+            let seq = 0;
+            const timer = setInterval(() => {
+              const b = new ArrayBuffer(12);
+              const v = new DataView(b);
+              v.setUint32(0, seq++);
+              v.setFloat64(4, performance.now());
+              send(b);
+              if (seq === PINGS) {
+                clearInterval(timer);
+                setTimeout(
+                  () =>
+                    res({ sent: PINGS, got, avgRttMs: got ? sum / got : null, allBinary, inOrder }),
+                  500,
+                );
+              }
+            }, 10);
+          });
+        spike.result.roundTrip = {
+          ctrl: await ping(
+            (b) => ctrl.send(b),
+            (f) => ctrl.on('data', f),
+          ),
+          fastPeerJs: await ping(
+            (b) => fastPeerJs.send(b),
+            (f) => fastPeerJs.on('data', f),
+          ),
+          fastNegotiated: await ping(
+            (b) => neg.send(b),
+            (f) => (neg.onmessage = (e) => f(e.data)),
+          ),
+        };
+        // A string on ctrl comes back as a string (raw serialization passes both kinds through).
+        spike.result.ctrlString = await new Promise((res) => {
+          ctrl.on('data', (d) => typeof d === 'string' && res(d));
+          ctrl.send('{"hello":"dragon"}');
+        });
+        // A view into a larger buffer must send only the view's bytes.
+        spike.result.viewBytes = await new Promise((res) => {
+          neg.onmessage = (e) => res(e.data.byteLength);
+          neg.send(new Uint8Array(new ArrayBuffer(64), 8, 5));
+        });
+        spike.result.pair = await pairInfo(ctrl.peerConnection);
+        log('result', spike.result);
+        spike.done = true;
+      } catch (e) {
+        fail(e);
+      }
+    });
+  }
+</script>
