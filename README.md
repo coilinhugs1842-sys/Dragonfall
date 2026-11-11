@@ -7,12 +7,13 @@ a room code. Built with three.js and tuned for laptops with Intel integrated gra
 
 ## Docs
 
-- `docs/WORKFLOW.md`: **start here.** How Claude Code and Cursor work on this at the same time
+- `docs/WORKFLOW.md`: **start here.** How to work on this with Claude Code
 - `docs/GAME_DESIGN.md`: the game
 - `docs/ROADMAP.md`: phases and gates
 - `docs/ARCHITECTURE.md`, `docs/NETWORKING.md`, `docs/PERFORMANCE.md`: technical design
 - `docs/ART_DIRECTION.md`, `docs/ASSET_PIPELINE.md`: look and Higgsfield asset generation
-- `AGENTS.md`: rules for the AI agents
+- `docs/TASKS.md`, `docs/PROGRESS.md`: task list and progress log
+- `CLAUDE.md`: rules Claude Code follows in this project
 
 ## Run (after Phase 0)
 

@@ -17,20 +17,20 @@
 
 ```
 src/
-  main.ts            boot: create renderer, load settings, start the App state machine     [Claude]
-  shared/            contracts used by both lanes (types, constants, tuning tables)         [Claude]
-  sim/               pure game simulation, runs on the host; clients run it for prediction  [Claude]
-  net/               transport, protocol codec, HostSession, ClientSession, snapshot buffer [Claude]
-  game/              App state machine + scene orchestration, builds WorldView for the views [Claude]
-  dev/               perf HUD, debug GUI, ?bench flythrough, latency/loss simulator          [Claude]
-  render/            renderer, quality presets, dynamic resolution, post pass, camera rig    [Cursor]
-  world/             map loader, islands, sky, clouds, cloud sea, instanced props, LOD       [Cursor]
-  dragons/           dragon model + animation controller, team tint, nameplates             [Cursor]
-  vfx/               pooled particles and effects driven by GameEvents                      [Cursor]
-  cinematics/        aerie lobby scene, camera splines, intro / results sequences            [Cursor]
-  ui/                menus, lobby panels, HUD, scoreboard, settings                         [Cursor]
-  input/             devices → InputFrame                                                   [Cursor]
-  audio/             WebAudio engine driven by GameEvents                                   [Cursor]
+  main.ts            boot: create renderer, load settings, start the App state machine
+  shared/            contracts between sim, net and views (types, constants, tuning tables)
+  sim/               pure game simulation, runs on the host; clients run it for prediction
+  net/               transport, protocol codec, HostSession, ClientSession, snapshot buffer
+  game/              App state machine + scene orchestration, builds WorldView for the views
+  dev/               perf HUD, debug GUI, ?bench flythrough, latency/loss simulator
+  render/            renderer, quality presets, dynamic resolution, post pass, camera rig
+  world/             map loader, islands, sky, clouds, cloud sea, instanced props, LOD
+  dragons/           dragon model + animation controller, team tint, nameplates
+  vfx/               pooled particles and effects driven by GameEvents
+  cinematics/        aerie lobby scene, camera splines, intro / results sequences
+  ui/                menus, lobby panels, HUD, scoreboard, settings
+  input/             devices → InputFrame
+  audio/             WebAudio engine driven by GameEvents
 ```
 
 ## Data flow
@@ -48,9 +48,9 @@ src/
 
 The host runs the same views as a client: it renders its own authoritative state with zero network delay.
 
-## Contracts (live in `src/shared/`, owned by Claude, defined in Phase 0)
+## Contracts (live in `src/shared/`, defined in Phase 0)
 
-These are the seams between the lanes. Cursor codes only against these.
+These are the seams between the sim/net side and the view side. View modules code only against these.
 
 - `InputFrame`: per-tick player input (steer vector, buttons bitmask, tick number).
 - `WorldView`: read-only, already interpolated state for rendering. It has the list of dragons (id, team,

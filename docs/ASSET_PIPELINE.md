@@ -1,6 +1,6 @@
 # Asset Pipeline: Higgsfield → Blender → gltf-transform → game
 
-Owned by the **Claude lane**. Claude runs the generations with the Higgsfield skills installed on this machine
+Claude runs the generations with the Higgsfield skills installed on this machine
 (`higgsfield-generate`, plus the game references bundled with `higgsfield-websites`: `game-stylization`,
 `game-3d-animation`, `game-procedural-animation`, `game-textures`, `game-audio`).
 

@@ -88,7 +88,7 @@ The player can always override the choice in Settings.
 1. `?perf` shows the HUD: fps, frame ms (avg and 1 % low), draw calls, triangles, textures/geometries in memory,
    JS heap, render scale, and on the host the sim ms and network KB/s.
 2. `?bench` flies a fixed camera path through the busiest part of the map with 10 bot dragons fighting, for 60 s,
-   and prints a summary (avg fps, 1 % low, max frame ms) to copy into the handoff file.
+   and prints a summary (avg fps, 1 % low, max frame ms) to copy into `docs/PROGRESS.md`.
 3. **Pass:** on a **U-series laptop that is hosting a 5v5**, after a **10-minute warm-up**, Medium holds an
    **average ≥ 60 fps with 1 % lows ≥ 45 fps**, and Low holds an average ≥ 60 fps with 1 % lows ≥ 50 fps.
 

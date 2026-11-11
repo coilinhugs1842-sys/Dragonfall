@@ -20,8 +20,7 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
    by the STYLE FORMULA.
 7. **Plain HTML/CSS UI (no React).** It's lighter, and there's no framework render loop competing with the game
    loop.
-8. **Two lanes with directory ownership + git worktrees.** Lets Claude Code and Cursor work at the same time with
-   few merge conflicts. Claude is the integrator on `main`.
+8. ~~Two lanes (Claude Code + Cursor) with git worktrees.~~ Superseded by decision 13.
 9. **Git LFS for binary assets.** Keeps the repo usable once generated assets pile up.
 
 ## Open questions (to resolve in the phase noted)
@@ -47,3 +46,10 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
     - The git author for commits is currently `aman037 <aman037@example.com>` (global git config). To link commits
       to a GitHub account, set `git config user.email` to the account's email or its GitHub noreply address
       before pushing.
+
+## 2026-11-10: Claude-only development
+
+13. **Claude Code builds the whole project. Cursor is not used as a second agent.** Running two agents was
+    confusing to coordinate. The Cursor worktree, branch, rules and lane task files were removed. There is one
+    task list (`docs/TASKS.md`) and one progress log (`docs/PROGRESS.md`). Any editor (Cursor, VS Code) can
+    still be used to view or edit the code by hand.
