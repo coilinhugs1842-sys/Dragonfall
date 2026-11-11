@@ -1,0 +1,609 @@
+/**
+ * `fast` channel messages: INPUT (client -> host, 30 Hz) and SNAPSHOT (host -> client, 20 Hz).
+ * Encode and decode are allocation-free: they only touch the caller's Writer/Reader and message
+ * structs.
+ *
+ * INPUT layout (6 + 6 per frame = 12..24 bytes):
+ *   0  header             u8 type, u16 tick      tick of the newest frame
+ *   3  u16 ackSnapshotTick                       newest snapshot the client had (lag compensation)
+ *   5  u8  meta                                  bits 0-1 frame count (1..3), bit 7 hasAck
+ *   6  per frame, newest first (frame i is for tick - i):
+ *        i16 steerX, i16 steerY, u16 buttons
+ *
+ * SNAPSHOT layout (17 + 84 if owner + 19 per dragon; 291 bytes for 10 dragons with owner):
+ *   0  header             u8 type, u16 tick      tick of the sim state
+ *   3  u16 ackInputTick                          lastProcessedInputTick of the recipient
+ *   5  u8  flags                                 bit 0 hasAck, bit 1 hasOwner
+ *   6  clock              u8 phase, u8 round, u16 phaseTicks, u16 remainingTicks,
+ *                         u8 scoreEmber, u8 scoreFrost
+ *   14 u8  dragonCount, u8 projectileCount (0), u8 zoneCount (0)
+ *   17 owner block (if hasOwner), 84 bytes: see `writeOwner`
+ *      dragon records, 19 bytes each: see `writeDragon`
+ *      (projectile and zone records will follow here; their counts must be 0 in this version)
+ *
+ * WHY THE BODIES ARE WRITTEN WITH RAW DataView CALLS: a float passed to, or returned from, a
+ * function the JIT did not inline is boxed on the heap. Going through `Writer.f32()` and the
+ * `quantize*` helpers cost about 200 B of garbage per snapshot once the functions grew past the
+ * inlining budget. So the size is checked once, and then the records are read and written with
+ * DataView methods and `Math.*` only (both compile to machine code without a call), and helpers
+ * take objects instead of numbers. The formulas are the ones in `./quantize`. Every quantized
+ * value ends in `| 0`: it turns NaN into 0, and it turns the -0 that `Math.round(-0.1)` yields
+ * into a plain integer (a -0 is a float to the engine and was boxed, 16 B per packet).
+ * tests/net/codec-fast.test.ts ("hot path allocations") measures all of this.
+ */
+
+import {
+  BUTTON_MASK,
+  DRAGON_ANIM_CLIPS,
+  DRAGON_ANIM_GLIDE,
+  MATCH_PHASES,
+  NO_PLAYER,
+  TICK_DT_S,
+  TICK_HZ,
+} from '../../shared';
+import type { DragonState, SimState } from '../../sim';
+import {
+  DECODE_BAD_VALUE,
+  DECODE_OVERSIZED,
+  DECODE_TRUNCATED,
+  DECODE_UNSUPPORTED,
+  FAST_MAX_BYTES,
+  INPUT_FIXED_BYTES,
+  INPUT_FRAMES_PER_PACKET,
+  INPUT_FRAME_BYTES,
+  MSG_INPUT,
+  MSG_SNAPSHOT,
+  SNAPSHOT_DRAGON_BYTES,
+  SNAPSHOT_FIXED_BYTES,
+  SNAPSHOT_MAX_DRAGONS,
+  SNAPSHOT_OWNER_BYTES,
+  WIRE_POSITION_CENTER_Y_M,
+  WIRE_POSITION_STEP_M,
+  WIRE_TIME_INFINITE,
+  WIRE_VELOCITY_STEP_MPS,
+} from '../protocol';
+import type { InputMessage, SnapshotDragon, SnapshotMessage, SnapshotOwner } from '../protocol';
+import type { Reader, Writer } from './io';
+import {
+  POSITION_UNITS_PER_M,
+  STEER_UNITS,
+  VELOCITY_UNITS_PER_MPS,
+  readQuat,
+  writeQuat,
+} from './quantize';
+
+const INPUT_FLAG_HAS_ACK = 0x80;
+const INPUT_COUNT_MASK = 0x03;
+const SNAPSHOT_FLAG_HAS_ACK = 1 << 0;
+const SNAPSHOT_FLAG_HAS_OWNER = 1 << 1;
+const OWNER_BIT_BOOST_LOCKED = 1 << 0;
+
+/** Integer in [0, max]; NaN and negatives become 0. For counts, not for floats in the hot path. */
+function clampCount(value: number, max: number): number {
+  // `!(> 0)` also catches NaN.
+  if (!(value > 0)) return 0;
+  return value >= max ? max : value | 0;
+}
+
+// --- INPUT ---------------------------------------------------------------------------------------
+
+export function inputByteLength(frameCount: number): number {
+  return INPUT_FIXED_BYTES + frameCount * INPUT_FRAME_BYTES;
+}
+
+/**
+ * Writes an INPUT message and returns its byte length (0 if it did not fit). The header tick is
+ * `msg.frames[0].tick`; `msg.tick` is ignored (decode fills it). `frames[i]` must be the input
+ * for tick `frames[0].tick - i`; send fewer frames (`frameCount`) until that history exists.
+ * Steer is clamped and quantized, unknown button bits are dropped.
+ */
+export function encodeInput(w: Writer, msg: Readonly<InputMessage>): number {
+  w.reset();
+  const count = msg.frameCount < 1 ? 1 : clampCount(msg.frameCount, INPUT_FRAMES_PER_PACKET);
+  const length = INPUT_FIXED_BYTES + count * INPUT_FRAME_BYTES;
+  const newest = msg.frames[0];
+  if (length > w.capacity || newest === undefined) {
+    w.overflow = true;
+    return 0;
+  }
+  const view = w.view;
+  view.setUint8(0, MSG_INPUT);
+  view.setUint16(1, newest.tick & 0xffff, true);
+  view.setUint16(3, msg.hasAck ? msg.ackSnapshotTick & 0xffff : 0, true);
+  view.setUint8(5, count | (msg.hasAck ? INPUT_FLAG_HAS_ACK : 0));
+  let at = INPUT_FIXED_BYTES;
+  for (let i = 0; i < count; i++) {
+    const frame = msg.frames[i];
+    if (frame === undefined) {
+      w.overflow = true;
+      return 0;
+    }
+    // quantizeSteer, inline.
+    view.setInt16(
+      at,
+      Math.max(-32767, Math.min(32767, Math.round(frame.steerX * STEER_UNITS))) | 0,
+      true,
+    );
+    view.setInt16(
+      at + 2,
+      Math.max(-32767, Math.min(32767, Math.round(frame.steerY * STEER_UNITS))) | 0,
+      true,
+    );
+    view.setUint16(at + 4, frame.buttons & BUTTON_MASK, true);
+    at += INPUT_FRAME_BYTES;
+  }
+  w.offset = length;
+  return length;
+}
+
+/**
+ * Reads an INPUT message from untrusted bytes. On success `into.frames[0..frameCount)` hold
+ * legal values (steer in [-1, 1], known buttons only) and each frame's `tick` is its 16-bit
+ * wire tick; expand it with `expandTick(frame.tick, hostTick)`. On failure `into` may be
+ * partly overwritten and `r.error` says why.
+ */
+export function decodeInput(r: Reader, into: InputMessage): boolean {
+  const tick = r.header(MSG_INPUT, FAST_MAX_BYTES);
+  const ack = r.u16();
+  const meta = r.u8();
+  if (!r.ok) return false;
+  const count = meta & INPUT_COUNT_MASK;
+  if (
+    count < 1 ||
+    count > INPUT_FRAMES_PER_PACKET ||
+    (meta & ~(INPUT_COUNT_MASK | INPUT_FLAG_HAS_ACK)) !== 0
+  ) {
+    return r.fail(DECODE_BAD_VALUE);
+  }
+  const length = INPUT_FIXED_BYTES + count * INPUT_FRAME_BYTES;
+  if (r.byteLength !== length) {
+    return r.fail(r.byteLength < length ? DECODE_TRUNCATED : DECODE_OVERSIZED);
+  }
+  into.tick = tick;
+  into.frameCount = count;
+  into.hasAck = (meta & INPUT_FLAG_HAS_ACK) !== 0;
+  into.ackSnapshotTick = into.hasAck ? ack : 0;
+  const view = r.view;
+  let at = INPUT_FIXED_BYTES;
+  for (let i = 0; i < count; i++) {
+    const frame = into.frames[i];
+    if (frame === undefined) return r.fail(DECODE_BAD_VALUE);
+    frame.tick = (tick - i) & 0xffff;
+    // dequantizeSteer, inline: -32768 clamps to -1.
+    frame.steerX = Math.max(-1, view.getInt16(at, true) / STEER_UNITS);
+    frame.steerY = Math.max(-1, view.getInt16(at + 2, true) / STEER_UNITS);
+    frame.buttons = view.getUint16(at + 4, true) & BUTTON_MASK;
+    at += INPUT_FRAME_BYTES;
+  }
+  r.offset = length;
+  return true;
+}
+
+// --- SNAPSHOT ------------------------------------------------------------------------------------
+
+export function snapshotByteLength(dragonCount: number, hasOwner: boolean): number {
+  return (
+    SNAPSHOT_FIXED_BYTES +
+    (hasOwner ? SNAPSHOT_OWNER_BYTES : 0) +
+    dragonCount * SNAPSHOT_DRAGON_BYTES
+  );
+}
+
+/**
+ * 19 bytes: u8 id, i16 x, i16 y, i16 z, u32 orientation, i8 vx, i8 vy, i8 vz, u8 health
+ * (rounded up), u8 stamina, u16 flags, u8 anim. Out-of-range values clamp; NaN writes 0.
+ */
+function writeDragon(view: DataView, at: number, dragon: Readonly<SnapshotDragon>): void {
+  const position = dragon.position;
+  const velocity = dragon.velocity;
+  view.setUint8(at, dragon.id);
+  view.setInt16(
+    at + 1,
+    Math.max(-32767, Math.min(32767, Math.round(position.x * POSITION_UNITS_PER_M))) | 0,
+    true,
+  );
+  view.setInt16(
+    at + 3,
+    Math.max(
+      -32767,
+      Math.min(32767, Math.round((position.y - WIRE_POSITION_CENTER_Y_M) * POSITION_UNITS_PER_M)),
+    ) | 0,
+    true,
+  );
+  view.setInt16(
+    at + 5,
+    Math.max(-32767, Math.min(32767, Math.round(position.z * POSITION_UNITS_PER_M))) | 0,
+    true,
+  );
+  writeQuat(view, at + 7, dragon.orientation);
+  view.setInt8(
+    at + 11,
+    Math.max(-127, Math.min(127, Math.round(velocity.x * VELOCITY_UNITS_PER_MPS))) | 0,
+  );
+  view.setInt8(
+    at + 12,
+    Math.max(-127, Math.min(127, Math.round(velocity.y * VELOCITY_UNITS_PER_MPS))) | 0,
+  );
+  view.setInt8(
+    at + 13,
+    Math.max(-127, Math.min(127, Math.round(velocity.z * VELOCITY_UNITS_PER_MPS))) | 0,
+  );
+  view.setUint8(at + 14, Math.max(0, Math.min(255, Math.ceil(dragon.health * 255))) | 0);
+  view.setUint8(at + 15, Math.max(0, Math.min(255, Math.round(dragon.stamina * 255))) | 0);
+  view.setUint16(at + 16, dragon.flags & 0xffff, true);
+  view.setUint8(at + 18, dragon.anim);
+}
+
+function readDragon(view: DataView, at: number, into: SnapshotDragon): void {
+  into.id = view.getUint8(at);
+  into.position.x = view.getInt16(at + 1, true) * WIRE_POSITION_STEP_M;
+  into.position.y = view.getInt16(at + 3, true) * WIRE_POSITION_STEP_M + WIRE_POSITION_CENTER_Y_M;
+  into.position.z = view.getInt16(at + 5, true) * WIRE_POSITION_STEP_M;
+  readQuat(view, at + 7, into.orientation);
+  into.velocity.x = view.getInt8(at + 11) * WIRE_VELOCITY_STEP_MPS;
+  into.velocity.y = view.getInt8(at + 12) * WIRE_VELOCITY_STEP_MPS;
+  into.velocity.z = view.getInt8(at + 13) * WIRE_VELOCITY_STEP_MPS;
+  into.health = view.getUint8(at + 14) / 255;
+  into.stamina = view.getUint8(at + 15) / 255;
+  into.flags = view.getUint16(at + 16, true);
+  const anim = view.getUint8(at + 18);
+  // An animation this build does not know is not worth losing the snapshot over.
+  into.anim = anim < DRAGON_ANIM_CLIPS.length ? anim : DRAGON_ANIM_GLIDE;
+}
+
+/**
+ * 84 bytes: u8 id, f32 x 15 (position xyz, yaw, pitch, roll, yawRate, pitchRate, speed,
+ * burst xyz, stamina, health, maxHealth), u16 flags, u16 prevButtons, u8 bits (bit 0
+ * boostLocked, bits 1-2 dodgeDir + 1), then 9 x u16 timers in DragonState order.
+ */
+function writeOwner(view: DataView, at: number, owner: Readonly<SnapshotOwner>): void {
+  view.setUint8(at, owner.id);
+  view.setFloat32(at + 1, owner.position.x, true);
+  view.setFloat32(at + 5, owner.position.y, true);
+  view.setFloat32(at + 9, owner.position.z, true);
+  view.setFloat32(at + 13, owner.yaw, true);
+  view.setFloat32(at + 17, owner.pitch, true);
+  view.setFloat32(at + 21, owner.roll, true);
+  view.setFloat32(at + 25, owner.yawRate, true);
+  view.setFloat32(at + 29, owner.pitchRate, true);
+  view.setFloat32(at + 33, owner.speed, true);
+  view.setFloat32(at + 37, owner.burst.x, true);
+  view.setFloat32(at + 41, owner.burst.y, true);
+  view.setFloat32(at + 45, owner.burst.z, true);
+  view.setFloat32(at + 49, owner.stamina, true);
+  view.setFloat32(at + 53, owner.health, true);
+  view.setFloat32(at + 57, owner.maxHealth, true);
+  view.setUint16(at + 61, owner.flags & 0xffff, true);
+  view.setUint16(at + 63, owner.prevButtons & BUTTON_MASK, true);
+  const dodgeDir = owner.dodgeDir < 0 ? 0 : owner.dodgeDir > 0 ? 2 : 1;
+  view.setUint8(at + 65, (owner.boostLocked ? OWNER_BIT_BOOST_LOCKED : 0) | (dodgeDir << 1));
+  // Timers are small whole numbers; the clamp only guards against a corrupted state.
+  view.setUint16(at + 66, Math.max(0, Math.min(0xffff, owner.dodgeTicks)) | 0, true);
+  view.setUint16(at + 68, Math.max(0, Math.min(0xffff, owner.dodgeTotalTicks)) | 0, true);
+  view.setUint16(at + 70, Math.max(0, Math.min(0xffff, owner.dodgeImmunityTicks)) | 0, true);
+  view.setUint16(at + 72, Math.max(0, Math.min(0xffff, owner.dodgeCooldownTicks)) | 0, true);
+  view.setUint16(at + 74, Math.max(0, Math.min(0xffff, owner.flapCooldownTicks)) | 0, true);
+  view.setUint16(at + 76, Math.max(0, Math.min(0xffff, owner.staminaRegenDelayTicks)) | 0, true);
+  view.setUint16(at + 78, Math.max(0, Math.min(0xffff, owner.spawnProtectTicks)) | 0, true);
+  view.setUint16(at + 80, Math.max(0, Math.min(0xffff, owner.hitTicks)) | 0, true);
+  view.setUint16(at + 82, Math.max(0, Math.min(0xffff, owner.terrainGraceTicks)) | 0, true);
+}
+
+/** Returns false if any float is NaN or infinite, or a packed field is out of range. */
+function readOwner(view: DataView, at: number, into: SnapshotOwner): boolean {
+  const px = view.getFloat32(at + 1, true);
+  const py = view.getFloat32(at + 5, true);
+  const pz = view.getFloat32(at + 9, true);
+  const yaw = view.getFloat32(at + 13, true);
+  const pitch = view.getFloat32(at + 17, true);
+  const roll = view.getFloat32(at + 21, true);
+  const yawRate = view.getFloat32(at + 25, true);
+  const pitchRate = view.getFloat32(at + 29, true);
+  const speed = view.getFloat32(at + 33, true);
+  const bx = view.getFloat32(at + 37, true);
+  const by = view.getFloat32(at + 41, true);
+  const bz = view.getFloat32(at + 45, true);
+  const stamina = view.getFloat32(at + 49, true);
+  const health = view.getFloat32(at + 53, true);
+  const maxHealth = view.getFloat32(at + 57, true);
+  // `v - v` is 0 for a finite v and NaN for NaN and both infinities, so the sum is 0 only if
+  // every value is finite.
+  const finite =
+    px -
+    px +
+    (py - py) +
+    (pz - pz) +
+    (yaw - yaw) +
+    (pitch - pitch) +
+    (roll - roll) +
+    (yawRate - yawRate) +
+    (pitchRate - pitchRate) +
+    (speed - speed) +
+    (bx - bx) +
+    (by - by) +
+    (bz - bz) +
+    (stamina - stamina) +
+    (health - health) +
+    (maxHealth - maxHealth);
+  const id = view.getUint8(at);
+  const bits = view.getUint8(at + 65);
+  const dodgeDir = (bits >> 1) & 3;
+  if (finite !== 0 || dodgeDir > 2 || (bits & ~0x07) !== 0 || id === NO_PLAYER) return false;
+
+  into.id = id;
+  into.position.x = px;
+  into.position.y = py;
+  into.position.z = pz;
+  into.yaw = yaw;
+  into.pitch = pitch;
+  into.roll = roll;
+  into.yawRate = yawRate;
+  into.pitchRate = pitchRate;
+  into.speed = speed;
+  into.burst.x = bx;
+  into.burst.y = by;
+  into.burst.z = bz;
+  into.stamina = stamina;
+  into.health = health;
+  into.maxHealth = maxHealth;
+  into.flags = view.getUint16(at + 61, true);
+  into.prevButtons = view.getUint16(at + 63, true) & BUTTON_MASK;
+  into.boostLocked = (bits & OWNER_BIT_BOOST_LOCKED) !== 0;
+  into.dodgeDir = dodgeDir - 1;
+  into.dodgeTicks = view.getUint16(at + 66, true);
+  into.dodgeTotalTicks = view.getUint16(at + 68, true);
+  into.dodgeImmunityTicks = view.getUint16(at + 70, true);
+  into.dodgeCooldownTicks = view.getUint16(at + 72, true);
+  into.flapCooldownTicks = view.getUint16(at + 74, true);
+  into.staminaRegenDelayTicks = view.getUint16(at + 76, true);
+  into.spawnProtectTicks = view.getUint16(at + 78, true);
+  into.hitTicks = view.getUint16(at + 80, true);
+  into.terrainGraceTicks = view.getUint16(at + 82, true);
+  return true;
+}
+
+/**
+ * Writes a SNAPSHOT for one recipient and returns its byte length (0 if it did not fit).
+ *
+ * The recipient's own dragon travels twice: quantized in `dragons` like everyone else's (what
+ * the views of other players get), and in the OWNER block with every primary flight field at
+ * `f32` precision plus the exact integer timers. Reconciliation overwrites the predicted dragon
+ * with the owner block (`applySnapshotOwner`) and replays its inputs for the ticks after the
+ * snapshot's (from snapshot tick + 1, not from the ack: see `ClientPredictor`). Sending the
+ * full state was chosen over "quantize identically on both sides": the host would otherwise have
+ * to simulate from quantized state too, or every replay would start from a state the host never
+ * had. `f32` (not `f64`) keeps the block at 84 bytes; the rounding it adds is about 1e-7
+ * relative (0.1 mm at the map edge) and is replaced by the next snapshot, so compare predicted
+ * and authoritative state with a tolerance, never with `===`.
+ */
+export function encodeSnapshot(w: Writer, msg: Readonly<SnapshotMessage>): number {
+  w.reset();
+  const dragonCount = clampCount(msg.dragonCount, SNAPSHOT_MAX_DRAGONS);
+  const hasOwner = msg.hasOwner;
+  const length = snapshotByteLength(dragonCount, hasOwner);
+  if (length > w.capacity) {
+    w.overflow = true;
+    return 0;
+  }
+  const view = w.view;
+  view.setUint8(0, MSG_SNAPSHOT);
+  view.setUint16(1, msg.tick & 0xffff, true);
+  view.setUint16(3, msg.hasAck ? msg.ackInputTick & 0xffff : 0, true);
+  view.setUint8(
+    5,
+    (msg.hasAck ? SNAPSHOT_FLAG_HAS_ACK : 0) | (hasOwner ? SNAPSHOT_FLAG_HAS_OWNER : 0),
+  );
+
+  const phase = MATCH_PHASES.indexOf(msg.phase);
+  view.setUint8(6, phase < 0 ? 0 : phase);
+  view.setUint8(7, Math.max(0, Math.min(255, msg.round)) | 0);
+  // quantizeClockS, inline.
+  view.setUint16(
+    8,
+    Math.max(0, Math.min(WIRE_TIME_INFINITE - 1, Math.round(msg.phaseTimeS * TICK_HZ))) | 0,
+    true,
+  );
+  view.setUint16(
+    10,
+    msg.timeRemainingS === Infinity
+      ? WIRE_TIME_INFINITE
+      : Math.max(0, Math.min(WIRE_TIME_INFINITE - 1, Math.round(msg.timeRemainingS * TICK_HZ))) | 0,
+    true,
+  );
+  view.setUint8(12, Math.max(0, Math.min(255, msg.scoreEmber)) | 0);
+  view.setUint8(13, Math.max(0, Math.min(255, msg.scoreFrost)) | 0);
+  view.setUint8(14, dragonCount);
+  view.setUint8(15, 0); // projectiles: reserved
+  view.setUint8(16, 0); // zones: reserved
+
+  let at = SNAPSHOT_FIXED_BYTES;
+  if (hasOwner) {
+    writeOwner(view, at, msg.owner);
+    at += SNAPSHOT_OWNER_BYTES;
+  }
+  for (let i = 0; i < dragonCount; i++) {
+    const dragon = msg.dragons[i];
+    if (dragon === undefined) {
+      w.overflow = true;
+      return 0;
+    }
+    writeDragon(view, at, dragon);
+    at += SNAPSHOT_DRAGON_BYTES;
+  }
+  w.offset = length;
+  return length;
+}
+
+/**
+ * Reads a SNAPSHOT. On success every number in `into` is finite, ids are valid player ids with
+ * no duplicates, orientations are unit quaternions and `dragonCount <= SNAPSHOT_MAX_DRAGONS`.
+ * On failure `into` may be partly overwritten (do not use it) and `r.error` says why.
+ */
+export function decodeSnapshot(r: Reader, into: SnapshotMessage): boolean {
+  const tick = r.header(MSG_SNAPSHOT, FAST_MAX_BYTES);
+  const ack = r.u16();
+  const flags = r.u8();
+  const phase = r.u8();
+  const round = r.u8();
+  const phaseTicks = r.u16();
+  const remainingTicks = r.u16();
+  const scoreEmber = r.u8();
+  const scoreFrost = r.u8();
+  const dragonCount = r.u8();
+  const projectileCount = r.u8();
+  const zoneCount = r.u8();
+  if (!r.ok) return false;
+
+  const phaseId = MATCH_PHASES[phase];
+  if (
+    phaseId === undefined ||
+    dragonCount > SNAPSHOT_MAX_DRAGONS ||
+    (flags & ~(SNAPSHOT_FLAG_HAS_ACK | SNAPSHOT_FLAG_HAS_OWNER)) !== 0
+  ) {
+    return r.fail(DECODE_BAD_VALUE);
+  }
+  if (projectileCount !== 0 || zoneCount !== 0) return r.fail(DECODE_UNSUPPORTED);
+  const hasOwner = (flags & SNAPSHOT_FLAG_HAS_OWNER) !== 0;
+  // The counts fix the exact length, so a lying count is caught here and everything below can
+  // read the view directly without further bounds checks.
+  const length = snapshotByteLength(dragonCount, hasOwner);
+  if (r.byteLength !== length) {
+    return r.fail(r.byteLength < length ? DECODE_TRUNCATED : DECODE_OVERSIZED);
+  }
+
+  into.tick = tick;
+  into.hasAck = (flags & SNAPSHOT_FLAG_HAS_ACK) !== 0;
+  into.ackInputTick = into.hasAck ? ack : 0;
+  into.phase = phaseId;
+  into.round = round;
+  // dequantizeClockS, inline.
+  into.phaseTimeS = phaseTicks * TICK_DT_S;
+  into.timeRemainingS =
+    remainingTicks === WIRE_TIME_INFINITE ? Infinity : remainingTicks * TICK_DT_S;
+  into.scoreEmber = scoreEmber;
+  into.scoreFrost = scoreFrost;
+  into.hasOwner = hasOwner;
+  into.dragonCount = dragonCount;
+  into.projectileCount = 0;
+  into.zoneCount = 0;
+
+  const view = r.view;
+  let at = SNAPSHOT_FIXED_BYTES;
+  if (hasOwner) {
+    if (!readOwner(view, at, into.owner)) return r.fail(DECODE_BAD_VALUE);
+    at += SNAPSHOT_OWNER_BYTES;
+  }
+  for (let i = 0; i < dragonCount; i++) {
+    const dragon = into.dragons[i];
+    if (dragon === undefined) return r.fail(DECODE_BAD_VALUE);
+    readDragon(view, at, dragon);
+    at += SNAPSHOT_DRAGON_BYTES;
+    if (dragon.id === NO_PLAYER) return r.fail(DECODE_BAD_VALUE);
+    for (let j = 0; j < i; j++) {
+      if (into.dragons[j]?.id === dragon.id) return r.fail(DECODE_BAD_VALUE);
+    }
+  }
+  r.offset = length;
+  return true;
+}
+
+// --- Sim <-> snapshot helpers ----------------------------------------------------------------------
+
+/** Field-by-field copy; `from` may be the sim's `DragonState`. */
+export function copySnapshotOwner(
+  out: SnapshotOwner,
+  from: Readonly<SnapshotOwner>,
+): SnapshotOwner {
+  out.id = from.id;
+  out.position.x = from.position.x;
+  out.position.y = from.position.y;
+  out.position.z = from.position.z;
+  out.yaw = from.yaw;
+  out.pitch = from.pitch;
+  out.roll = from.roll;
+  out.yawRate = from.yawRate;
+  out.pitchRate = from.pitchRate;
+  out.speed = from.speed;
+  out.burst.x = from.burst.x;
+  out.burst.y = from.burst.y;
+  out.burst.z = from.burst.z;
+  out.stamina = from.stamina;
+  out.health = from.health;
+  out.maxHealth = from.maxHealth;
+  out.flags = from.flags;
+  out.prevButtons = from.prevButtons;
+  out.boostLocked = from.boostLocked;
+  out.dodgeDir = from.dodgeDir;
+  out.dodgeTicks = from.dodgeTicks;
+  out.dodgeTotalTicks = from.dodgeTotalTicks;
+  out.dodgeImmunityTicks = from.dodgeImmunityTicks;
+  out.dodgeCooldownTicks = from.dodgeCooldownTicks;
+  out.flapCooldownTicks = from.flapCooldownTicks;
+  out.staminaRegenDelayTicks = from.staminaRegenDelayTicks;
+  out.spawnProtectTicks = from.spawnProtectTicks;
+  out.hitTicks = from.hitTicks;
+  out.terrainGraceTicks = from.terrainGraceTicks;
+  return out;
+}
+
+/**
+ * Client reconciliation, step 1: overwrites the predicted dragon's primary fields with the
+ * host's. `active`, `team` and `classId` are left alone (lobby data), and so are the derived
+ * fields (`orientation`, `velocity`, `anim`): the next `finalizeDragon` rewrites them, so call
+ * it yourself if no input is replayed afterwards. The block is the state AFTER the snapshot's
+ * tick whatever input the host used for it, so replay the inputs of snapshot tick + 1 onwards
+ * (replaying from `ackInputTick` would apply an input twice).
+ */
+export function applySnapshotOwner(
+  dragon: DragonState,
+  owner: Readonly<SnapshotOwner>,
+): DragonState {
+  copySnapshotOwner(dragon, owner);
+  return dragon;
+}
+
+/**
+ * Host side: fills `msg.tick`, `msg.dragons` and `msg.dragonCount` from a sim state (every
+ * active dragon, in slot order). The per-recipient fields (ack, owner) and the clock are the
+ * caller's to set before each `encodeSnapshot`.
+ */
+export function fillSnapshotDragons(
+  msg: SnapshotMessage,
+  state: Readonly<SimState>,
+): SnapshotMessage {
+  let count = 0;
+  for (let i = 0; i < state.dragons.length && count < SNAPSHOT_MAX_DRAGONS; i++) {
+    const dragon = state.dragons[i];
+    const out = msg.dragons[count];
+    if (dragon === undefined || !dragon.active || out === undefined) continue;
+    out.id = dragon.id;
+    out.position.x = dragon.position.x;
+    out.position.y = dragon.position.y;
+    out.position.z = dragon.position.z;
+    out.orientation.x = dragon.orientation.x;
+    out.orientation.y = dragon.orientation.y;
+    out.orientation.z = dragon.orientation.z;
+    out.orientation.w = dragon.orientation.w;
+    out.velocity.x = dragon.velocity.x;
+    out.velocity.y = dragon.velocity.y;
+    out.velocity.z = dragon.velocity.z;
+    out.health = dragon.maxHealth > 0 ? dragon.health / dragon.maxHealth : 0;
+    out.stamina = dragon.stamina;
+    out.flags = dragon.flags;
+    out.anim = dragon.anim;
+    count++;
+  }
+  msg.tick = state.tick & 0xffff;
+  msg.dragonCount = count;
+  return msg;
+}
+
+/** Host side: sets or clears the owner block for the next recipient. */
+export function setSnapshotOwner(
+  msg: SnapshotMessage,
+  dragon: Readonly<SnapshotOwner> | null | undefined,
+): SnapshotMessage {
+  msg.hasOwner = dragon !== null && dragon !== undefined;
+  if (dragon !== null && dragon !== undefined) copySnapshotOwner(msg.owner, dragon);
+  return msg;
+}
