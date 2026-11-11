@@ -1,0 +1,1394 @@
+/*
+ * Menu, lobby and connection-overlay styles (src/ui). Everything is prefixed `dfu-`.
+ *
+ * Look (docs/ART_DIRECTION.md, "UI"): parchment-white on translucent ink, thin serif titles,
+ * geometric sans numbers, team colours only for team information and always next to the team's
+ * shape. System font stacks for now (no network font loads).
+ *
+ * Cost rules: no backdrop-filter, no blur, no large shadows. Motion is opacity/transform only and
+ * sits behind `prefers-reduced-motion: no-preference`.
+ */
+
+.dfu-root {
+  --dfu-ink: #141824;
+  --dfu-panel: #141824cc;
+  --dfu-panel-solid: #171c2b;
+  --dfu-text: #fff6e8;
+  --dfu-muted: rgb(255 246 232 / 64%);
+  --dfu-faint: rgb(255 246 232 / 38%);
+  --dfu-line: rgb(255 246 232 / 16%);
+  --dfu-line-strong: rgb(255 246 232 / 34%);
+  --dfu-wash: rgb(255 246 232 / 7%);
+  --dfu-ember: #ff7a1a;
+  --dfu-frost: #3fd7ff;
+  --dfu-edge: #c9b79a;
+  --dfu-serif:
+    'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Constantia, Georgia, serif;
+  --dfu-sans: 'Avenir Next', Avenir, 'Century Gothic', Futura, 'Segoe UI', system-ui, sans-serif;
+
+  position: absolute;
+  inset: 0;
+  color: var(--dfu-text);
+  font-family: var(--dfu-sans);
+  /* One scale for 1280×720 up to large displays: every size below is in em. */
+  font-size: clamp(13.5px, 0.45vw + 0.5vh + 5px, 24px);
+  line-height: 1.4;
+}
+
+.dfu-base {
+  position: absolute;
+  inset: 0;
+}
+
+.dfu-num {
+  font-family: var(--dfu-sans);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.02em;
+}
+
+.dfu-icon {
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+
+.dfu-overline {
+  color: var(--dfu-edge);
+  font-size: 0.74em;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+}
+
+.dfu-heading {
+  font-family: var(--dfu-serif);
+  font-size: 1.7em;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 1.15;
+}
+
+.dfu-heading-small {
+  font-size: 1.2em;
+}
+
+.dfu-hint {
+  color: var(--dfu-muted);
+  font-size: 0.82em;
+}
+
+/* --- Surfaces ---------------------------------------------------------------------------------- */
+
+.dfu-screen {
+  position: absolute;
+  inset: 0;
+}
+
+.dfu-panel {
+  border: 1px solid var(--dfu-line);
+  border-radius: 0.35em;
+  background: var(--dfu-panel);
+}
+
+.dfu-scrim {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.5em;
+  background: rgb(9 11 20 / 58%);
+}
+
+.dfu-scrim-heavy {
+  background: rgb(9 11 20 / 82%);
+}
+
+.dfu-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9em;
+  width: min(28em, 100%);
+  padding: 2em 2em 1.8em;
+  background: var(--dfu-panel-solid);
+  text-align: center;
+}
+
+.dfu-dialog-text {
+  color: var(--dfu-muted);
+  margin-bottom: 0.4em;
+}
+
+/* --- Controls ---------------------------------------------------------------------------------- */
+
+.dfu-root button {
+  cursor: pointer;
+}
+
+.dfu-root button:disabled {
+  cursor: default;
+}
+
+.dfu-root :focus-visible {
+  outline: 2px solid var(--dfu-text);
+  outline-offset: 2px;
+}
+
+.dfu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  min-height: 2.7em;
+  padding: 0 1.3em;
+  border: 1px solid var(--dfu-line-strong);
+  border-radius: 0.25em;
+  background: transparent;
+  color: var(--dfu-text);
+  font-size: 0.86em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dfu-btn:hover:not(:disabled) {
+  background: rgb(255 246 232 / 12%);
+  border-color: var(--dfu-text);
+}
+
+.dfu-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.dfu-btn:disabled {
+  opacity: 0.38;
+}
+
+.dfu-btn-primary {
+  border-color: var(--dfu-text);
+  background: var(--dfu-text);
+  color: var(--dfu-ink);
+  font-weight: 600;
+}
+
+.dfu-btn-primary:hover:not(:disabled) {
+  background: #fff;
+}
+
+.dfu-btn-small {
+  min-height: 2.1em;
+  padding: 0 0.85em;
+  font-size: 0.72em;
+}
+
+.dfu-btn-large {
+  min-height: 3.2em;
+  width: 100%;
+}
+
+.dfu-row {
+  display: flex;
+  gap: 0.7em;
+}
+
+.dfu-row > .dfu-btn {
+  flex: 1;
+}
+
+.dfu-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 1.9em;
+  height: 1.9em;
+  padding: 0;
+  border: 1px solid var(--dfu-line);
+  border-radius: 0.25em;
+  background: transparent;
+  color: var(--dfu-muted);
+  font-size: 0.9em;
+}
+
+.dfu-icon-btn:hover {
+  border-color: var(--dfu-text);
+  color: var(--dfu-text);
+  background: var(--dfu-wash);
+}
+
+.dfu-icon-btn[data-team='ember'] {
+  color: var(--dfu-ember);
+}
+
+.dfu-icon-btn[data-team='frost'] {
+  color: var(--dfu-frost);
+}
+
+.dfu-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.dfu-field-label {
+  color: var(--dfu-muted);
+  font-size: 0.74em;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.dfu-input,
+.dfu-select {
+  width: 100%;
+  min-height: 2.7em;
+  padding: 0 0.85em;
+  border: 1px solid var(--dfu-line-strong);
+  border-radius: 0.25em;
+  background: rgb(9 11 20 / 55%);
+  color: var(--dfu-text);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.dfu-input::placeholder {
+  color: var(--dfu-faint);
+}
+
+.dfu-input:hover:not(:disabled),
+.dfu-select:hover:not(:disabled) {
+  border-color: var(--dfu-text);
+}
+
+.dfu-input:disabled,
+.dfu-select:disabled {
+  border-color: var(--dfu-line);
+  color: var(--dfu-muted);
+  opacity: 1;
+}
+
+.dfu-select {
+  appearance: none;
+  padding-right: 2em;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--dfu-muted) 50%),
+    linear-gradient(135deg, var(--dfu-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 1.05em) 55%,
+    calc(100% - 0.7em) 55%;
+  background-size:
+    0.35em 0.35em,
+    0.35em 0.35em;
+  background-repeat: no-repeat;
+}
+
+.dfu-select:disabled {
+  background-image: none;
+}
+
+.dfu-select option {
+  background: var(--dfu-ink);
+  color: var(--dfu-text);
+}
+
+.dfu-input-number {
+  width: 5.2em;
+  text-align: center;
+}
+
+/* Segmented control (connection mode, riders per team). The pressed one is filled AND underlined. */
+.dfu-segment {
+  display: inline-flex;
+  border: 1px solid var(--dfu-line-strong);
+  border-radius: 0.25em;
+  overflow: hidden;
+}
+
+.dfu-segment-btn {
+  min-width: 2.3em;
+  min-height: 2.2em;
+  padding: 0 0.8em;
+  border: 0;
+  border-left: 1px solid var(--dfu-line);
+  background: transparent;
+  color: var(--dfu-muted);
+  font-size: 0.82em;
+  letter-spacing: 0.06em;
+}
+
+.dfu-segment-btn:first-child {
+  border-left: 0;
+}
+
+.dfu-segment-btn:hover:not(:disabled) {
+  color: var(--dfu-text);
+  background: var(--dfu-wash);
+}
+
+.dfu-segment-btn[aria-pressed='true'] {
+  background: var(--dfu-text);
+  color: var(--dfu-ink);
+  font-weight: 600;
+}
+
+.dfu-segment-btn:disabled {
+  opacity: 0.35;
+}
+
+.dfu-segment-btn[aria-pressed='true']:disabled {
+  opacity: 0.8;
+}
+
+.dfu-segment-btn:focus-visible {
+  outline-offset: -3px;
+  outline-color: var(--dfu-edge);
+}
+
+/* Switch: the knob moves and the words beside it change, so the state never rests on colour. */
+.dfu-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  min-height: 2.2em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dfu-muted);
+  font-size: 0.86em;
+}
+
+.dfu-switch::before {
+  content: '';
+  order: -1;
+  width: 2.5em;
+  height: 1.3em;
+  border: 1px solid var(--dfu-line-strong);
+  border-radius: 1em;
+  background: rgb(9 11 20 / 55%);
+}
+
+.dfu-switch-knob {
+  position: absolute;
+  width: 0.9em;
+  height: 0.9em;
+  margin-left: 0.22em;
+  border-radius: 50%;
+  background: var(--dfu-muted);
+}
+
+.dfu-switch {
+  position: relative;
+}
+
+.dfu-switch[aria-checked='true'] {
+  color: var(--dfu-text);
+}
+
+.dfu-switch[aria-checked='true']::before {
+  border-color: var(--dfu-text);
+  background: rgb(255 246 232 / 22%);
+}
+
+.dfu-switch[aria-checked='true'] .dfu-switch-knob {
+  background: var(--dfu-text);
+  transform: translateX(1.18em);
+}
+
+.dfu-switch:disabled {
+  opacity: 0.7;
+}
+
+.dfu-chip-btn {
+  min-height: 2em;
+  padding: 0 0.7em;
+  border: 1px solid var(--dfu-line);
+  border-radius: 1em;
+  background: transparent;
+  color: var(--dfu-faint);
+  font-size: 0.76em;
+  letter-spacing: 0.06em;
+  text-decoration: line-through;
+}
+
+.dfu-chip-btn[aria-pressed='true'] {
+  border-color: var(--dfu-line-strong);
+  background: var(--dfu-wash);
+  color: var(--dfu-text);
+  text-decoration: none;
+}
+
+.dfu-chip-btn:hover:not(:disabled) {
+  border-color: var(--dfu-text);
+}
+
+/* Signal bars: four <i> elements, lit from the left by data-bars="0..4". */
+.dfu-bars > i {
+  display: inline-block;
+  width: 0.2em;
+  margin-right: 0.12em;
+  border-radius: 1px;
+  background: var(--dfu-faint);
+  opacity: 0.45;
+  vertical-align: baseline;
+}
+
+.dfu-bars > i:nth-child(1) {
+  height: 0.3em;
+}
+
+.dfu-bars > i:nth-child(2) {
+  height: 0.5em;
+}
+
+.dfu-bars > i:nth-child(3) {
+  height: 0.72em;
+}
+
+.dfu-bars > i:nth-child(4) {
+  height: 0.95em;
+  margin-right: 0.45em;
+}
+
+.dfu-bars[data-bars='1'] > i:nth-child(-n + 1),
+.dfu-bars[data-bars='2'] > i:nth-child(-n + 2),
+.dfu-bars[data-bars='3'] > i:nth-child(-n + 3),
+.dfu-bars[data-bars='4'] > i:nth-child(-n + 4) {
+  background: var(--dfu-text);
+  opacity: 1;
+}
+
+/* --- Title ------------------------------------------------------------------------------------- */
+
+.dfu-title {
+  overflow: hidden;
+}
+
+/*
+ * The sky itself is the 3D scene on the canvas behind the menus. This is only an ink veil: dark
+ * on the left under the wordmark and the card, clear on the right where the sun and the cloud
+ * sea show, with a slight vignette along the bottom for the footer line.
+ */
+.dfu-title-sky {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      90deg,
+      rgb(14 16 28 / 90%) 0%,
+      rgb(14 16 28 / 74%) 30%,
+      rgb(14 16 28 / 26%) 56%,
+      rgb(14 16 28 / 0%) 74%
+    ),
+    linear-gradient(0deg, rgb(14 16 28 / 46%) 0%, rgb(14 16 28 / 0%) 22%);
+}
+
+.dfu-title-inner {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: 1fr auto auto 1fr auto;
+  row-gap: 1.6em;
+  padding: 2em 0 1.4em clamp(2em, 8vw, 12em);
+  /* Safety net for very short windows; normally nothing overflows. */
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.dfu-title-head {
+  grid-row: 2;
+}
+
+.dfu-wordmark {
+  margin: 0.12em 0 0.18em -0.04em;
+  font-family: var(--dfu-serif);
+  font-size: 4.6em;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dfu-tagline {
+  color: var(--dfu-muted);
+  font-family: var(--dfu-serif);
+  font-size: 1.15em;
+  font-style: italic;
+  letter-spacing: 0.04em;
+}
+
+.dfu-title-card {
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1em;
+  width: min(100%, 27em);
+  padding: 1.5em;
+}
+
+.dfu-title-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+}
+
+.dfu-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15em;
+  padding: 0.8em 1.1em;
+  border: 1px solid var(--dfu-line-strong);
+  border-left-width: 3px;
+  border-radius: 0.25em;
+  background: transparent;
+  color: var(--dfu-text);
+  text-align: left;
+}
+
+.dfu-choice:hover {
+  border-color: var(--dfu-text);
+  background: rgb(255 246 232 / 10%);
+}
+
+.dfu-choice:active {
+  transform: translateY(1px);
+}
+
+.dfu-choice-label {
+  font-size: 1em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.dfu-choice-detail {
+  color: var(--dfu-muted);
+  font-size: 0.82em;
+}
+
+.dfu-choice-primary {
+  border-color: var(--dfu-text);
+  background: var(--dfu-text);
+  color: var(--dfu-ink);
+}
+
+.dfu-choice-primary:hover {
+  background: #fff;
+}
+
+.dfu-choice-primary .dfu-choice-label {
+  font-weight: 600;
+}
+
+.dfu-choice-primary .dfu-choice-detail {
+  color: rgb(20 24 36 / 72%);
+}
+
+.dfu-choice-primary:focus-visible {
+  outline-offset: 3px;
+}
+
+.dfu-code-input {
+  min-height: 2.3em;
+  padding-left: 0.6em;
+  font-family: var(--dfu-sans);
+  font-size: 1.9em;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.5em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.dfu-connecting {
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.8em 0 0.2em;
+  text-align: center;
+}
+
+.dfu-connecting-label {
+  font-family: var(--dfu-serif);
+  font-size: 1.25em;
+  letter-spacing: 0.06em;
+}
+
+.dfu-connecting .dfu-btn {
+  margin-top: 0.6em;
+  min-width: 10em;
+}
+
+.dfu-spinner {
+  width: 2.2em;
+  height: 2.2em;
+  border: 2px solid var(--dfu-line);
+  border-top-color: var(--dfu-text);
+  border-radius: 50%;
+}
+
+.dfu-error {
+  /* Title and Dismiss share the first line; the advice runs the full width underneath. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.3em 0.8em;
+  padding: 0.7em 0.9em;
+  border: 1px solid var(--dfu-line-strong);
+  border-left: 3px solid var(--dfu-text);
+  border-radius: 0.25em;
+  background: rgb(9 11 20 / 60%);
+}
+
+.dfu-error-text {
+  display: contents;
+}
+
+.dfu-error > .dfu-btn {
+  grid-area: 1 / 2;
+}
+
+.dfu-error-title {
+  grid-area: 1 / 1;
+  font-family: var(--dfu-serif);
+  font-size: 1.08em;
+  letter-spacing: 0.03em;
+}
+
+.dfu-error-hint {
+  grid-area: 2 / 1 / 3 / 3;
+  color: var(--dfu-muted);
+  font-size: 0.84em;
+}
+
+.dfu-signaling {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding-top: 1em;
+  border-top: 1px solid var(--dfu-line);
+}
+
+.dfu-signaling .dfu-segment {
+  align-self: flex-start;
+}
+
+.dfu-title-foot {
+  grid-row: 5;
+  color: var(--dfu-muted);
+  font-size: 0.76em;
+  letter-spacing: 0.08em;
+  white-space: pre-wrap;
+}
+
+/* --- Lobby ------------------------------------------------------------------------------------- */
+
+.dfu-lobby {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 21.5em;
+  gap: 1em;
+  padding: 1.1em 1.3em 1.2em;
+  /*
+   * Dusk ink over the drifting sky on the canvas: dense enough that every row reads, thin
+   * enough that the room does not feel like a spreadsheet. The Phase 5 aerie replaces the sky.
+   */
+  background: linear-gradient(
+    165deg,
+    rgb(33 30 60 / 80%) 0%,
+    rgb(20 24 36 / 74%) 52%,
+    rgb(24 32 48 / 80%) 100%
+  );
+}
+
+.dfu-lobby-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8em;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.dfu-lobby-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 2.4em;
+  min-height: 4.4em;
+}
+
+.dfu-code-line {
+  display: flex;
+  align-items: center;
+  gap: 0.9em;
+}
+
+.dfu-code {
+  font-family: var(--dfu-sans);
+  font-size: 2.7em;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-weight: 300;
+  letter-spacing: 0.3em;
+  line-height: 1.1;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.dfu-lobby-title {
+  padding-bottom: 0.25em;
+}
+
+.dfu-lobby-status {
+  color: var(--dfu-muted);
+  font-size: 0.86em;
+  white-space: pre-wrap;
+}
+
+.dfu-teams {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9em;
+}
+
+.dfu-team {
+  padding: 0.75em 0.85em 0.7em;
+  border-top-width: 2px;
+}
+
+.dfu-team[data-team='ember'] {
+  border-top-color: var(--dfu-ember);
+}
+
+.dfu-team[data-team='frost'] {
+  border-top-color: var(--dfu-frost);
+}
+
+.dfu-team-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  min-height: 2.2em;
+  margin-bottom: 0.45em;
+}
+
+.dfu-team-icon {
+  width: 1.15em;
+  height: 1.15em;
+  color: var(--dfu-muted);
+}
+
+.dfu-team[data-team='ember'] .dfu-team-icon,
+.dfu-team[data-team='ember'] .dfu-slot-mark {
+  color: var(--dfu-ember);
+}
+
+.dfu-team[data-team='frost'] .dfu-team-icon,
+.dfu-team[data-team='frost'] .dfu-slot-mark {
+  color: var(--dfu-frost);
+}
+
+.dfu-team-name {
+  font-family: var(--dfu-serif);
+  font-size: 1.2em;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+}
+
+.dfu-team-count {
+  margin-right: auto;
+  color: var(--dfu-muted);
+  font-size: 0.86em;
+}
+
+.dfu-slots,
+.dfu-watcher-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dfu-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+}
+
+.dfu-slot {
+  display: grid;
+  /* Name over class on the left; ping, ready state and host actions span both lines. */
+  grid-template-columns: 1.2em minmax(0, 1fr) auto auto auto;
+  grid-template-rows: 1fr 1fr;
+  align-items: center;
+  column-gap: 0.7em;
+  height: 3em;
+  padding: 0 0.6em;
+  border: 1px solid transparent;
+  border-radius: 0.25em;
+  background: var(--dfu-wash);
+}
+
+.dfu-slot-mark {
+  grid-area: 1 / 1 / 3 / 2;
+  display: grid;
+  place-items: center;
+  color: var(--dfu-muted);
+}
+
+.dfu-slot-id {
+  grid-area: 1 / 2 / 2 / 3;
+  align-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.dfu-slot-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfu-slot-class {
+  grid-area: 2 / 2 / 3 / 3;
+  align-self: start;
+  color: var(--dfu-muted);
+  font-size: 0.7em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.dfu-slot-ping {
+  grid-area: 1 / 3 / 3 / 4;
+  min-width: 4.6em;
+  color: var(--dfu-muted);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.dfu-slot-state {
+  grid-area: 1 / 4 / 3 / 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  min-width: 6.4em;
+  color: var(--dfu-faint);
+  font-size: 0.8em;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.dfu-slot-check {
+  visibility: hidden;
+}
+
+.dfu-slot[data-state='ready'] .dfu-slot-state,
+.dfu-slot[data-state='bot'] .dfu-slot-state {
+  color: var(--dfu-text);
+}
+
+.dfu-slot[data-state='ready'] .dfu-slot-check,
+.dfu-slot[data-state='bot'] .dfu-slot-check {
+  visibility: visible;
+}
+
+.dfu-slot[data-state='host'] .dfu-slot-state {
+  color: var(--dfu-muted);
+}
+
+.dfu-slot[data-state='away'] {
+  border-style: dashed;
+  border-color: var(--dfu-line-strong);
+}
+
+.dfu-slot[data-state='away'] .dfu-slot-state {
+  color: var(--dfu-edge);
+  font-style: italic;
+}
+
+.dfu-slot[data-state='away'] .dfu-slot-name {
+  color: var(--dfu-muted);
+}
+
+.dfu-slot-actions {
+  grid-area: 1 / 5 / 3 / 6;
+  display: inline-flex;
+  gap: 0.3em;
+}
+
+.dfu-slot-actions:not(:has(> :not([hidden]))) {
+  display: none;
+}
+
+.dfu-slot-empty {
+  display: none;
+  grid-area: 1 / 2 / 3 / 6;
+  color: var(--dfu-faint);
+  font-size: 0.82em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.dfu-slot:not([data-kind='player']) > :not(.dfu-slot-mark, .dfu-slot-empty) {
+  display: none;
+}
+
+.dfu-slot:not([data-kind='player']) > .dfu-slot-empty {
+  display: block;
+}
+
+.dfu-slot[data-kind='open'] {
+  border: 1px dashed var(--dfu-line);
+  background: transparent;
+}
+
+.dfu-slot[data-kind='open'] .dfu-slot-mark {
+  opacity: 0.5;
+}
+
+.dfu-slot[data-kind='closed'] {
+  background: transparent;
+  opacity: 0.4;
+}
+
+.dfu-slot[data-kind='closed'] .dfu-slot-mark {
+  visibility: hidden;
+}
+
+.dfu-slot-local {
+  border-color: var(--dfu-line-strong);
+  background: rgb(255 246 232 / 12%);
+}
+
+.dfu-badge {
+  flex: none;
+  padding: 0.1em 0.5em;
+  border: 1px solid var(--dfu-line-strong);
+  border-radius: 0.2em;
+  color: var(--dfu-muted);
+  font-size: 0.62em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.dfu-badge-host {
+  border-color: var(--dfu-edge);
+  color: var(--dfu-edge);
+}
+
+.dfu-badge-you {
+  border-color: var(--dfu-text);
+  background: var(--dfu-text);
+  color: var(--dfu-ink);
+  font-weight: 600;
+}
+
+.dfu-watchers {
+  padding: 0.6em 0.85em 0.65em;
+}
+
+.dfu-watchers .dfu-team-head {
+  margin-bottom: 0.3em;
+}
+
+.dfu-watcher-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  min-height: 2.3em;
+  align-items: center;
+}
+
+.dfu-watcher-empty {
+  color: var(--dfu-faint);
+  font-size: 0.82em;
+}
+
+.dfu-watcher-list .dfu-slot {
+  display: inline-flex;
+  gap: 0.5em;
+  height: 2.3em;
+  max-width: 100%;
+}
+
+.dfu-watcher-list .dfu-slot-class,
+.dfu-watcher-list .dfu-slot:not([data-state='away']) .dfu-slot-state {
+  display: none;
+}
+
+.dfu-watcher-list .dfu-slot-state,
+.dfu-watcher-list .dfu-slot-ping {
+  min-width: 0;
+}
+
+.dfu-watcher-list .dfu-slot-id {
+  align-self: center;
+}
+
+.dfu-watcher-list .dfu-slot-check {
+  display: none;
+}
+
+.dfu-self {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 13em;
+  gap: 0.9em;
+  margin-top: auto;
+  padding: 0.75em 0.85em;
+}
+
+.dfu-classes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5em;
+}
+
+.dfu-class {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1em;
+  padding: 0.6em 0.75em;
+  border: 1px solid var(--dfu-line);
+  border-radius: 0.25em;
+  background: transparent;
+  color: var(--dfu-text);
+  text-align: left;
+}
+
+.dfu-class:hover:not(:disabled) {
+  border-color: var(--dfu-text);
+  background: var(--dfu-wash);
+}
+
+.dfu-class-name {
+  font-family: var(--dfu-serif);
+  font-size: 1.18em;
+  letter-spacing: 0.06em;
+}
+
+.dfu-class-role {
+  color: var(--dfu-edge);
+  font-size: 0.68em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.dfu-class-detail {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--dfu-muted);
+  font-size: 0.76em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Chosen dragon: bright frame, filled, and a corner notch (shape, not only colour). */
+.dfu-class[aria-checked='true'] {
+  border-color: var(--dfu-text);
+  background:
+    linear-gradient(225deg, var(--dfu-text) 0.55em, transparent 0.55em), rgb(255 246 232 / 13%);
+}
+
+.dfu-class:disabled {
+  opacity: 0.4;
+}
+
+.dfu-class:disabled:not([aria-checked='true']) .dfu-class-name {
+  text-decoration: line-through;
+}
+
+.dfu-self-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45em;
+  justify-content: center;
+}
+
+.dfu-ready[aria-pressed='false'] .dfu-icon {
+  display: none;
+}
+
+.dfu-ready[aria-pressed='true'] {
+  background: transparent;
+  color: var(--dfu-text);
+}
+
+.dfu-ready[aria-pressed='true']:hover:not(:disabled) {
+  background: rgb(255 246 232 / 12%);
+}
+
+.dfu-lock-note {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.dfu-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8em;
+  min-height: 0;
+  padding: 1em 1.1em 1.1em;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  /* Leaves the top-right corner to the connection chip. */
+  margin-top: 2.9em;
+}
+
+.dfu-rules-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8em;
+  padding-bottom: 0.6em;
+  border-bottom: 1px solid var(--dfu-line);
+}
+
+.dfu-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.dfu-rule {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8em;
+  min-height: 2.3em;
+}
+
+.dfu-rule-label {
+  flex: none;
+  color: var(--dfu-muted);
+  font-size: 0.84em;
+}
+
+.dfu-rule .dfu-select {
+  width: 11.5em;
+  min-height: 2.2em;
+  font-size: 0.86em;
+}
+
+.dfu-rule .dfu-input-number {
+  min-height: 2.2em;
+  font-size: 0.86em;
+}
+
+.dfu-allow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.3em;
+}
+
+.dfu-start {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55em;
+  margin-top: auto;
+  padding-top: 0.8em;
+  border-top: 1px solid var(--dfu-line);
+}
+
+.dfu-start-note {
+  min-height: 2.4em;
+  text-align: center;
+}
+
+/* --- Overlays ---------------------------------------------------------------------------------- */
+
+.dfu-chip {
+  position: absolute;
+  top: 0.9em;
+  right: 1.3em;
+  display: inline-flex;
+  align-items: baseline;
+  padding: 0.4em 0.8em 0.45em;
+  border: 1px solid var(--dfu-line);
+  border-radius: 1.2em;
+  background: var(--dfu-panel);
+  font-size: 0.82em;
+  white-space: nowrap;
+}
+
+.dfu-chip[data-kind='reconnecting'],
+.dfu-chip[data-kind='connecting'] {
+  border-style: dashed;
+  border-color: var(--dfu-line-strong);
+  font-style: italic;
+}
+
+.dfu-strip {
+  position: absolute;
+  top: 3.6em;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7em;
+  max-width: calc(100% - 3em);
+  padding: 0.6em 1.2em;
+  border: 1px dashed var(--dfu-line-strong);
+  border-radius: 0.25em;
+  background: var(--dfu-panel-solid);
+  font-size: 0.9em;
+  transform: translateX(-50%);
+}
+
+.dfu-strip-dot {
+  flex: none;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--dfu-text);
+}
+
+.dfu-loading {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, #17172e 0%, #2c2850 60%, #3d335f 100%);
+}
+
+.dfu-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9em;
+  width: min(26em, 80%);
+  text-align: center;
+}
+
+.dfu-loading-label {
+  font-family: var(--dfu-serif);
+  font-size: 1.4em;
+  letter-spacing: 0.06em;
+}
+
+.dfu-progress {
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  background: var(--dfu-line);
+}
+
+.dfu-progress-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--dfu-text);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+/* --- Motion (compositor-only; skipped entirely for reduced motion) ---------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .dfu-title-head,
+  .dfu-title-card,
+  .dfu-lobby-main,
+  .dfu-rules,
+  .dfu-dialog {
+    animation: dfu-rise 0.36s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  .dfu-title-card,
+  .dfu-rules {
+    animation-delay: 0.08s;
+  }
+
+  .dfu-scrim,
+  .dfu-strip,
+  .dfu-chip {
+    animation: dfu-fade 0.2s ease-out both;
+  }
+
+  .dfu-spinner {
+    animation: dfu-spin 0.9s linear infinite;
+  }
+
+  .dfu-strip-dot {
+    animation: dfu-pulse 1.1s ease-in-out infinite alternate;
+  }
+
+  .dfu-switch-knob,
+  .dfu-progress-fill {
+    transition: transform 0.14s ease-out;
+  }
+}
+
+@keyframes dfu-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.6em);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dfu-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dfu-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dfu-pulse {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0.25;
+  }
+}
+
+/* --- Small windows: stack the rules under the teams instead of squeezing the columns --------- */
+
+@media (max-width: 1100px) {
+  .dfu-lobby {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .dfu-lobby-main {
+    overflow: visible;
+  }
+
+  .dfu-rules {
+    margin-top: 0;
+    overflow: visible;
+  }
+}
+
+/* --- Short windows (1280×720 class): tighten the title so an error still fits ----------------- */
+
+@media (max-height: 820px) {
+  .dfu-title-inner {
+    row-gap: 1em;
+    padding-top: 1.2em;
+    padding-bottom: 1em;
+  }
+
+  .dfu-wordmark {
+    font-size: 3.9em;
+  }
+
+  .dfu-title-card {
+    gap: 0.8em;
+    padding: 1.15em 1.3em;
+  }
+
+  .dfu-choice {
+    padding: 0.55em 1em;
+  }
+
+  .dfu-signaling {
+    padding-top: 0.7em;
+  }
+}
