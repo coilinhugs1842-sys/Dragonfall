@@ -36,8 +36,16 @@ export interface GameRenderer {
   readonly resolution: DynamicResolution;
   readonly presetId: QualityPresetId;
   readonly stats: RenderStats;
-  /** Applies the preset's renderer settings and render-scale bounds, and resets the scaler. */
+  /**
+   * Applies the preset's renderer settings and render-scale bounds, resets the scaler, then
+   * tells every `onPresetChange` listener (the active scene forwards it to its views).
+   */
   setPreset(id: QualityPresetId): void;
+  /**
+   * Subscribes to `setPreset` calls, whoever makes them (debug GUI, Settings menu, automatic
+   * pick). Scenes use it to run `setQuality` on their views. Returns the unsubscribe function.
+   */
+  onPresetChange(listener: PresetChangeListener): () => void;
   /**
    * Call on window resize / DPR change. CSS sizes the canvas; this sizes the drawing buffer.
    * The new size takes effect at the start of the next `render`: resizing clears the buffer,
@@ -48,6 +56,8 @@ export interface GameRenderer {
   render(scene: Scene, camera: Camera, frameMs: number): void;
   dispose(): void;
 }
+
+export type PresetChangeListener = (id: QualityPresetId) => void;
 
 interface MutableStats {
   renderScale: number;
@@ -80,6 +90,8 @@ class GameRendererImpl implements GameRenderer {
   private appliedPixelRatio = -1;
   /** `resize` was called since the last `applyResolution`. */
   private resizePending = false;
+  /** Replaced, never mutated, so a listener may unsubscribe while being called. */
+  private presetListeners: readonly PresetChangeListener[] = [];
 
   constructor(canvas: HTMLCanvasElement, context: WebGL2RenderingContext, id: QualityPresetId) {
     this.canvas = canvas;
@@ -120,6 +132,14 @@ class GameRendererImpl implements GameRenderer {
     this.resolution.setBounds(preset.renderScaleMin, preset.renderScaleMax);
     this.resolution.reset();
     this.applyResolution();
+    for (const listener of this.presetListeners) listener(id);
+  }
+
+  onPresetChange(listener: PresetChangeListener): () => void {
+    this.presetListeners = [...this.presetListeners, listener];
+    return () => {
+      this.presetListeners = this.presetListeners.filter((l) => l !== listener);
+    };
   }
 
   resize(cssWidth: number, cssHeight: number, devicePixelRatio: number): void {
