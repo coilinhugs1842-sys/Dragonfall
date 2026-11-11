@@ -100,6 +100,18 @@ function boot(): void {
     );
     return;
   }
+  // `?viewer=cine:<name>`: one cinematic piece on the real stage, without a room.
+  if (flags.viewer.startsWith('cine')) {
+    void import('./dev/cine-viewer').then((m) => {
+      m.startCineViewer({
+        canvas,
+        uiRoot: requireElement('ui', HTMLElement),
+        renderer,
+        spec: flags.viewer,
+      });
+    });
+    return;
+  }
 
   const now = (): number => performance.now();
   // Fetched only with `?netsim` or `?debug`; the game waits for it before its first transport.

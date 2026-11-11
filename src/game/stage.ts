@@ -14,7 +14,7 @@
  */
 
 import { PerspectiveCamera, Scene } from 'three';
-import type { WebGLRenderer } from 'three';
+import type { Object3D, WebGLRenderer } from 'three';
 import { createDragons, sharedDragonAssetLibrary } from '../dragons';
 import type { Dragons } from '../dragons';
 import { createCameraRig } from '../render';
@@ -109,6 +109,16 @@ export interface Stage {
   unloadMatch(): void;
   /** One title / lobby frame. */
   updateBackdrop(dtS: number): void;
+  /**
+   * Shows a lobby set (the aerie's terraces) with its own dragon renderer, or takes it away with
+   * null. Only drawn while no match is loaded. The caller keeps ownership of `object`.
+   */
+  setLobbySet(object: Object3D | null): void;
+  /** One lobby frame: the backdrop plus the lobby set's dragons, read from `view`. */
+  updateLobby(view: WorldView, dtS: number): void;
+  /** Adds a cinematic's own object (the results podium) to the scene; `removeProp` takes it out. */
+  addProp(object: Object3D): void;
+  removeProp(object: Object3D): void;
   /**
    * One match frame, after the WorldView is built. `steerX/Y` is the local player's latest
    * input (camera look-ahead); pass 0 for a spectator.
@@ -265,12 +275,33 @@ export function createStage(options: StageOptions): Stage {
   /** True on a frame where the chase camera had somebody to follow. */
   let chasing = false;
 
+  // The lobby set (the aerie) and the dragons perched on it. Hidden while a match is loaded:
+  // the map takes the same sky.
+  let lobbySet: Object3D | null = null;
+  let lobbyDragons: Dragons | null = null;
+
+  function showLobby(visible: boolean): void {
+    if (lobbySet !== null) lobbySet.visible = visible;
+    if (lobbyDragons !== null) lobbyDragons.object.visible = visible;
+  }
+
+  function clearLobbySet(): void {
+    if (lobbySet !== null) scene.remove(lobbySet);
+    if (lobbyDragons !== null) {
+      scene.remove(lobbyDragons.object);
+      lobbyDragons.dispose();
+    }
+    lobbySet = null;
+    lobbyDragons = null;
+  }
+
   function applyQuality(): void {
     sky.setQuality(preset);
     lights.setQuality(preset);
     lighting.setQuality(preset);
     sea.setQuality(preset);
     clouds.setQuality(preset);
+    lobbyDragons?.setQuality(preset);
     match?.mapView.setQuality(preset);
     match?.dragons.setQuality(preset);
     match?.vfx.setQuality(preset);
@@ -361,6 +392,7 @@ export function createStage(options: StageOptions): Stage {
     watchedId = NO_PLAYER;
     downForS = 0;
     lastSubjectId = NO_PLAYER;
+    showLobby(true);
   }
 
   applyQuality();
@@ -430,6 +462,7 @@ export function createStage(options: StageOptions): Stage {
       });
       const unsubscribe = events !== null ? vfx.connect(events) : null;
       match = { seed: assets.seed, mapView, dragons, rig, vfx, storm, unsubscribe };
+      showLobby(false);
       void warmUp();
       watchedId = NO_PLAYER;
       downForS = 0;
@@ -448,6 +481,40 @@ export function createStage(options: StageOptions): Stage {
       placeBackdropCamera();
       directed = runDirector(null, dtS);
       updateSky(directed ? directedCamera : backdropCamera);
+    },
+
+    setLobbySet(object: Object3D | null): void {
+      if (disposed || object === lobbySet) return;
+      clearLobbySet();
+      if (object === null) return;
+      lobbySet = object;
+      // No dead dragons in a lobby; skinned dragons from the same library as the match.
+      lobbyDragons = createDragons(preset, { showDead: false, library: dragonAssets });
+      scene.add(object, lobbyDragons.object);
+      showLobby(match === null);
+      if (match === null) void warmUp();
+    },
+
+    updateLobby(view: WorldView, dtS: number): void {
+      if (disposed) return;
+      timeS += dtS;
+      chasing = false;
+      placeBackdropCamera();
+      directed = runDirector(null, dtS);
+      const camera = directed ? directedCamera : backdropCamera;
+      updateSky(camera);
+      if (lobbyDragons !== null && match === null) {
+        lobbyDragons.update(view, dtS, camera);
+        lighting.setBlobCasters(view.dragons, view.dragonCount, camera.position);
+      }
+    },
+
+    addProp(object: Object3D): void {
+      if (!disposed) scene.add(object);
+    },
+
+    removeProp(object: Object3D): void {
+      scene.remove(object);
     },
 
     updateMatch(view: WorldView, steerX: number, steerY: number, dtS: number): void {
@@ -583,6 +650,7 @@ export function createStage(options: StageOptions): Stage {
     dispose(): void {
       if (disposed) return;
       unloadMatch();
+      clearLobbySet();
       disposed = true;
       scene.clear();
       scene.fog = null;
