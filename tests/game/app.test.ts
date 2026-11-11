@@ -48,8 +48,11 @@ describe('App transition table', () => {
     expect(new App().transition('match')).toBe(false);
     expect(new App().transition('results')).toBe(false);
     expect(appAt('lobby').transition('results')).toBe(false);
-    expect(appAt('lobby', 'match').transition('lobby')).toBe(false);
     expect(appAt('lobby', 'match', 'results').transition('match')).toBe(false);
+  });
+
+  it('lets the host end a match straight back to the lobby', () => {
+    expect(appAt('lobby', 'match', 'lobby').state).toBe('lobby');
   });
 
   it('rejects a move to the current state', () => {

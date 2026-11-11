@@ -7,7 +7,7 @@
 
 import type { AbilitySlot, DragonClassId } from './classes';
 import type { LobbySide, PlayerId, TeamId } from './constants';
-import type { HostSettings, LobbyState, RejectReason } from './lobby';
+import type { HostSettings, LobbyState, LobbySwitchSideIntent, RejectReason } from './lobby';
 import type { MapId, MatchPhase, MatchWinner, ModeId } from './match';
 import type { QualityPresetId } from './quality';
 
@@ -72,11 +72,44 @@ export interface ConnectionState {
   readonly error: UiError | null;
 }
 
+/**
+ * Why hosting or joining failed before a session existed. Mirrors the transport's error reasons
+ * (`src/net/transport`), repeated here because `shared` cannot import `net`; a transport reason
+ * is assignable as it stands.
+ */
+export type ConnectFailureReason =
+  | 'roomNotFound'
+  | 'idTaken'
+  | 'brokerUnreachable'
+  | 'peerUnavailable'
+  | 'timeout'
+  | 'invalidRoomCode'
+  | 'unsupported'
+  | 'unknown';
+
 export type UiError =
   | { readonly kind: 'rejected'; readonly reason: RejectReason }
   | { readonly kind: 'hostLeft' }
   | { readonly kind: 'signalingFailed'; readonly detail: string }
-  | { readonly kind: 'connectionLost' };
+  | { readonly kind: 'connectionLost' }
+  /** Hosting or joining failed with a typed reason (preferred over `signalingFailed`). */
+  | { readonly kind: 'connectFailed'; readonly reason: ConnectFailureReason }
+  /** The host removed this player from a room they had already joined. */
+  | { readonly kind: 'kicked' };
+
+/**
+ * Why Start is unavailable. Mirrors `StartBlocker` in `src/sim/lobby` (the UI cannot import the
+ * sim); `src/game` passes `canStart(...).reason` straight through.
+ */
+export type UiStartBlocker =
+  | 'wrongPhase'
+  | 'noRiders'
+  | 'teamEmpty'
+  | 'teamTooSmall'
+  | 'teamOverSize'
+  | 'teamsUneven'
+  | 'playerReconnecting'
+  | 'notAllReady';
 
 export interface LoadingState {
   /** 0..1. */
@@ -167,6 +200,18 @@ export interface UiState {
   readonly loading: LoadingState | null;
   readonly hud: HudState | null;
   readonly results: ResultsState | null;
+  /**
+   * Lobby: why Start is unavailable, or null when the host may start. Absent = not computed (the
+   * panel then leaves Start enabled and the host's own check decides).
+   */
+  readonly startBlocker?: UiStartBlocker | null;
+  /**
+   * Round trip per player in ms, indexed by PlayerId; a missing or negative entry = unknown.
+   * `src/game` may mutate one array in place: the UI reads values, it does not keep the array.
+   */
+  readonly playerPings?: readonly number[];
+  /** Match: the escape menu (resume / leave) is showing. */
+  readonly pauseMenuOpen?: boolean;
 }
 
 // --- Intents ------------------------------------------------------------------------------------
@@ -180,12 +225,18 @@ export type UiIntent =
   | { readonly type: 'title.host'; readonly name: string }
   | { readonly type: 'title.join'; readonly name: string; readonly roomCode: string }
   | { readonly type: 'title.dismissError' }
+  /** Fly alone in the sandbox: no room, no network. */
+  | { readonly type: 'title.solo'; readonly name: string }
+  /** Abandon a host/join attempt that is still connecting. */
+  | { readonly type: 'title.cancel' }
   // Lobby (any player)
   | { readonly type: 'lobby.ready'; readonly ready: boolean }
   | { readonly type: 'lobby.pickClass'; readonly classId: DragonClassId }
   /** Frames a player's perch in a close-up; null returns to the drifting camera. Local only. */
   | { readonly type: 'lobby.focusPlayer'; readonly playerId: PlayerId | null }
   | { readonly type: 'lobby.leave' }
+  /** Change your own side; refused while teams are locked or the side is full. */
+  | LobbySwitchSideIntent
   // Host panel
   | { readonly type: 'host.setMode'; readonly mode: ModeId }
   | { readonly type: 'host.setMap'; readonly map: MapId }
@@ -204,6 +255,15 @@ export type UiIntent =
   // Match
   | { readonly type: 'match.skipIntro' }
   | { readonly type: 'match.leave' }
+  /**
+   * Host only: end the running match and take the whole room back to the lobby (teams and seats
+   * are kept, so the host can start again). Handled on the host's own page; a client has no
+   * such button and nothing is sent. `match.leave` on the host closes the room instead.
+   */
+  | { readonly type: 'match.end' }
+  /** Open / close the escape menu. Local only; the match keeps running (it is multiplayer). */
+  | { readonly type: 'match.pause' }
+  | { readonly type: 'match.resume' }
   // Settings (local; a patch so one intent covers every field)
   | { readonly type: 'settings.update'; readonly patch: Partial<SettingsState> }
   | { readonly type: 'settings.reset' };

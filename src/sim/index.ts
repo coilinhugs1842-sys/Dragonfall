@@ -17,7 +17,8 @@ export {
   secondsToTicks,
   setDragonVelocity,
 } from './flight';
-export { createSim } from './sim';
+export * from './lobby';
+export { createSim, stepDragon } from './sim';
 export type { Sim, SimInputs, SimOptions } from './sim';
 export {
   copySimState,

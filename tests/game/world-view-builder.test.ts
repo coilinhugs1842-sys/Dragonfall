@@ -19,6 +19,38 @@ function length4(q: { x: number; y: number; z: number; w: number }): number {
   return Math.sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
 }
 
+describe('buildWorldView past the newest state', () => {
+  it('holds at current by default and extrapolates only up to maxAlpha', () => {
+    const sim = createSim();
+    sim.spawnDragon(1, 0, 'talon', { x: 0, y: 300, z: 0 }, 0);
+    sim.step(0, []);
+    sim.step(1, []);
+    const before = sim.prev.dragons.find((dragon) => dragon.active);
+    const now = sim.current.dragons.find((dragon) => dragon.active);
+    if (before === undefined || now === undefined) throw new Error('no dragon');
+    const stepZ = now.position.z - before.position.z;
+    expect(stepZ).toBeGreaterThan(0.5);
+
+    const view = createWorldView();
+    const options = { localDragonId: 1, stormWall: null, phase: 'playing' as const };
+    buildWorldView(view, sim.prev, sim.current, 1.4, options);
+    expect(view.dragons[0]?.position.z).toBeCloseTo(now.position.z, 9);
+
+    buildWorldView(view, sim.prev, sim.current, 1.4, { ...options, maxAlpha: 1.5 });
+    expect(view.dragons[0]?.position.z).toBeCloseTo(now.position.z + stepZ * 0.4, 9);
+    const q = view.dragons[0]?.orientation;
+    expect(Math.hypot(q?.x ?? 0, q?.y ?? 0, q?.z ?? 0, q?.w ?? 0)).toBeCloseTo(1, 9);
+
+    buildWorldView(view, sim.prev, sim.current, 9, { ...options, maxAlpha: 1.5 });
+    expect(view.dragons[0]?.position.z).toBeCloseTo(now.position.z + stepZ * 0.5, 9);
+
+    // A dragon (re)spawned this tick has no motion to carry on: it stays where it is.
+    sim.spawnDragon(1, 0, 'talon', { x: 50, y: 310, z: -20 }, 0);
+    buildWorldView(view, sim.prev, sim.current, 1.5, { ...options, maxAlpha: 1.5 });
+    expect(view.dragons[0]?.position).toEqual({ x: 50, y: 310, z: -20 });
+  });
+});
+
 describe('nlerpQuat', () => {
   it('returns the ends at 0 and 1 and a unit quaternion in between', () => {
     const a = createQuat(0, 0, 0, 1);

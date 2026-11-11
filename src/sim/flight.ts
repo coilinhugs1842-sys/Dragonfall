@@ -58,9 +58,11 @@ import type {
   ClassTuning,
   DragonClassId,
   FlightTuning,
+  InputFrame,
   MatchTuning,
   PlayerId,
   TeamId,
+  Vec3,
 } from '../shared';
 import { resetDragonState } from './dragon-state';
 import type { DragonState } from './dragon-state';
@@ -155,19 +157,22 @@ export function initDragon(
   dragon.health = cls.maxHp;
   dragon.flags = DRAGON_FLAG_ALIVE;
   dragon.spawnProtectTicks = secondsToTicks(match.spawnProtectionS);
-  finalizeDragon(dragon, flight, cls, dragon.position.x, dragon.position.y, dragon.position.z);
+  finalizeDragon(dragon, flight, cls, null);
 }
 
 /**
- * Advances one dragon by one fixed tick from raw input values (they are sanitised here: NaN
- * steers as 0, out-of-range values are clamped, unknown button bits are dropped).
+ * Advances one dragon by one fixed tick from a raw input frame (its values are sanitised here:
+ * NaN steers as 0, out-of-range values are clamped, unknown button bits are dropped).
+ * `input` undefined = no input this tick: the dragon flies straight with the buttons it held.
  * Writes the primary fields only; call `finalizeDragon` afterwards.
+ *
+ * The frame is taken as an object on purpose: a float passed as an argument to a function the
+ * JIT does not inline is boxed (32 B per call, measured), and this runs per dragon per tick on
+ * the host and per predicted or replayed tick on every client.
  */
 export function integrateDragon(
   dragon: DragonState,
-  rawSteerX: number,
-  rawSteerY: number,
-  rawButtons: number,
+  input: Readonly<InputFrame> | undefined,
   flight: FlightTuning,
   cls: ClassTuning,
 ): void {
@@ -186,10 +191,10 @@ export function integrateDragon(
     return;
   }
 
-  const steerX = clampUnit(rawSteerX);
-  const steerY = clampUnit(rawSteerY);
+  const steerX = input !== undefined ? clampUnit(input.steerX) : 0;
+  const steerY = input !== undefined ? clampUnit(input.steerY) : 0;
   // `| 0` turns NaN and Infinity into 0 before masking.
-  const buttons = (rawButtons | 0) & BUTTON_MASK;
+  const buttons = ((input !== undefined ? input.buttons : dragon.prevButtons) | 0) & BUTTON_MASK;
   const pressed = buttons & ~dragon.prevButtons;
   dragon.prevButtons = buttons;
 
@@ -374,20 +379,25 @@ function integrateDeathFall(dragon: DragonState, flight: FlightTuning): void {
  * legal range (non-finite values included, so no NaN survives a tick), applies death, and
  * rebuilds the derived fields (`orientation`, `velocity`, `anim`, the sim-owned flag bits).
  *
- * `prevX/Y/Z` is the position to fall back to if the current one is not finite.
+ * `fallback` is the position to return to if the current one is not finite (null = the origin).
+ * A vector, not three numbers: float arguments to a non-inlined call are boxed.
  */
 export function finalizeDragon(
   dragon: DragonState,
   flight: FlightTuning,
   cls: ClassTuning,
-  prevX: number,
-  prevY: number,
-  prevZ: number,
+  fallback: Readonly<Vec3> | null,
 ): void {
   const position = dragon.position;
-  if (!Number.isFinite(position.x)) position.x = Number.isFinite(prevX) ? prevX : 0;
-  if (!Number.isFinite(position.y)) position.y = Number.isFinite(prevY) ? prevY : 0;
-  if (!Number.isFinite(position.z)) position.z = Number.isFinite(prevZ) ? prevZ : 0;
+  if (!Number.isFinite(position.x)) {
+    position.x = fallback !== null && Number.isFinite(fallback.x) ? fallback.x : 0;
+  }
+  if (!Number.isFinite(position.y)) {
+    position.y = fallback !== null && Number.isFinite(fallback.y) ? fallback.y : 0;
+  }
+  if (!Number.isFinite(position.z)) {
+    position.z = fallback !== null && Number.isFinite(fallback.z) ? fallback.z : 0;
+  }
 
   // --- Health and death -------------------------------------------------------------------------
   if (!(dragon.health > 0)) {

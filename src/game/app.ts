@@ -14,12 +14,13 @@ export const APP_STATE_IDS: readonly AppStateId[] = ['title', 'lobby', 'match', 
  * Every legal move. Anything not listed is rejected.
  * - lobby → title: leave the room.
  * - match → title: the host left, so the match ends for everyone (docs/NETWORKING.md, "Topology").
+ * - match → lobby: the host ended the match (Phase 2 has no results screen in between yet).
  * - results → lobby: back to the aerie with teams kept; results → title: leave.
  */
 export const APP_TRANSITIONS: Readonly<Record<AppStateId, readonly AppStateId[]>> = {
   title: ['lobby'],
   lobby: ['match', 'title'],
-  match: ['results', 'title'],
+  match: ['results', 'lobby', 'title'],
   results: ['lobby', 'title'],
 };
 

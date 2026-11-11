@@ -222,6 +222,97 @@ describe('sim/net boundaries (golden rule 3)', () => {
   });
 });
 
+/**
+ * The host worker's entry file has to live outside `src/net` (it uses `self`), but everything it
+ * pulls into the worker bundle must be worker-safe. It may import the guarded directories, plus
+ * the one `src/game` module listed here, which is itself held to `shared` only.
+ */
+describe('host worker entry (src/game/worker)', () => {
+  const WORKER_DIR = join(SRC, 'game', 'worker');
+  const WORKER_SAFE_MODULES = new Set(['net', 'sim', 'shared']);
+  /** `src/game` files the worker may import, and the only modules THEY may import. */
+  const WORKER_GAME_FILES: Readonly<Record<string, ReadonlySet<string>>> = {
+    autopilot: new Set(['shared']),
+  };
+
+  function gameFileOf(path: string): string | null {
+    const target = relative(join(SRC, 'game'), path);
+    if (target.startsWith('..') || target.includes(sep)) return null;
+    return target.replace(/\.\w+$/, '');
+  }
+
+  function workerViolations(file: string, source: string): string[] {
+    const code = stripComments(source);
+    const problems: string[] = [];
+    for (const ref of findImports(code)) {
+      if (!ref.specifier.startsWith('.')) {
+        problems.push(`imports the package '${ref.specifier}'`);
+        continue;
+      }
+      const target = resolve(dirname(file), ref.specifier);
+      const module = srcModuleOf(target);
+      if (module !== null && WORKER_SAFE_MODULES.has(module)) continue;
+      const gameFile = module === 'game' ? gameFileOf(target) : null;
+      if (gameFile === null || WORKER_GAME_FILES[gameFile] === undefined) {
+        problems.push(`imports '${ref.specifier}', which is not worker-safe`);
+      }
+    }
+    code.split('\n').forEach((line, index) => {
+      const match = DOM_GLOBALS.exec(line);
+      if (match) problems.push(`uses the browser global '${match[1]}' on line ${index + 1}`);
+    });
+    return problems;
+  }
+
+  it('imports only worker-safe modules and touches no DOM global', () => {
+    const files = listSourceFiles(WORKER_DIR);
+    expect(files.length).toBeGreaterThan(0);
+    const failures: string[] = [];
+    for (const file of files) {
+      for (const problem of workerViolations(file, readFileSync(file, 'utf8'))) {
+        failures.push(`${relative(SRC, file)}: ${problem}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it.each(Object.keys(WORKER_GAME_FILES))('keeps game/%s importable from a worker', (name) => {
+    const file = join(SRC, 'game', `${name}.ts`);
+    const allowed = WORKER_GAME_FILES[name] ?? new Set<string>();
+    const code = stripComments(readFileSync(file, 'utf8'));
+    const failures: string[] = [];
+    for (const ref of findImports(code)) {
+      const module = ref.specifier.startsWith('.')
+        ? srcModuleOf(resolve(dirname(file), ref.specifier))
+        : null;
+      if (module === null || !allowed.has(module)) failures.push(ref.specifier);
+    }
+    expect(DOM_GLOBALS.test(code)).toBe(false);
+    expect(failures).toEqual([]);
+  });
+
+  it('flags what does not belong in a worker', () => {
+    const file = join(WORKER_DIR, 'host.worker.ts');
+    expect(workerViolations(file, `import { createStage } from '../stage';`)).toHaveLength(1);
+    expect(workerViolations(file, `import { createGame } from '../game';`)).toHaveLength(1);
+    expect(workerViolations(file, `import { Scene } from 'three';`)).toHaveLength(1);
+    expect(workerViolations(file, `import { createUi } from '../../ui';`)).toHaveLength(1);
+    expect(workerViolations(file, `import { x } from '../../render';`)).toHaveLength(1);
+    expect(workerViolations(file, `import { Peer } from 'peerjs';`)).toHaveLength(1);
+    expect(workerViolations(file, `document.title = 'x';`)).toHaveLength(1);
+    expect(workerViolations(file, `window.postMessage(1);`)).toHaveLength(1);
+    expect(
+      workerViolations(
+        file,
+        `import { writeAutopilotFrame } from '../autopilot';
+         import { createHostWorkerServer } from '../../net/worker/host-worker-server';
+         import type { SimState } from '../../sim';
+         self.onmessage = null;`,
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('boundary scanner', () => {
   const file = join(SRC, 'sim', 'systems', 'example.ts');
   const check = (source: string): string[] => findViolations(file, source);

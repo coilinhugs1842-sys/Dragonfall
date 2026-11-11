@@ -35,6 +35,23 @@ class FakeHost implements FrameHost {
     return () => this.visibilityListeners.delete(listener);
   }
 
+  timers = new Map<number, () => void>();
+
+  startTimer(callback: () => void, _intervalMs: number): number {
+    const handle = this.nextHandle++;
+    this.timers.set(handle, callback);
+    return handle;
+  }
+
+  stopTimer(handle: number): void {
+    this.timers.delete(handle);
+  }
+
+  /** Fires every running timer once. */
+  timerBeat(): void {
+    for (const callback of [...this.timers.values()]) callback();
+  }
+
   get pendingFrames(): number {
     return this.pending.size;
   }
@@ -234,6 +251,50 @@ describe('FrameDriver', () => {
     expect(host.pendingFrames).toBe(1);
     host.frame(16);
     expect(frames).toBe(2);
+  });
+
+  it('runs the background callback on a timer while hidden, and only then', () => {
+    const host = new FakeHost();
+    const loop = new FixedStepLoop(10, () => {});
+    let frames = 0;
+    let beats = 0;
+    const driver = new FrameDriver({
+      loop,
+      host,
+      render: () => frames++,
+      background: () => beats++,
+    });
+    driver.start();
+    expect(host.timers.size).toBe(0);
+    host.frame(0);
+
+    host.setHidden(true);
+    expect(host.pendingFrames).toBe(0);
+    expect(host.timers.size).toBe(1);
+    host.timerBeat();
+    host.timerBeat();
+    expect(beats).toBe(2);
+    expect(frames).toBe(1);
+
+    host.setHidden(false);
+    expect(host.timers.size).toBe(0);
+    expect(host.pendingFrames).toBe(1);
+
+    // Started hidden: the beat runs from the start; stopping ends it.
+    host.setHidden(true);
+    driver.stop();
+    expect(host.timers.size).toBe(0);
+    driver.start();
+    expect(host.timers.size).toBe(1);
+    driver.dispose();
+    expect(host.timers.size).toBe(0);
+  });
+
+  it('starts no timer without a background callback', () => {
+    const { host, driver } = createRig();
+    driver.start();
+    host.setHidden(true);
+    expect(host.timers.size).toBe(0);
   });
 
   it('reports the time spent in sim steps', () => {

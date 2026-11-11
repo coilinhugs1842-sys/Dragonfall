@@ -79,6 +79,31 @@ export interface Sim {
   setCollisionWorld(world: SimCollisionWorld | null): void;
 }
 
+/**
+ * One dragon, one fixed tick: flight integration, collision, then the derived fields. This is
+ * the whole per-dragon part of `Sim.step`, exported so client prediction (`src/net/prediction`)
+ * replays exactly the code the host ran instead of a copy of it.
+ *
+ * `input` undefined = no input for this tick: the dragon flies straight with the buttons it held
+ * last tick (see `SimInputs`). `scratch` is overwritten with the position before the step.
+ * Deterministic and allocation-free.
+ */
+export function stepDragon(
+  dragon: DragonState,
+  input: Readonly<InputFrame> | undefined,
+  flight: FlightTuning,
+  cls: ClassTuning,
+  collision: SimCollisionWorld,
+  scratch: MutableVec3,
+): void {
+  scratch.x = dragon.position.x;
+  scratch.y = dragon.position.y;
+  scratch.z = dragon.position.z;
+  integrateDragon(dragon, input, flight, cls);
+  collision.resolveDragon(dragon, scratch, TICK_DT_S, flight);
+  finalizeDragon(dragon, flight, cls, scratch);
+}
+
 export function createSim(options: SimOptions = {}): Sim {
   const flight = options.flightTuning ?? FLIGHT_TUNING;
   const classes = options.classTuning ?? CLASS_TUNING;
@@ -114,19 +139,14 @@ export function createSim(options: SimOptions = {}): Sim {
       for (let i = 0; i < dragons.length; i++) {
         const dragon = dragons[i];
         if (dragon === undefined || !dragon.active) continue;
-        const cls = classes[dragon.classId];
-        const input = inputs[dragon.id];
-        prevPosition.x = dragon.position.x;
-        prevPosition.y = dragon.position.y;
-        prevPosition.z = dragon.position.z;
-
-        if (input !== undefined) {
-          integrateDragon(dragon, input.steerX, input.steerY, input.buttons, flight, cls);
-        } else {
-          integrateDragon(dragon, 0, 0, dragon.prevButtons, flight, cls);
-        }
-        collision.resolveDragon(dragon, prevPosition, TICK_DT_S, flight);
-        finalizeDragon(dragon, flight, cls, prevPosition.x, prevPosition.y, prevPosition.z);
+        stepDragon(
+          dragon,
+          inputs[dragon.id],
+          flight,
+          classes[dragon.classId],
+          collision,
+          prevPosition,
+        );
       }
       // Phase 3+: projectiles, zones, scoring.
     },

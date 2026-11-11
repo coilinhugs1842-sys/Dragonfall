@@ -25,9 +25,8 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
 
 ## Open questions (to resolve in the phase noted)
 
-- Phase 2: does WebRTC with our setup work from a plain-HTTP LAN origin (`http://<ip>:4173`)? If not, LAN mode
-  uses self-signed HTTPS.
-- Phase 2: does PeerJS 1.5 give a truly unreliable channel, or do we open one on the raw `RTCPeerConnection`?
+- ~~Phase 2: does WebRTC work from a plain-HTTP LAN origin?~~ Yes, see decision 20.
+- ~~Phase 2: does PeerJS 1.5 give a truly unreliable channel?~~ No, we open our own, see decision 19.
 - Phase 4: which Higgsfield 3D model settings give the best dragon meshes. Note the finding here.
 
 ## 2026-11-10: target hardware, reference review, GitHub
@@ -76,3 +75,37 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
 18. **Collision and visuals are built from one triangle source.** The greybox map is pure data in
     `src/shared/maps`; `buildMapTriangles` feeds both the sim's BVH and the map view's merged chunks, so what
     you see is what you hit. Real maps (Phase 4) keep the rule with a dedicated collider mesh in the manifest.
+
+## 2026-11-11: Phase 2
+
+19. **`fast` is a second, negotiated data channel on PeerJS's own `RTCPeerConnection`; PeerJS's "unreliable"
+    mode is not used.** Spike (PeerJS 1.5.5, Edge/Chromium, `tools/net-spike`): `peer.connect(id, { reliable:
+    false })` only sets `ordered: false`; `maxRetransmits` stays null, so that channel still retransmits forever.
+    Every `peer.connect()` also builds its own `RTCPeerConnection`. So one link is one PeerJS data connection
+    (`ctrl`: serialization `raw`, reliable and ordered) plus a channel both ends create on
+    `dataConnection.peerConnection` with `negotiated: true, id: 2, ordered: false, maxRetransmits: 0`.
+    This answers the open question "does PeerJS 1.5 give a truly unreliable channel": no, we open our own.
+20. **LAN mode is plain HTTP; no self-signed HTTPS.** WebRTC data channels, the LAN PeerServer websocket
+    (`ws://<host>:9000/dragonfall`) and the host Web Worker all work from `http://<lan-ip>:<port>`
+    (`isSecureContext` false), checked with the production build in Edge. Consequences: nothing in the game may
+    need a secure context (`crypto.getRandomValues` instead of `crypto.randomUUID`, a selection-based clipboard
+    fallback), and `secure` is always set explicitly for the LAN PeerServer. Checked with two browser instances
+    on one machine by LAN IP; two laptops over Wi-Fi is the Phase 2 gate. Revisit if a browser starts requiring
+    a secure context for WebRTC.
+21. **The host sim runs in a Web Worker by default, with the main thread as an automatic fallback (A-26).**
+    `HostCore` (session, lobby, bots, sim, collision, snapshot encoding) is DOM-free and runs in `host.worker`
+    on its own 30 Hz timer; the page keeps the WebRTC transport and the input devices and exchanges one
+    transferred binary batch per tick. Reasons: the match keeps its pace when the host's tab is hidden or its
+    frame hitches, and host work leaves the render thread. Measured with `?bots=9` (dev build, desktop Edge):
+    0.025 ms per tick in the worker against 0.045 ms on the main thread, and 0.02 ms against 0.13 ms of host
+    work per rendered frame on the main thread. The host's own view receives state by `postMessage` (about
+    0.6 ms late on average) and may extrapolate up to half a tick. `?noworker`, a browser without `Worker`, or a
+    worker that fails before it says `ready` host on the main thread behind the same `HostHandle`; a worker
+    that dies later closes the room. A hidden main-thread host freezes its sim but keeps answering pings.
+    Still to measure on a U-series laptop (T-2.10).
+22. **Kick bans the browser, not just the seat.** HELLO carries a per-browser `clientId`; the host refuses new
+    seats for a kicked id for the life of the room. Clearing site data gets around it, which is fine among friends.
+23. **Final visual bar (user, 2026-11-10): hero-shooter polish within the U-series budget.** The greybox and
+    placeholder dragons are not the final look. Phase 4 targets the finish of a top stylized hero shooter
+    (strong silhouettes, rich materials, rim light, readable VFX, cohesive grading) in our own style; the
+    "original work only" rule still applies.

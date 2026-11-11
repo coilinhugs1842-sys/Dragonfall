@@ -5,12 +5,41 @@ up where the last one stopped.
 
 ## Current state
 
-- **Phase:** 1 (Flight sandbox) built, **waiting for the user's gate check** (flight feel + Medium at 60 fps on a
-  U-series laptop). The Phase 0 gate has not been reported either; the same session can cover both.
-- **Next:** T-2.1 (PeerJS spike) once the Phase 1 gate passes; tune flight from the user's feedback first.
-- **Open issues:** see "Known rough edges" in the Phase 1 entry.
+- **Phase:** 2 (Netcode core) built; Phase 3 in progress. The user asked (2026-11-10) for all remaining phases
+  to be built back to back without stopping; gates for Phases 0-2 are still theirs to run on real laptops.
+- **Next:** T-3.1.
+- **Open issues:** see the latest entry.
 
 ## Log
+
+### 2026-11-11: Phase 2 netcode core (T-2.1 to T-2.10)
+- Full flow works: title → Host / Join by room code / Fly solo → lobby → match → back to lobby or title.
+- **T-2.1** Transport abstraction with PeerJS and in-memory loopback implementations. Spike answers: PeerJS has
+  no truly unreliable channel, so `fast` is our own negotiated channel (DECISIONS 19); plain-HTTP LAN works
+  (DECISIONS 20).
+- **T-2.2** Binary codec: defensive decode, 10-dragon snapshot inside the 360 B budget, fuzz-tested.
+- **T-2.3** `HostSession` / `ClientSession`: handshake, lobby broadcast, reconnect token (30 s slot), kick ban.
+- **T-2.4** 20 Hz snapshots, adaptive interpolation buffer, client prediction + reconciliation with smoothing.
+- **T-2.5** `?netsim=<profile>` (off/lan/wifi/bad/awful or `ms,±ms,loss%`) and `?bots=N` net-bots
+  (`&autostart` to host, fill and start at once).
+- **T-2.6** Pure lobby state machine: teams 1-5, uneven toggle, move/auto-balance/shuffle/lock, class, ready,
+  kick, start rules.
+- **T-2.7 to T-2.9** Title, Host/Join, 2D lobby panel, connection chip, pause menu (host: End match / Close
+  room), disconnect and host-left screens.
+- **T-2.10** Host sim + snapshot encoding run in a Web Worker by default, main-thread fallback with `?noworker`
+  (DECISIONS 21).
+- 1206 tests in 60 files; typecheck, test, build pass. Two reviews raised 8 findings, all fixed.
+- **Measured in headless Edge on the dev desktop (relative figures, not the U-series target):**
+  - Host with 9 bots: 0.025 ms per tick in the worker; 0.02 ms of host work per frame on the main thread
+    (0.13 ms with `?noworker`); 5.7 KB/s upload per client (budget 7).
+  - Client under `netsim=bad`: remote position error mean 0.03 m, max 0.10 m; own dragon 0 corrections.
+  - Draw calls and triangles unchanged from Phase 1 (no visual work in this phase).
+- **Phase 2 gate for the user (two real laptops on Wi-Fi):** host runs `npm run dev:lan` and `npm run peer:lan`,
+  opens `http://<ip>:5173/?lan&bots=8&perf`, picks Local network → Host a room; the second laptop opens
+  `http://<host-ip>:5173/?lan&perf&netsim=bad` and joins by code. Fly a few minutes: no rubber-banding, own
+  dragon never snaps. Also try: client tab hidden 20 s, Wi-Fi off 5 s, F5 on the client, kick, host End match.
+- **Open questions (defaults chosen, change on request):** a hidden client's dragon flies straight on its last
+  input; a hidden main-thread host freezes the sim (worker path does not); Close room has no confirm step.
 
 ### 2026-11-10: Phase 1 flight sandbox (T-1.1 to T-1.9)
 - The app now boots straight into a flyable sandbox on the greybox Shattered Spires map ("click to fly").

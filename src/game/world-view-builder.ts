@@ -1,11 +1,15 @@
 /**
  * Builds the frame's WorldView from the two latest sim states (docs/ARCHITECTURE.md, "Data
- * flow"): the host's path from authoritative state to the views. `alpha` is the fixed loop's
- * banked fraction of a tick: 0 shows `prev`, 1 shows `current`.
+ * flow"): the host's path from authoritative state to the views. `alpha` is the fraction of a
+ * tick between them (the fixed loop's banked fraction, or the host worker's equivalent): 0
+ * shows `prev`, 1 shows `current`. The states are the sim's own, or the mirror of them a host
+ * worker sends (`HostViewState` is the part of `SimState` read here).
  *
  * Positions and velocities are lerped, orientations nlerped along the shorter arc (at most one
  * tick of rotation apart, where nlerp and slerp are indistinguishable), and everything discrete
- * (flags, anim, health, stamina) is taken from `current`.
+ * (flags, anim, health, stamina) is taken from `current`. With `maxAlpha` above 1 the same
+ * formulas extrapolate past `current` (a dragon that was (re)spawned this tick has no motion to
+ * carry on and stays at its `current` pose).
  *
  * Runs every rendered frame: it only writes numbers into the reused view (the pool grows once
  * per dragon slot, never afterwards).
@@ -13,7 +17,7 @@
 
 import { MAX_PLAYERS, acquireDragonView, acquireZoneView, beginWorldView } from '../shared';
 import type { MatchPhase, MutableQuat, MutableWorldView, PlayerId, Quat } from '../shared';
-import type { SimState } from '../sim';
+import type { HostViewState } from '../net';
 
 /** The storm wall as the views draw it; null on a map without one. */
 export interface StormWallSource {
@@ -28,6 +32,12 @@ export interface WorldViewBuildOptions {
   /** Read live each frame (Duel shrinks the radius). */
   readonly stormWall: StormWallSource | null;
   readonly phase: MatchPhase;
+  /**
+   * Largest blend factor honoured (default 1: never past `current`). A host worker's view asks
+   * for a little more, so a state that arrives a few milliseconds late is bridged by carrying
+   * the last tick's motion on instead of holding still.
+   */
+  readonly maxAlpha?: number;
 }
 
 /** Zone id of the storm wall: there is exactly one, so it never changes. */
@@ -73,12 +83,13 @@ export function nlerpQuat(out: MutableQuat, a: Quat, b: Quat, t: number): Mutabl
  */
 export function buildWorldView(
   view: MutableWorldView,
-  prev: Readonly<SimState>,
-  current: Readonly<SimState>,
+  prev: Readonly<HostViewState>,
+  current: Readonly<HostViewState>,
   alpha: number,
   options: WorldViewBuildOptions,
 ): MutableWorldView {
-  const t = clamp01(alpha);
+  const limit = options.maxAlpha !== undefined && options.maxAlpha > 1 ? options.maxAlpha : 1;
+  const t = alpha > 0 ? (alpha < limit ? alpha : limit) : 0;
   beginWorldView(view);
 
   for (let i = 0; i < MAX_PLAYERS; i++) {

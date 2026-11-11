@@ -55,8 +55,8 @@ Each client↔host link has two data channels:
 | `ctrl` | reliable, ordered | handshake, lobby state, intents, chat, GameEvents (takedowns, objectives, phase changes), pings |
 | `fast` | unreliable, unordered (`maxRetransmits: 0`) | client → host inputs, host → client snapshots |
 
-The Phase 2 spike must confirm that PeerJS 1.5 gives us an unreliable channel (`reliable: false`). If it can't,
-`net/` creates the second channel directly on the underlying `RTCPeerConnection`.
+Spike result (DECISIONS 19): PeerJS 1.5's `reliable: false` still retransmits, so `fast` is a negotiated channel
+(`id: 2, ordered: false, maxRetransmits: 0`) that both ends create on the PeerJS connection's `RTCPeerConnection`.
 
 ## Tick rates and timing
 
@@ -95,7 +95,8 @@ The Phase 2 spike must confirm that PeerJS 1.5 gives us an unreliable channel (`
 
 ## Lobby protocol (on `ctrl`)
 
-1. Client → host: `hello { name, protocolVersion, reconnectToken? }`
+1. Client → host: `hello { name, protocolVersion, reconnectToken?, clientId? }` (`clientId` is a per-browser id;
+   a kick bans it for the life of the room)
 2. Host → client: `welcome { playerId, lobbyState }` or `reject { reason }` (full, version mismatch, kicked,
    match in progress with no spectator slots)
 3. The host broadcasts the full `lobbyState` whenever it changes: players, teams, classes, ready flags, host

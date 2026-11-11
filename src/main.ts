@@ -1,26 +1,28 @@
 /**
- * Boot: create the one renderer, start the App state machine, start the frame driver.
- *
- * Phase 1 has no title screen or lobby yet, so the app starts in `match`, which is the flight
- * sandbox (game/match-scene.ts). The other states exist and are reachable from the `?debug`
- * panel; they draw nothing.
+ * Boot: create the one renderer, the game controller (title -> lobby -> match, see
+ * ./game/game.ts) and the frame driver.
  *
  * Only ./dev/query-flags and ./dev/boot may be imported from `dev` here. They are tiny; the
- * `./dev` barrel would pull stats-gl and lil-gui into the entry chunk.
+ * `./dev` barrel would pull stats-gl and lil-gui into the entry chunk. The netsim chunk and the
+ * PeerJS chunk are fetched on demand (`?netsim` / `?debug`, and when the player hosts or joins).
  */
 import './style.css';
-import { loadDevTools } from './dev/boot';
+import { loadDevTools, loadNetsim } from './dev/boot';
 import type { PerfHud } from './dev/perf-hud';
 import { getQueryFlags } from './dev/query-flags';
-import { App, FrameDriver, createMatchScene, readStoredQuality } from './game';
+import { FrameDriver, createGame, readStoredQuality } from './game';
+import type { Game } from './game';
 import { WebGL2UnavailableError, createGameRenderer } from './render';
 import type { GameRenderer } from './render';
 import { DEFAULT_QUALITY, TICK_MS } from './shared';
 import type { QualityPresetId } from './shared';
 import { FixedStepLoop } from './sim';
 
-/** EMA weight for the HUD's sim figure. Most 60 Hz frames run 0 or 1 sim steps, so raw is noisy. */
-const SIM_MS_SMOOTHING = 0.05;
+/** What a dev build (and `?debug`) hangs on `window` for the console and the browser tests. */
+interface DebugHook {
+  readonly game: Game;
+  report(): unknown;
+}
 
 function requireElement<T extends HTMLElement>(id: string, type: new () => T): T {
   const element = document.getElementById(id);
@@ -28,9 +30,9 @@ function requireElement<T extends HTMLElement>(id: string, type: new () => T): T
   return element;
 }
 
-function localStorageOrNull(): Storage | null {
+function storageOrNull(kind: 'localStorage' | 'sessionStorage'): Storage | null {
   try {
-    return window.localStorage;
+    return window[kind];
   } catch {
     // Some browsers throw on the property access itself when storage is blocked.
     return null;
@@ -39,7 +41,7 @@ function localStorageOrNull(): Storage | null {
 
 /** `?quality=` wins, then the saved setting, then the default (until the automatic pick exists). */
 function pickQuality(forced: QualityPresetId | null): QualityPresetId {
-  return forced ?? readStoredQuality(localStorageOrNull()) ?? DEFAULT_QUALITY;
+  return forced ?? readStoredQuality(storageOrNull('localStorage')) ?? DEFAULT_QUALITY;
 }
 
 /** Returns null after showing the index.html fallback when WebGL2 cannot be created. */
@@ -83,52 +85,88 @@ function boot(): void {
   const renderer = createRendererOrFallback(canvas, pickQuality(flags.quality));
   if (renderer === null) return;
 
-  const app = new App('match');
-  const match = createMatchScene({
-    app,
-    renderer,
+  const now = (): number => performance.now();
+  // Fetched only with `?netsim` or `?debug`; the game waits for it before its first transport.
+  const netsim = loadNetsim(flags, now);
+
+  const game = createGame({
     canvas,
-    autopilot: flags.autopilot,
-    skipSeconds: flags.skipSeconds,
+    uiRoot: requireElement('ui', HTMLElement),
+    renderer,
+    flags: {
+      autopilot: flags.autopilot,
+      skipSeconds: flags.skipSeconds,
+      bots: flags.bots,
+      lan: flags.lan,
+      solo: flags.solo,
+      autostart: flags.autostart,
+      noWorker: flags.noWorker,
+      measure: flags.perf || flags.debug || import.meta.env.DEV,
+    },
+    storage: { local: storageOrNull('localStorage'), session: storageOrNull('sessionStorage') },
+    pageHostname: window.location.hostname,
+    now,
+    shaper: netsim,
   });
 
   const applySize = (): void => {
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     renderer.resize(width, height, window.devicePixelRatio);
-    if (width > 0 && height > 0) match.setAspect(width / height);
+    if (width > 0 && height > 0) game.setAspect(width / height);
   };
   applySize();
   new ResizeObserver(applySize).observe(canvas);
   watchDevicePixelRatio(applySize);
 
-  // The active state's scene samples input and steps its sim inside `app.update`, so the
-  // frame driver's sim timing (the HUD's `sim` line) covers all of it.
-  const loop = new FixedStepLoop(TICK_MS, (tick) => {
-    app.update(tick);
+  // The host's fixed 30 Hz step. A client's ticks are run by its session inside `game.frame`
+  // (the host steers their rate), so on a client this does nothing.
+  const loop = new FixedStepLoop(TICK_MS, () => {
+    game.fixedStep();
   });
 
   // Filled in when the `?perf` chunk arrives; stays null in normal play.
   let perfHud: PerfHud | null = null;
-  let simMs = 0;
 
   const driver = new FrameDriver({
     loop,
     // Created once and called every frame: nothing in here may allocate.
     render: (alpha, frameMs) => {
       perfHud?.begin(frameMs);
-      simMs += (driver.simMs - simMs) * SIM_MS_SMOOTHING;
-      match.renderFrame(alpha, frameMs);
+      game.frame(alpha, frameMs);
       perfHud?.end();
+    },
+    // Hidden tab: no frames, but a client must keep telling the host it is still there.
+    background: () => {
+      game.background();
     },
   });
 
-  app.start();
   driver.start();
+
+  // The other side should hear a goodbye, not a timeout: the host tells its clients the room
+  // is gone, a client lets go of its link (its seat is held for a reload).
+  window.addEventListener('pagehide', () => {
+    game.shutdown();
+  });
+
+  if (import.meta.env.DEV || flags.debug) {
+    const hook: DebugHook = { game, report: () => game.report() };
+    Reflect.set(window, '__dragonfall', hook);
+  }
 
   // Not awaited: the game must not wait for (or die with) a dev-only chunk. loadDevTools
   // already turns a tool whose chunk failed into null; the handler below is for anything else.
-  loadDevTools(flags, { renderer, app, getSimMs: () => simMs }).then(
+  loadDevTools(
+    flags,
+    {
+      renderer,
+      app: game.app,
+      getSimMs: () => game.getSimMs(),
+      getNetText: () => game.getNetText(),
+    },
+    netsim,
+  ).then(
     (dev) => {
       perfHud = dev.perfHud;
     },

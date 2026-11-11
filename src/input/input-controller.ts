@@ -156,8 +156,10 @@ export class InputController implements EventListenerObject {
    * Writes this tick's input into `out` (reused, no allocation). Call once per sim tick. While
    * unlocked the frame is neutral: no buttons, and the reticle keeps easing to the centre.
    */
-  sample(tick: number, out: InputFrame): InputFrame {
-    return sampleInput(this.state, tick, out);
+  sample(tick: number, out: InputFrame, dtS?: number): InputFrame {
+    return dtS === undefined
+      ? sampleInput(this.state, tick, out)
+      : sampleInput(this.state, tick, out, dtS);
   }
 
   /** Installs a rebind table (releases all keys). */

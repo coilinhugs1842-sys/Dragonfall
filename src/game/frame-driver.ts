@@ -3,8 +3,10 @@
  * into the fixed-step loop, then calls the render callback with the interpolation alpha.
  *
  * It stops while the tab is hidden and restarts its clock on return, so the time spent away is
- * never simulated (no fast-forward). The browser pieces come through `FrameHost` so tests can
- * drive it by hand in node.
+ * never simulated (no fast-forward). While it is stopped that way an optional `background`
+ * callback runs on a slow timer instead: nothing is simulated or drawn, but a network session
+ * can keep its link alive (a hidden tab that sends nothing is dropped by the other side within
+ * seconds). The browser pieces come through `FrameHost` so tests can drive it by hand in node.
  */
 
 import type { FixedStepLoop } from '../sim/fixed-loop';
@@ -18,6 +20,9 @@ export interface FrameHost {
   isHidden(): boolean;
   /** Subscribes to visibility changes. Returns the unsubscribe function. */
   onVisibilityChange(listener: () => void): () => void;
+  /** A repeating timer (`setInterval`). Only used when a `background` callback was given. */
+  startTimer?(callback: () => void, intervalMs: number): number;
+  stopTimer?(handle: number): void;
 }
 
 export type FrameRenderFn = (alpha: number, frameMs: number) => void;
@@ -25,12 +30,19 @@ export type FrameRenderFn = (alpha: number, frameMs: number) => void;
 export interface FrameDriverOptions {
   loop: FixedStepLoop;
   render: FrameRenderFn;
+  /**
+   * Called every `BACKGROUND_INTERVAL_MS` or so while the tab is hidden (browsers slow hidden
+   * timers to about one a second). Created once and called often: it must not allocate.
+   */
+  background?: () => void;
   /** Defaults to the real browser (`createBrowserFrameHost`). */
   host?: FrameHost;
 }
 
 /** Reported as `frameMs` on a frame with no measurement (the first one after start or resume). */
 const NOMINAL_FRAME_MS = 1000 / 60;
+/** How often `background` is asked for while hidden; a hidden page gets about 1000 ms. */
+export const BACKGROUND_INTERVAL_MS = 500;
 
 export function createBrowserFrameHost(): FrameHost {
   return {
@@ -42,6 +54,8 @@ export function createBrowserFrameHost(): FrameHost {
       document.addEventListener('visibilitychange', listener);
       return () => document.removeEventListener('visibilitychange', listener);
     },
+    startTimer: (callback, intervalMs) => window.setInterval(callback, intervalMs),
+    stopTimer: (handle) => window.clearInterval(handle),
   };
 }
 
@@ -49,8 +63,10 @@ export class FrameDriver {
   private readonly loop: FixedStepLoop;
   private readonly render: FrameRenderFn;
   private readonly host: FrameHost;
+  private readonly background: (() => void) | null;
   private wanted = false;
   private handle: number | null = null;
+  private timer: number | null = null;
   /** NaN means "no previous frame": the next frame measures nothing. */
   private lastTimeMs = Number.NaN;
   private lastFrameMs = NOMINAL_FRAME_MS;
@@ -60,6 +76,7 @@ export class FrameDriver {
   constructor(options: FrameDriverOptions) {
     this.loop = options.loop;
     this.render = options.render;
+    this.background = options.background ?? null;
     this.host = options.host ?? createBrowserFrameHost();
   }
 
@@ -82,7 +99,8 @@ export class FrameDriver {
     if (this.wanted) return;
     this.wanted = true;
     this.unsubscribeVisibility = this.host.onVisibilityChange(this.onVisibility);
-    if (!this.host.isHidden()) this.schedule();
+    if (this.host.isHidden()) this.startBackground();
+    else this.schedule();
   }
 
   stop(): void {
@@ -91,6 +109,7 @@ export class FrameDriver {
     this.unsubscribeVisibility?.();
     this.unsubscribeVisibility = null;
     this.cancel();
+    this.stopBackground();
   }
 
   /** Same as `stop()`; named for symmetry with the other long-lived objects. */
@@ -113,12 +132,26 @@ export class FrameDriver {
     }
   }
 
+  private startBackground(): void {
+    const background = this.background;
+    if (background === null || this.timer !== null || this.host.startTimer === undefined) return;
+    this.timer = this.host.startTimer(background, BACKGROUND_INTERVAL_MS);
+  }
+
+  private stopBackground(): void {
+    if (this.timer === null) return;
+    this.host.stopTimer?.(this.timer);
+    this.timer = null;
+  }
+
   private readonly onVisibility = (): void => {
     if (!this.wanted) return;
     if (this.host.isHidden()) {
       this.cancel();
-    } else if (this.handle === null) {
-      this.schedule();
+      this.startBackground();
+    } else {
+      this.stopBackground();
+      if (this.handle === null) this.schedule();
     }
   };
 
