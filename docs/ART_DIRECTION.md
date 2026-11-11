@@ -7,8 +7,24 @@ Look **premium and cinematic** while staying cheap to render on integrated graph
 from fog and light shafts, and saturated creatures against a softer world. This style looks deliberate at low
 resolution, unlike realistic graphics, which look cheap when scaled down.
 
-It must also be **our own look**, not a copy of the Higgsfield showcase game. Before Phase 4 the user will share
-a few screenshots of that game so we can check side by side that our palette, shapes and UI read as different.
+It must also be **our own look**, not a copy of the Higgsfield showcase game.
+
+## How we differ from the reference game
+
+The reference video (reviewed 2026-11-10, then deleted; never commit it) shows these choices, which we **avoid**:
+
+| Reference game | Dragonfall instead |
+| --- | --- |
+| Bright cobalt **midday** sky with huge white cumulus | **Golden hour / dusk** skies, cream-peach-violet gradients, light shafts |
+| Ground world far below: rivers, turquoise water, patchwork farmland, villages | **No ground.** Floating stone spires and ruins above an endless **cloud sea** |
+| Single-player PvE: purple enemy swarms, XP and level-ups, giant winged stone colossus boss | **Team PvP** (1v1–5v5) with modes and objectives. No XP levels, no colossus boss |
+| Red/orange player dragon with orange bat wings; purple enemies | Neutral **jewel-tone** hides (emerald, sapphire, bronze, obsidian); team colour only as glowing accents |
+| Comic-book pop-up text ("HIT!", "DOWN! WHOOSH!", "LEVEL UP!") in bold italic with outlines | Restrained cinematic UI: thin serif titles, small killfeed, subtle hit markers, no onomatopoeia |
+| Mobile touch layout (virtual joystick, round buttons) | Keyboard + mouse first, gamepad second |
+| Golden spark-shower breath, white speed streaks | Each class has its own effect shape (ember bolts with ribbon trails, heavy flame cone, forked lightning, smoky shade), with team-tinted cores |
+
+What both games share is the genre: third-person dragon flight with breath attacks, dodge, boost and lock-on.
+That's fine. The art, world, names, UI and structure are ours.
 
 ## STYLE FORMULA (draft: needs the user's approval before any asset generation)
 
@@ -36,7 +52,7 @@ shadow, no ground` *after* the formula (the formula itself stays unchanged).
 | Stone, ruins | slate blue `#4E6A86`, deep shadow `#2A3346`, lit edge `#C9B79A` |
 | Vegetation, moss | teal green `#3F8F7A`, highlight `#8CC9A1` |
 | Sky, clouds | cream `#F4E6CC` → peach `#F2B984` → dusk violet `#5B4C7A` |
-| Dragons (base hides) | jewel tones: emerald, sapphire, garnet, obsidian with iridescent edges |
+| Dragons (base hides) | jewel tones: emerald, sapphire, bronze, obsidian with iridescent edges (never a red/orange body) |
 | Team Ember | `#FF7A1A` (glow `#FFB15C`) |
 | Team Frost | `#3FD7FF` (glow `#A8F0FF`) |
 | Hazards, pickups, objectives | magenta `#FF3FA4` |
@@ -62,7 +78,7 @@ membranes, glowing runes and the breath colour, so any dragon model works for ei
   - **Bastion:** bulky, armored plates, broad wings.
   - **Tempest:** long neck, crest fins, ribbed wings.
   - **Wraith:** lean, tattered wing edges, smoky tail.
-- About 8–12k triangles at LOD0, ≤ 24 bones. Wing membranes are separate material slots so they can take the
+- ≤ 8k triangles at LOD0 (U-series budget), ≤ 24 bones. Wing membranes are separate material slots so they can take the
   team tint.
 - Riders are small and readable: a saddle silhouette with a team-coloured cloak.
 

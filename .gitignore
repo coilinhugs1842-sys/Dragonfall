@@ -11,6 +11,11 @@ Thumbs.db
 .env.*
 !.env.example
 
+# Third-party reference material (other games' footage, screenshots): local only, never pushed
+/reference/
+Refernce*.*
+Reference*.*
+
 # Higgsfield / Blender scratch
 art-source/_scratch/
 *.blend1

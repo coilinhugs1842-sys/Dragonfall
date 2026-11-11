@@ -2,43 +2,49 @@
 
 ## The target machine
 
-- **CPU/GPU:** Intel Core Ultra 5 with integrated graphics. **H-series** chips (e.g. 125H, 225H) have Intel Arc
-  graphics with 7 Xe cores. **U-series** chips (e.g. 125U, 135U) have 4 Xe cores, which is roughly **half the
-  GPU**. We design so a U-series laptop is playable on **Low** and an H-series laptop is smooth on **Medium**.
+- **CPU/GPU: confirmed U-series** (Core Ultra 5 1xxU/2xxU). That means 15 W chips with **Intel Graphics, 4 Xe
+  cores**, about half the GPU of the H-series' Arc graphics. The CPU has only 2 performance cores, and these
+  laptops **throttle under sustained load** once they heat up. Everything below is sized for this machine.
+  **Medium is the default preset and must hold 60 fps on a U-series laptop.** High is a bonus for stronger
+  machines.
 - **Memory:** 16 GB shared between the CPU and GPU. Chrome or Edge, Windows and a background app or two leave
   roughly 2–3 GB that a game tab can use comfortably.
 - **Browser:** current Chrome or Edge with hardware acceleration on, using WebGL2.
 - **The host laptop does more:** it runs the sim for 10 dragons and keeps 9 WebRTC connections alive while
   rendering. The host's sim + net budget is below.
 
-> Find out exactly which chip each laptop has (Settings → System → About → Processor). If any is a U-series,
-> run every phase gate on that machine.
+> Every phase gate runs on a U-series laptop. If a laptop has an even weaker chip, that one becomes the gate
+> machine.
 
 ## Frame budget (60 fps = 16.7 ms)
 
 | Item | Budget |
 | --- | --- |
-| Sim + net on the host (30 Hz work, averaged per frame) | ≤ 2.0 ms |
-| Sim + net on a client (prediction + interpolation) | ≤ 1.0 ms |
-| JS render prep (culling, animation, matrices, particles) | ≤ 3.5 ms |
-| GPU time | ≤ 11 ms at Medium |
+| Sim + net on the host (30 Hz work, averaged per frame) | ≤ 1.5 ms (or moved to a worker, see below) |
+| Sim + net on a client (prediction + interpolation) | ≤ 0.8 ms |
+| JS render prep (culling, animation, matrices, particles) | ≤ 3.0 ms |
+| GPU time | ≤ 11 ms at Medium on a U-series laptop |
 | Garbage collection | no visible stalls; zero per-frame allocations in the hot path |
 
 ## Scene budgets per quality preset
 
-| Budget | Low | Medium (default) | High |
+| Budget | Low | Medium (default, U-series target) | High (stronger PCs) |
 | --- | --- | --- | --- |
-| Render scale (dynamic, of 1080p) | 0.55–0.8 | 0.7–1.0 | 0.85–1.0 |
-| Draw calls | ≤ 150 | ≤ 250 | ≤ 400 |
-| Triangles on screen | ≤ 400k | ≤ 800k | ≤ 1.5M |
-| Shadow map (sun, near cascade only) | none (blob shadows) | 1024 | 2048 |
+| Render scale (dynamic, of 1080p) | 0.5–0.7 | 0.6–0.85 | 0.85–1.0 |
+| Draw calls | ≤ 120 | ≤ 180 | ≤ 350 |
+| Triangles on screen | ≤ 250k | ≤ 450k | ≤ 1.2M |
+| Shadow map (sun, near cascade only) | none (blob shadows) | none for world, 1024 for dragons only | 2048 |
 | Post-processing | none (tone-map in material) | one combined pass: FXAA + colour grade + vignette | + half-res bloom |
-| Max particles alive | 800 | 2,000 | 4,000 |
-| Dragon LOD distances (LOD0/LOD1/LOD2) | 30/90/250 m | 50/150/400 m | 80/220/600 m |
-| Prop draw distance | 600 m | 1,000 m | 1,500 m |
+| Max particles alive | 600 | 1,200 | 3,000 |
+| Dragon LOD distances (LOD0/LOD1/LOD2) | 25/70/200 m | 40/120/320 m | 80/220/600 m |
+| Prop draw distance | 500 m | 800 m | 1,500 m |
 | Cloud billboard layers | 1 | 2 | 3 |
-| Texture VRAM (KTX2) | ≤ 256 MB | ≤ 400 MB | ≤ 600 MB |
+| Max texture size (mips skipped below this) | 512² | 1024² | 2048² |
+| Texture VRAM (KTX2) | ≤ 180 MB | ≤ 300 MB | ≤ 600 MB |
 | Audio voices | 16 | 24 | 32 |
+
+The upscale from a reduced render scale must look intentional. Use the FXAA pass and a light sharpen in the
+combined post pass, and render the UI at full resolution as HTML, so text stays crisp at any render scale.
 
 **Never in gameplay:** SSAO, SSR, real-time depth of field, more than one shadow-casting light, dynamic point
 lights, full-resolution bloom, or a transparent full-screen effect stacked on another.
@@ -62,9 +68,14 @@ lights, full-resolution bloom, or a transparent full-screen effect stacked on an
   High. Large transparent sprites are capped and sorted.
 - **No hitches.** Shaders are precompiled with `renderer.compileAsync` during the loading screen, textures are
   uploaded before the match, and effect objects are pooled.
-- **Host specifics.** The host's sim is light (≈10 dragons, simple shapes and a BVH raycast against terrain).
-  If profiling says so, the sim moves into a Web Worker in Phase 6. That's possible because `src/sim` has no
-  DOM or three.js scene dependency.
+- **Host specifics.** The host's sim is light (≈10 dragons, simple shapes and a BVH raycast against terrain),
+  but a U-series chip has only 2 performance cores, and the render loop, WebRTC and the browser all compete for
+  them. So the **host sim + net layer is designed to run in a Web Worker from the start** (Phase 2 decides
+  after a measurement, Phase 3 at the latest). This is possible because `src/sim` has no DOM or three.js scene
+  dependency.
+- **Thermal headroom.** A U-series laptop that holds 60 fps for 1 minute may drop after 8 minutes once it heats
+  up. The dynamic resolution scaler absorbs most of that, and gates are measured after a 10-minute warm-up.
+  Optionally, a "cap at 30/45 fps" setting saves battery and heat.
 
 ## Automatic quality pick
 
@@ -78,8 +89,8 @@ The player can always override the choice in Settings.
    JS heap, render scale, and on the host the sim ms and network KB/s.
 2. `?bench` flies a fixed camera path through the busiest part of the map with 10 bot dragons fighting, for 60 s,
    and prints a summary (avg fps, 1 % low, max frame ms) to copy into the handoff file.
-3. **Pass:** Medium on an H-series laptop holds an **average ≥ 60 fps with 1 % lows ≥ 45 fps**, and Low on a
-   U-series laptop holds an average ≥ 50 fps, **while that laptop is the host of a 5v5**.
+3. **Pass:** on a **U-series laptop that is hosting a 5v5**, after a **10-minute warm-up**, Medium holds an
+   **average ≥ 60 fps with 1 % lows ≥ 45 fps**, and Low holds an average ≥ 60 fps with 1 % lows ≥ 50 fps.
 
 ## Laptop setup for testing and play (do this on every machine)
 

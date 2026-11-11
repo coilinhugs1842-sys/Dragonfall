@@ -15,3 +15,6 @@
   STYLE FORMULA from `docs/ART_DIRECTION.md` byte-for-byte. Log every job in `art-source/LOG.md`.
   Higgsfield jobs cost credits: confirm batches with the user before running them.
 - Blender is at `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe` (not on PATH).
+  KTX-Software is in `C:\Program Files\KTX-Software\bin`, and ffmpeg was installed via winget. Both are on PATH in
+  new shells.
+- Target laptops are **U-series** Core Ultra 5. When in doubt, choose the cheaper technique.

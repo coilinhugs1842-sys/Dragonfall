@@ -37,8 +37,10 @@ each client.
 
 ## Where players load the game from
 
-- **Default:** deploy the static build (`npm run build` → `dist/`) to a free HTTPS static host (Cloudflare Pages,
-  Netlify or GitHub Pages). Everyone opens the same URL. HTTPS avoids browser secure-context problems.
+- **Default:** deploy the static build (`npm run build` → `dist/`) to a free HTTPS static host. The repo goes to
+  GitHub, so the plan is **GitHub Pages via a GitHub Actions workflow** that checks out with `lfs: true`. (A plain
+  branch deploy would serve LFS pointer files instead of the assets.) Cloudflare Pages is the alternative.
+  Everyone opens the same URL. HTTPS avoids browser secure-context problems.
 - **LAN fallback:** the host runs `npm run preview` and the others open `http://<host-ip>:4173`. Phase 2 must
   verify that WebRTC and everything else we use works from a plain-HTTP LAN origin in Chrome and Edge. If it
   doesn't, we switch the LAN fallback to HTTPS with `@vitejs/plugin-basic-ssl` (players accept a self-signed

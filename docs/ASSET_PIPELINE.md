@@ -35,8 +35,10 @@ public/assets/              optimized runtime assets only, loaded by the game
 | Blender 5.2 | installed at `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe` | rigging, LODs, cleanup |
 | Python 3.13 | installed | texture post-process scripts from the skill |
 | `@gltf-transform/cli` | in devDependencies | optimize/compress GLB |
-| KTX-Software (`ktx` CLI) | **not installed** | KTX2 texture compression used by gltf-transform |
-| ffmpeg | **not installed** | audio normalising and conversion to .ogg |
+| KTX-Software 4.4.2 (`ktx`, `toktx`) | installed at `C:\Program Files\KTX-Software\bin` | KTX2 texture compression used by gltf-transform |
+| ffmpeg 9.0.2 | installed via winget (`ffmpeg` on PATH in new shells) | audio normalising, .ogg conversion, video frames |
+
+New terminals pick up both on PATH. A shell that was open before the install needs the full paths, or a restart.
 
 ## 1. Style gate (once)
 
@@ -48,16 +50,16 @@ The user approves the STYLE FORMULA in `ART_DIRECTION.md`. Claude then generates
 1. **Concept:** 2–4 images with the formula + the class description + `three-quarter isometric view, pure flat
    white background, no shadow, no ground`. Pick the best. Optionally add a side view for better reconstruction.
 2. **Image → 3D:** `image_to_3d` (or `multi_image_to_3d` with several views) with `should_texture true`. Ask for
-   the low-poly / target polycount option (about 10k).
+   the low-poly / target polycount option (about 8k).
 3. **Rig + animation:** a dragon isn't a biped, so automatic rigging will likely fail with "pose estimation
    failed". Use the **procedural branch** from `game-procedural-animation`:
    `proc_rig_dragon.py` → `proc_weights.py` → `proc_anim_dragon.py` in headless Blender. Clips: `glide`, `flap`,
    `boost`, `dive`, `bank_l`, `bank_r`, `hover`, `roar`, `land`, `takeoff`, `hit`, `death_fall`. Gameplay
    blends them in `src/dragons`.
-4. **LODs:** decimate in Blender to about 10k / 4k / 1.2k triangles. Export one GLB with `LOD0..2` nodes.
+4. **LODs:** decimate in Blender to about 8k / 3k / 1k triangles. Export one GLB with `LOD0..2` nodes.
 5. **Tint slots:** split the material slots `Hide`, `Membrane`, `Runes` so runtime team tinting works.
 6. **Optimize:** `gltf-transform optimize in.glb out.glb --compress meshopt --texture-compress ktx2`, then
-   `npm run assets:inspect -- out.glb` and check the budget (≤ 2.5 MB per dragon, textures ≤ 1024²).
+   `npm run assets:inspect -- out.glb` and check the budget (≤ 2 MB per dragon, textures ≤ 1024²).
 7. **Visual check:** load it in the dev viewer (`?viewer=dragon:<class>`). Check scale (wingspan about 14 m),
    forward axis (+Z), clip names, and that the wings deform cleanly.
 
@@ -93,7 +95,7 @@ are always **real-time**, never video files, so they react to the actual players
 
 | Asset | Triangles | Textures | File |
 | --- | --- | --- | --- |
-| Dragon (per class) | 10k / 4k / 1.2k | ≤ 1024², 3 slots | ≤ 2.5 MB |
+| Dragon (per class) | 8k / 3k / 1k | ≤ 1024², 3 slots | ≤ 2 MB |
 | Hero rock | 8k / 3k / 800 | shared tileables | ≤ 1 MB |
 | Prop | ≤ 3k | shared atlas | ≤ 300 KB |
 | Sky panorama | — | 4096×2048 KTX2 | ≤ 6 MB |

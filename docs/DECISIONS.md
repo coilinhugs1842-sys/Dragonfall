@@ -30,6 +30,20 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
   uses self-signed HTTPS.
 - Phase 2: does PeerJS 1.5 give a truly unreliable channel, or do we open one on the raw `RTCPeerConnection`?
 - Phase 4: which Higgsfield 3D model settings give the best dragon meshes. Note the finding here.
-- Before Phase 4: the user shares screenshots of the Higgsfield showcase game so our look is checked to be
-  different.
-- Ask the user: which Core Ultra 5 model (U or H series) each laptop has.
+
+## 2026-11-10: target hardware, reference review, GitHub
+
+10. **The laptops are U-series Core Ultra 5 (4 Xe cores, 15 W).** Medium is sized so it holds 60 fps on them,
+    with tighter budgets (see `PERFORMANCE.md`). Dragons are ≤ 8k triangles. Gates run after a 10-minute
+    warm-up. The host sim is planned for a Web Worker (A-26). Revisit only if the hardware changes.
+11. **Reference game reviewed and differences written down** in `ART_DIRECTION.md` ("How we differ"). The video
+    was deleted afterwards. Reference material goes in `/reference/`, which is git-ignored and never pushed.
+12. **The repo will be pushed to GitHub.** Consequences:
+    - Binary assets stay in Git LFS. GitHub's free LFS storage and bandwidth are limited, so keep raw
+      generations lean, and before each push check `git lfs ls-files -s` against the account's current quota.
+    - **GitHub Pages does not serve LFS files** from a plain branch deploy, only pointer files. Deploy with a
+      GitHub Actions workflow that checks out with `lfs: true` and publishes `dist/`, or use Cloudflare Pages.
+    - Never commit secrets. TURN credentials, if we ever use them, go in a git-ignored `.env`.
+    - The git author for commits is currently `aman037 <aman037@example.com>` (global git config). To link commits
+      to a GitHub account, set `git config user.email` to the account's email or its GitHub noreply address
+      before pushing.

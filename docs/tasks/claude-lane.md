@@ -4,7 +4,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked (say why 
 Only Claude edits this file. "Needs" lists what must exist first.
 
 ## Phase 0: Scaffold (solo; Cursor waits)
-- [ ] A-01 `npm install`, `vite.config.ts` (meshopt/KTX2 transcoder files copied to `public/`), `index.html`, `src/main.ts`
+- [ ] A-01 (`npm install` already done in `D:\Dragonfall`) `vite.config.ts` (meshopt/KTX2 transcoder files copied to `public/`), `index.html`, `src/main.ts`
 - [ ] A-02 `src/shared` contracts: `InputFrame`, `WorldView`, `GameEvents`, `UiState`/`UiIntent`, `QualityPreset` table, manifests, constants, tuning tables
 - [ ] A-03 Fixed 30 Hz sim loop + render interpolation alpha; App state machine skeleton (title/lobby/match/results)
 - [ ] A-04 `src/dev`: perf HUD (`?perf`, stats-gl + renderer.info + heap), lil-gui (`?debug`)
@@ -24,6 +24,7 @@ Only Claude edits this file. "Needs" lists what must exist first.
 - [ ] A-23 Snapshots 20 Hz, interpolation buffer, client prediction + reconciliation
 - [ ] A-24 `dev/netsim` latency/jitter/loss + `?bots=N` net-bots
 - [ ] A-25 Lobby logic: teams 1–5 per side, uneven toggle, move/auto-balance/shuffle/lock, class pick, ready, kick, start
+- [ ] A-26 Measure host main-thread cost on a U-series laptop with `?bots=9`; move host sim + snapshot encoding into a Web Worker (decision recorded in DECISIONS)
 
 ## Phase 3: Combat + MVP modes
 - [ ] A-30 Health, damage, takedowns, respawn + spawn protection, GameEvents
@@ -34,7 +35,7 @@ Only Claude edits this file. "Needs" lists what must exist first.
 
 ## Phase 4: Art pass (generation needs user OK per batch)
 - [ ] A-40 Style gate: user approves STYLE FORMULA; 3 mood-board images
-- [ ] A-41 Install KTX-Software + ffmpeg (user approves); `tools/` wrappers for optimize + audio normalise
+- [ ] A-41 `tools/` wrappers for optimize (gltf-transform + KTX2) and audio normalise (ffmpeg). KTX-Software and ffmpeg are already installed
 - [ ] A-42 Dragons ×4: concept → 3D → procedural rig + clips → LODs → optimize → manifest
 - [ ] A-43 Shattered Spires: hero rocks, props, tileable textures, sky panorama → optimize → manifest
 - [ ] A-44 Audio: SFX set, ambience, lobby + match music, stings → normalise → manifest
@@ -44,10 +45,10 @@ Only Claude edits this file. "Needs" lists what must exist first.
 - [ ] A-51 Death cam data (killer id, last positions), MVP/stat calculation for podium
 
 ## Phase 6: Scale + content
-- [ ] A-60 5v5 load tests (real laptops + bots), bandwidth + host CPU profiling; sim → Web Worker if needed
+- [ ] A-60 5v5 load tests (real laptops + bots) after a 10-minute warm-up on the U-series host, bandwidth + host CPU profiling
 - [ ] A-61 Ember Relay mode; Emberfall Caldera map assets + colliders
 - [ ] A-62 Reconnect within 30 s mid-match; spectators
 
 ## Phase 7: Ship
-- [ ] A-70 Deploy to HTTPS static host; LAN mode (`peer:lan`) guide; README hosting guide
+- [ ] A-70 GitHub: check LFS usage vs quota, push; deploy via GitHub Actions → Pages (checkout with `lfs: true`) or Cloudflare Pages; LAN mode (`peer:lan`) guide; README hosting guide
 - [ ] A-71 Trailer from captures (Higgsfield video, user OK)

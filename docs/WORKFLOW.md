@@ -20,8 +20,8 @@ conflict.
 2. **Open the Claude lane:** either keep using Claude Code in a terminal in `D:\Dragonfall`, **or** (recommended)
    open a *second* Cursor window on `D:\Dragonfall`, open its terminal (Ctrl+`), and run `claude`. Inside Cursor,
    Claude's edits show up as diffs in the editor. If it doesn't connect automatically, type `/ide`.
-3. **Install dependencies:** Claude runs `npm install` in `D:\Dragonfall` during Phase 0. After you sync Cursor
-   for the first time, run `npm install` in `D:\Dragonfall-cursor` too (in Cursor's terminal).
+3. **Install dependencies:** already done in both folders. If `package.json` changes later, run `npm install` again
+   in whichever folder needs it.
 4. **Optional:** give Cursor the Higgsfield skills as well:
    `npx skills add higgsfield-ai/skills -g -a cursor`. Asset generation is Claude's job, so this is optional.
 
@@ -61,6 +61,20 @@ The other laptops don't need the code, only a browser.
   works over plain HTTP on LAN. If it doesn't, we switch to HTTPS and you click through a certificate warning once
   per laptop.)
 - **For real play:** the Phase 7 deploy gives everyone one HTTPS URL.
+
+## Pushing to GitHub (when you're ready)
+
+1. Create an **empty** repo on GitHub, with no README or license, so the first push is clean.
+2. Optional: so the commits show up as yours, run this in `D:\Dragonfall`:
+   `git config user.email "<your GitHub email or noreply address>"`
+3. In `D:\Dragonfall`:
+   ```
+   git remote add origin https://github.com/<you>/dragonfall.git
+   git push -u origin main lane/cursor
+   ```
+   LFS files upload automatically. Both branches are pushed, so Cursor's lane is backed up too.
+4. After that, `git push` from either folder pushes that folder's branch. You can also ask Claude to push.
+5. Reference footage from other games stays in `/reference/` (git-ignored). Never push it.
 
 ## Rules that keep this smooth
 
