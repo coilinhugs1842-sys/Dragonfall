@@ -42,6 +42,7 @@ import {
   createSim,
   damageDragon,
   maxFlightSpeed,
+  moveScaleOf,
   minFlightSpeed,
   secondsToTicks,
   setDragonVelocity,
@@ -85,6 +86,8 @@ function makeRig(options: RigOptions = {}): Rig {
     matchTuning: { ...MATCH_TUNING, spawnProtectionS: options.spawnProtectionS ?? 0 },
     ...(options.collisionWorld ? { collisionWorld: options.collisionWorld } : {}),
   });
+  // Flight tests watch the death fall to its end: nobody comes back.
+  sim.respawnPolicy.enabled = false;
   sim.spawnDragon(0, TEAM_EMBER, options.classId ?? 'tempest', SPAWN, options.yaw ?? 0);
   const input = createInputFrame();
   const inputs = [input];
@@ -130,7 +133,10 @@ function expectSane(dragon: DragonState, flight: FlightTuning, label: string): v
   const cls = CLASS_TUNING[dragon.classId];
   const q = dragon.orientation;
   expect(Math.hypot(q.x, q.y, q.z, q.w), `${label}: |orientation|`).toBeCloseTo(1, 9);
-  expect(dragon.speed, `${label}: speed`).toBeLessThanOrEqual(maxFlightSpeed(flight, cls) + 1e-9);
+  // Haste (afterburn) lifts the cap, a slow lowers it.
+  expect(dragon.speed, `${label}: speed`).toBeLessThanOrEqual(
+    maxFlightSpeed(flight, cls) * Math.max(1, moveScaleOf(dragon)) + 1e-9,
+  );
   if (has(dragon, DRAGON_FLAG_ALIVE)) {
     expect(dragon.speed, `${label}: speed`).toBeGreaterThanOrEqual(
       minFlightSpeed(flight, cls) - 1e-9,
@@ -949,6 +955,8 @@ function fillAdversarial(frame: InputFrame, random: () => number): void {
   frame.steerX = random() < 0.1 ? pick() : random() * 4 - 2;
   frame.steerY = random() < 0.1 ? pick() : random() * 4 - 2;
   frame.buttons = random() < 0.05 ? pick() : Math.floor(random() * 0x1ffff) - 0xff;
+  frame.aimYaw = random() < 0.1 ? pick() : random() * 20 - 10;
+  frame.aimPitch = random() < 0.1 ? pick() : random() * 8 - 4;
 }
 
 describe('adversarial inputs', () => {
@@ -957,6 +965,8 @@ describe('adversarial inputs', () => {
     const sim = createSim({ flightTuning: flight });
     const random = lcg(0xd4a60f);
     const frames: InputFrame[] = [];
+    // The victim below has to stay down for its death fall to be checked.
+    sim.respawnPolicy.enabled = false;
     const inputs: (InputFrame | undefined)[] = [];
     DRAGON_CLASS_IDS.forEach((classId, id) => {
       sim.spawnDragon(id, id % 2 === 0 ? TEAM_EMBER : TEAM_FROST, classId, SPAWN, id);

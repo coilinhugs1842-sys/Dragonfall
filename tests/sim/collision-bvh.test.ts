@@ -246,3 +246,62 @@ describe('TerrainBvh.raycast', () => {
     expect(run()).toEqual(run());
   });
 });
+
+describe('TerrainBvh.solidDepth', () => {
+  const solid = (x: number, y: number, z: number, sx: number, sy: number, sz: number) =>
+    ({
+      kind: 'box',
+      role: 'stone',
+      position: { x, y, z },
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      size: { x: sx, y: sy, z: sz },
+    }) as const;
+
+  it('counts the solids a point is in: overlapping, stacked and apart', () => {
+    // A on the origin; B overlaps A's top by 10 m; C sits exactly on B (a shared face).
+    const built = buildMapTriangles({
+      size: 2000,
+      chunkSize: 250,
+      colliders: { stormCenter: { x: 0, y: 0, z: 0 } },
+      solids: [
+        solid(0, 50, 0, 40, 100, 40),
+        solid(0, 140, 0, 40, 100, 40),
+        solid(0, 240, 0, 40, 100, 40),
+      ],
+    });
+    const stack = new TerrainBvh(built.positions, built.indices);
+    expect(stack.solidDepth(0, 50, 0)).toBe(1);
+    expect(stack.solidDepth(3, 95, -7)).toBe(2);
+    // Just under B's bottom face, inside A only: the closest face looks at the point.
+    expect(stack.solidDepth(3, 88, -7)).toBe(1);
+    expect(stack.solidDepth(0, 150, 0)).toBe(1);
+    // Either side of the face B and C share.
+    expect(stack.solidDepth(5, 189.5, 5)).toBe(1);
+    expect(stack.solidDepth(5, 190.5, 5)).toBe(1);
+    expect(stack.solidDepth(0, 291, 0)).toBe(0);
+    expect(stack.solidDepth(25, 50, 0)).toBe(0);
+    expect(stack.solidDepth(0, -5, 0)).toBe(0);
+    expect(stack.solidDepth(500, 50, 500)).toBe(0);
+  });
+
+  it('agrees with "every way out is blocked" on the greybox map, and is 0 in open sky', () => {
+    const random = createSeededRandom(31);
+    let inside = 0;
+    for (let i = 0; i < 4000; i++) {
+      const x = (random() - 0.5) * 1600;
+      const y = random() * 700;
+      const z = (random() - 0.5) * 1600;
+      const depth = terrain.solidDepth(x, y, z);
+      expect(depth).toBeGreaterThanOrEqual(0);
+      // A point with a free line straight up or down is not inside a closed solid.
+      const open =
+        terrain.raycast(x, y, z, 0, 1, 0, 1e5) < 0 || terrain.raycast(x, y, z, 0, -1, 0, 1e5) < 0;
+      if (open) expect(depth, `${x}, ${y}, ${z}`).toBe(0);
+      if (depth > 0) inside++;
+    }
+    expect(inside).toBeGreaterThan(20);
+    expect(terrain.solidDepth(0, 5000, 0)).toBe(0);
+  });
+});

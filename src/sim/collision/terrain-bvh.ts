@@ -26,6 +26,7 @@
 import { BufferAttribute, BufferGeometry } from 'three';
 import { MeshBVH, SAH } from 'three-mesh-bvh';
 import type { MutableVec3 } from '../../shared';
+import type { TerrainRay } from '../collision-world';
 
 const UINT32_PER_NODE = 8;
 const LEAF_FLAG = 0xffff;
@@ -125,6 +126,15 @@ export class TerrainBvh {
   /** Triangle index (this tree's order) of the last `closestPoint` / `raycast` result. */
   closestTriangle = -1;
   hitTriangle = -1;
+
+  // Arguments of the ray being cast (see `raycastRay`).
+  private rayOx = 0;
+  private rayOy = 0;
+  private rayOz = 0;
+  private rayDx = 0;
+  private rayDy = 0;
+  private rayDz = 1;
+  private rayMax = 0;
 
   private readonly f32: Float32Array;
   private readonly u16: Uint16Array;
@@ -353,6 +363,39 @@ export class TerrainBvh {
     directionZ: number,
     maxDistance: number,
   ): number {
+    this.rayOx = ox;
+    this.rayOy = oy;
+    this.rayOz = oz;
+    this.rayDx = directionX;
+    this.rayDy = directionY;
+    this.rayDz = directionZ;
+    this.rayMax = maxDistance;
+    return this.castStoredRay();
+  }
+
+  /**
+   * `raycast` with its arguments in one object, for callers in the tick: floats handed to a call
+   * that is not inlined are boxed, fields of a reused object are not.
+   */
+  raycastRay(ray: Readonly<TerrainRay>): number {
+    this.rayOx = ray.originX;
+    this.rayOy = ray.originY;
+    this.rayOz = ray.originZ;
+    this.rayDx = ray.directionX;
+    this.rayDy = ray.directionY;
+    this.rayDz = ray.directionZ;
+    this.rayMax = ray.maxDistance;
+    return this.castStoredRay();
+  }
+
+  private castStoredRay(): number {
+    const ox = this.rayOx;
+    const oy = this.rayOy;
+    const oz = this.rayOz;
+    const directionX = this.rayDx;
+    const directionY = this.rayDy;
+    const directionZ = this.rayDz;
+    const maxDistance = this.rayMax;
     if (this.triangleCount === 0 || !(maxDistance > 0)) return -1;
     const length = Math.sqrt(
       directionX * directionX + directionY * directionY + directionZ * directionZ,
@@ -451,6 +494,96 @@ export class TerrainBvh {
     if (found < 0) return -1;
     this.hitTriangle = found;
     return best;
+  }
+
+  /**
+   * How many solids the point is inside (0 = open air). The triangles are closed volumes wound
+   * counter-clockwise from outside (`buildMapTriangles`), so along any ray to infinity the
+   * faces crossed from behind minus the faces crossed from the front is that number, whether
+   * the solids overlap, touch or share faces: unlike "is the point behind the closest face",
+   * which a face of another solid inside the rock gets wrong.
+   *
+   * A ray through an edge two triangles share would count it twice, so three skew rays vote
+   * (the median). Three unpruned traversals: for the rare question, not for every tick.
+   */
+  solidDepth(px: number, py: number, pz: number): number {
+    if (this.triangleCount === 0) return 0;
+    this.rayOx = px;
+    this.rayOy = py;
+    this.rayOz = pz;
+    const a = this.signedCrossings(0.3015, 0.9045, 0.3015);
+    const b = this.signedCrossings(-0.5298, 0.7205, 0.4472);
+    if (a === b) return a;
+    const c = this.signedCrossings(0.1874, 0.6325, -0.7515);
+    return c === a || c === b ? c : a + b + c - Math.max(a, b, c) - Math.min(a, b, c);
+  }
+
+  /** Back-face minus front-face crossings of the ray from `rayO*` along the unit (dx, dy, dz). */
+  private signedCrossings(dx: number, dy: number, dz: number): number {
+    const ox = this.rayOx;
+    const oy = this.rayOy;
+    const oz = this.rayOz;
+    const ix = 1 / dx;
+    const iy = 1 / dy;
+    const iz = 1 / dz;
+    const f32 = this.f32;
+    const u16 = this.u16;
+    const u32 = this.u32;
+    const tris = this.tris;
+    const stack = this.stack;
+
+    let count = 0;
+    if (rayBoxEntry(f32, 0, ox, oy, oz, ix, iy, iz, Infinity) < 0) return 0;
+    stack[0] = 0;
+    let size = 1;
+    while (size > 0) {
+      const node = stack[--size]!;
+      const node16 = node * 2;
+      if (u16[node16 + 15] === LEAF_FLAG) {
+        const first = u32[node + 6]!;
+        const end = first + u16[node16 + 14]!;
+        for (let t = first; t < end; t++) {
+          // Moeller-Trumbore as in `castStoredRay`, without the edge slack: a crossing on a
+          // shared edge must not be counted for both of its triangles more often than chance.
+          const o = t * TRI_STRIDE;
+          const ax = tris[o]!;
+          const ay = tris[o + 1]!;
+          const az = tris[o + 2]!;
+          const e1x = tris[o + 3]! - ax;
+          const e1y = tris[o + 4]! - ay;
+          const e1z = tris[o + 5]! - az;
+          const e2x = tris[o + 6]! - ax;
+          const e2y = tris[o + 7]! - ay;
+          const e2z = tris[o + 8]! - az;
+          const px = dy * e2z - dz * e2y;
+          const py = dz * e2x - dx * e2z;
+          const pz = dx * e2y - dy * e2x;
+          const det = e1x * px + e1y * py + e1z * pz;
+          if (det > -RAY_PARALLEL_EPSILON && det < RAY_PARALLEL_EPSILON) continue;
+          const inverse = 1 / det;
+          const sx = ox - ax;
+          const sy = oy - ay;
+          const sz = oz - az;
+          const u = (sx * px + sy * py + sz * pz) * inverse;
+          if (!(u >= 0 && u <= 1)) continue;
+          const qx = sy * e1z - sz * e1y;
+          const qy = sz * e1x - sx * e1z;
+          const qz = sx * e1y - sy * e1x;
+          const v = (dx * qx + dy * qy + dz * qz) * inverse;
+          if (!(v >= 0 && u + v <= 1)) continue;
+          const distance = (e2x * qx + e2y * qy + e2z * qz) * inverse;
+          if (!(distance > 0)) continue;
+          // det = -(direction . outward normal): negative = leaving a solid through this face.
+          count += det < 0 ? 1 : -1;
+        }
+      } else {
+        const left = node + UINT32_PER_NODE;
+        const right = node + u32[node + 6]! * UINT32_PER_NODE;
+        if (rayBoxEntry(f32, left, ox, oy, oz, ix, iy, iz, Infinity) >= 0) stack[size++] = left;
+        if (rayBoxEntry(f32, right, ox, oy, oz, ix, iy, iz, Infinity) >= 0) stack[size++] = right;
+      }
+    }
+    return count;
   }
 
   /**

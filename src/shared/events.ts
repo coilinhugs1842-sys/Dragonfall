@@ -4,17 +4,19 @@
  * Continuous state (positions, health) belongs in WorldView, not here.
  */
 
+import type { StatusKind } from './abilities';
 import type { AbilitySlot, DragonClassId } from './classes';
 import type { PlayerId, TeamId } from './constants';
 import { NO_PLAYER, TEAM_EMBER } from './constants';
 import type { MatchPhase, MatchWinner } from './match';
 import type { MutableVec3, Vec3 } from './math-types';
 import { copyVec3, createVec3 } from './math-types';
+import type { ProjectileKind } from './world-view';
 
 /**
  * What dealt the damage. Ability damage is identified by its slot (the attacker's class gives
- * the ability), so the list starts with ABILITY_SLOTS in order. More sources are TBD in T-3.x.
- * Index = `u8` wire value. Append only.
+ * the ability), so the list starts with ABILITY_SLOTS in order; damage over time and zones count
+ * as the slot that caused them. Index = `u8` wire value. Append only.
  */
 export const DAMAGE_SOURCES = [
   'primary',
@@ -103,8 +105,52 @@ export interface MatchPhaseEvent {
   readonly winner: MatchWinner | null;
 }
 
+/** Someone who hurt the victim shortly before a takedown. Follows its `takedown` event. */
+export interface AssistEvent {
+  readonly type: 'assist';
+  readonly tick: number;
+  readonly assisterId: PlayerId;
+  /** NO_PLAYER when the environment got the takedown. */
+  readonly killerId: PlayerId;
+  readonly victimId: PlayerId;
+}
+
+/**
+ * A timed effect landed on a dragon (not sent again while it is merely refreshed). Continuous
+ * display belongs to the DRAGON_FLAG_* bits; this is the moment it starts.
+ */
+export interface StatusAppliedEvent {
+  readonly type: 'statusApplied';
+  readonly tick: number;
+  readonly targetId: PlayerId;
+  /** Who caused it; the target itself for its own buffs. */
+  readonly sourceId: PlayerId;
+  readonly status: StatusKind;
+  readonly durationS: number;
+  readonly position: Vec3;
+}
+
+/** A projectile ended against something: a blast, a mine arming, a bolt stopped by a dragon. */
+export interface ImpactEvent {
+  readonly type: 'impact';
+  readonly tick: number;
+  readonly projectile: ProjectileKind;
+  readonly ownerId: PlayerId;
+  /** The dragon it hit directly, or NO_PLAYER (terrain, end of flight). */
+  readonly targetId: PlayerId;
+  readonly position: Vec3;
+}
+
 export type GameEvent =
-  HitEvent | TakedownEvent | SpawnEvent | AbilityCastEvent | ObjectiveEvent | MatchPhaseEvent;
+  | HitEvent
+  | TakedownEvent
+  | SpawnEvent
+  | AbilityCastEvent
+  | ObjectiveEvent
+  | MatchPhaseEvent
+  | AssistEvent
+  | StatusAppliedEvent
+  | ImpactEvent;
 
 export type GameEventType = GameEvent['type'];
 export type GameEventOf<T extends GameEventType> = Extract<GameEvent, { type: T }>;
@@ -142,6 +188,13 @@ export interface GameEventBus extends GameEventSource, GameEventSink {
    * current event still reaches its remaining handlers and later emits are delivered.
    */
   clear(): void;
+  /**
+   * Drops the queued events that are not of type `keep`; those stay queued, in order. For a
+   * page whose frames stopped for a while (a hidden tab): the casts and hits of that time must
+   * not all be shown at once, but the match phases still have to be heard. Not for handlers:
+   * during a flush it does nothing.
+   */
+  dropExcept(keep: GameEventType): void;
   readonly pending: number;
 }
 
@@ -234,6 +287,39 @@ function createMatchPhaseSlot(): EventSlot<MatchPhaseEvent> {
   return { type: 'matchPhase', tick: 0, phase: 'lobby', round: 1, winner: null };
 }
 
+function createAssistSlot(): EventSlot<AssistEvent> {
+  return {
+    type: 'assist',
+    tick: 0,
+    assisterId: NO_PLAYER,
+    killerId: NO_PLAYER,
+    victimId: NO_PLAYER,
+  };
+}
+
+function createStatusAppliedSlot(): EventSlot<StatusAppliedEvent> {
+  return {
+    type: 'statusApplied',
+    tick: 0,
+    targetId: NO_PLAYER,
+    sourceId: NO_PLAYER,
+    status: 'slow',
+    durationS: 0,
+    position: createVec3(),
+  };
+}
+
+function createImpactSlot(): EventSlot<ImpactEvent> {
+  return {
+    type: 'impact',
+    tick: 0,
+    projectile: 'fireBolt',
+    ownerId: NO_PLAYER,
+    targetId: NO_PLAYER,
+    position: createVec3(),
+  };
+}
+
 /**
  * The bus owns the storage: `emit` copies the event into a pooled slot of its type and `flush`
  * hands those slots to the handlers, then marks them all free. So emitting allocates only while
@@ -244,25 +330,34 @@ function createMatchPhaseSlot(): EventSlot<MatchPhaseEvent> {
  */
 export function createGameEventBus(): GameEventBus {
   const handlers = new Map<GameEventType, readonly AnyHandler[]>();
+  // Only the first `queued` entries are live. The array is never shortened: `length = 0` would
+  // drop its backing store and every flush would then allocate a new one.
   const queue: GameEvent[] = [];
+  let queued = 0;
   const hits = createSlotPool<EventSlot<HitEvent>>();
   const takedowns = createSlotPool<EventSlot<TakedownEvent>>();
   const spawns = createSlotPool<EventSlot<SpawnEvent>>();
   const abilityCasts = createSlotPool<EventSlot<AbilityCastEvent>>();
   const objectives = createSlotPool<EventSlot<ObjectiveEvent>>();
   const matchPhases = createSlotPool<EventSlot<MatchPhaseEvent>>();
+  const assists = createSlotPool<EventSlot<AssistEvent>>();
+  const statuses = createSlotPool<EventSlot<StatusAppliedEvent>>();
+  const impacts = createSlotPool<EventSlot<ImpactEvent>>();
   let flushing = false;
   /** Index of the event `flush` is delivering. */
   let cursor = 0;
 
   function releaseSlots(): void {
-    queue.length = 0;
+    queued = 0;
     hits.used = 0;
     takedowns.used = 0;
     spawns.used = 0;
     abilityCasts.used = 0;
     objectives.used = 0;
     matchPhases.used = 0;
+    assists.used = 0;
+    statuses.used = 0;
+    impacts.used = 0;
   }
 
   return {
@@ -289,7 +384,7 @@ export function createGameEventBus(): GameEventBus {
           slot.source = event.source;
           slot.damage = event.damage;
           copyVec3(slot.position, event.position);
-          queue.push(slot);
+          queue[queued++] = slot;
           break;
         }
         case 'takedown': {
@@ -299,7 +394,7 @@ export function createGameEventBus(): GameEventBus {
           slot.victimId = event.victimId;
           slot.source = event.source;
           copyVec3(slot.position, event.position);
-          queue.push(slot);
+          queue[queued++] = slot;
           break;
         }
         case 'spawn': {
@@ -309,7 +404,7 @@ export function createGameEventBus(): GameEventBus {
           slot.team = event.team;
           slot.classId = event.classId;
           copyVec3(slot.position, event.position);
-          queue.push(slot);
+          queue[queued++] = slot;
           break;
         }
         case 'abilityCast': {
@@ -320,7 +415,7 @@ export function createGameEventBus(): GameEventBus {
           slot.slot = event.slot;
           copyVec3(slot.position, event.position);
           copyVec3(slot.direction, event.direction);
-          queue.push(slot);
+          queue[queued++] = slot;
           break;
         }
         case 'objective': {
@@ -330,7 +425,7 @@ export function createGameEventBus(): GameEventBus {
           slot.team = event.team;
           slot.dragonId = event.dragonId;
           copyVec3(slot.position, event.position);
-          queue.push(slot);
+          queue[queued++] = slot;
           break;
         }
         case 'matchPhase': {
@@ -339,7 +434,37 @@ export function createGameEventBus(): GameEventBus {
           slot.phase = event.phase;
           slot.round = event.round;
           slot.winner = event.winner;
-          queue.push(slot);
+          queue[queued++] = slot;
+          break;
+        }
+        case 'assist': {
+          const slot = acquireSlot(assists, createAssistSlot);
+          slot.tick = event.tick;
+          slot.assisterId = event.assisterId;
+          slot.killerId = event.killerId;
+          slot.victimId = event.victimId;
+          queue[queued++] = slot;
+          break;
+        }
+        case 'statusApplied': {
+          const slot = acquireSlot(statuses, createStatusAppliedSlot);
+          slot.tick = event.tick;
+          slot.targetId = event.targetId;
+          slot.sourceId = event.sourceId;
+          slot.status = event.status;
+          slot.durationS = event.durationS;
+          copyVec3(slot.position, event.position);
+          queue[queued++] = slot;
+          break;
+        }
+        case 'impact': {
+          const slot = acquireSlot(impacts, createImpactSlot);
+          slot.tick = event.tick;
+          slot.projectile = event.projectile;
+          slot.ownerId = event.ownerId;
+          slot.targetId = event.targetId;
+          copyVec3(slot.position, event.position);
+          queue[queued++] = slot;
           break;
         }
       }
@@ -350,8 +475,8 @@ export function createGameEventBus(): GameEventBus {
       if (flushing) return;
       flushing = true;
       try {
-        // `queue.length` is re-read each step so events emitted by handlers are delivered too.
-        for (cursor = 0; cursor < queue.length; cursor++) {
+        // `queued` is re-read each step so events emitted by handlers are delivered too.
+        for (cursor = 0; cursor < queued; cursor++) {
           const event = queue[cursor];
           if (event === undefined) continue;
           const list = handlers.get(event.type);
@@ -372,12 +497,32 @@ export function createGameEventBus(): GameEventBus {
       // From a handler: the slots stay taken until the flush ends, because the event being
       // delivered is one of them and a later emit must not overwrite it. The flush goes on with
       // whatever is emitted from here on.
-      queue.length = 0;
+      queued = 0;
       cursor = -1;
     },
 
+    dropExcept(keep: GameEventType): void {
+      if (flushing) return;
+      let kept = 0;
+      for (let i = 0; i < queued; i++) {
+        const event = queue[i];
+        if (event !== undefined && event.type === keep) queue[kept++] = event;
+      }
+      queued = kept;
+      // The kept events still live in their pool's slots; every other pool is free again.
+      if (keep !== 'hit') hits.used = 0;
+      if (keep !== 'takedown') takedowns.used = 0;
+      if (keep !== 'spawn') spawns.used = 0;
+      if (keep !== 'abilityCast') abilityCasts.used = 0;
+      if (keep !== 'objective') objectives.used = 0;
+      if (keep !== 'matchPhase') matchPhases.used = 0;
+      if (keep !== 'assist') assists.used = 0;
+      if (keep !== 'statusApplied') statuses.used = 0;
+      if (keep !== 'impact') impacts.used = 0;
+    },
+
     get pending(): number {
-      return queue.length;
+      return queued;
     },
   };
 }

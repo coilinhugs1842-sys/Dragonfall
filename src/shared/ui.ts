@@ -7,8 +7,16 @@
 
 import type { AbilitySlot, DragonClassId } from './classes';
 import type { LobbySide, PlayerId, TeamId } from './constants';
-import type { HostSettings, LobbyState, LobbySwitchSideIntent, RejectReason } from './lobby';
+import type { DamageSource } from './events';
+import type {
+  HostSettings,
+  LobbyBotIntent,
+  LobbyState,
+  LobbySwitchSideIntent,
+  RejectReason,
+} from './lobby';
 import type { MapId, MatchPhase, MatchWinner, ModeId } from './match';
+import { DEFAULT_QUALITY, QUALITY_PRESETS } from './quality';
 import type { QualityPresetId } from './quality';
 
 // --- Settings -----------------------------------------------------------------------------------
@@ -38,7 +46,36 @@ export interface SettingsState {
   /** Host name or IP of the self-hosted PeerServer; used when `signaling` is `lan`. */
   readonly lanHost: string;
   readonly turn: TurnSettings | null;
-  // Key rebinding is TBD in T-1.x (controls are "rebindable" per GAME_DESIGN.md).
+
+  // --- Settings menu (T-3.9). All optional and additive: an absent field means its default in
+  // DEFAULT_GAME_SETTINGS. `resolveSettings` fills them in; the settings store always holds the
+  // full `GameSettings`. Key bindings are not here: see `ControlsUiState`. -----------------------
+  /** false pins the render scale at the cap instead of letting it follow the frame time. */
+  readonly dynamicResolution?: boolean;
+  /**
+   * Upper bound for the render scale as a position inside the preset's own bounds: 0 = the
+   * preset's `renderScaleMin`, 1 = its `renderScaleMax` (see `renderScaleCapFor`). A fraction
+   * keeps its meaning when the preset changes.
+   */
+  readonly renderScaleCap?: number;
+  /** Vertical base FOV in degrees (SETTINGS_LIMITS.fovDeg). */
+  readonly fovDeg?: number;
+  /** 0..1 multiplier on camera shake amplitude. */
+  readonly cameraShake?: number;
+  /** Accessibility: no shake, no camera roll, smaller FOV change, no UI motion. */
+  readonly reduceMotion?: boolean;
+  /** true: one press of the boost key turns boost on, the next turns it off. */
+  readonly boostToggle?: boolean;
+  /** 0..1, for menu and HUD sounds. */
+  readonly uiVolume?: number;
+  /** Multiplier on the size of menus and HUD (SETTINGS_LIMITS.uiScale). */
+  readonly uiScale?: number;
+  /** Stronger team shapes and outlines on markers, for players who cannot tell the colours apart. */
+  readonly colorBlindMarkers?: boolean;
+  /** Show the small ping / fps chip during a match. */
+  readonly showNetChip?: boolean;
+  /** Rider name ('' = the fallback name). */
+  readonly playerName?: string;
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {
@@ -53,6 +90,103 @@ export const DEFAULT_SETTINGS: SettingsState = {
   lanHost: '',
   turn: null,
 };
+
+/** Every setting present. The settings store holds one of these. */
+export type GameSettings = Required<SettingsState>;
+
+export type QualityChoice = SettingsState['quality'];
+export type FpsCap = SettingsState['fpsCap'];
+
+export const DEFAULT_GAME_SETTINGS: GameSettings = {
+  ...DEFAULT_SETTINGS,
+  dynamicResolution: true,
+  renderScaleCap: 1,
+  fovDeg: 62,
+  cameraShake: 1,
+  reduceMotion: false,
+  boostToggle: false,
+  uiVolume: 0.8,
+  uiScale: 1,
+  colorBlindMarkers: false,
+  showNetChip: true,
+  playerName: '',
+};
+
+export interface NumberLimit {
+  readonly min: number;
+  readonly max: number;
+  /** Slider step; stored values are snapped to it. */
+  readonly step: number;
+}
+
+/** Ranges of the numeric settings: the store clamps to them, the menu builds sliders from them. */
+export const SETTINGS_LIMITS = {
+  renderScaleCap: { min: 0, max: 1, step: 0.01 },
+  fovDeg: { min: 60, max: 100, step: 1 },
+  cameraShake: { min: 0, max: 1, step: 0.05 },
+  mouseSensitivity: { min: 0.1, max: 5, step: 0.05 },
+  volume: { min: 0, max: 1, step: 0.01 },
+  uiScale: { min: 0.8, max: 1.3, step: 0.05 },
+} as const satisfies Record<string, NumberLimit>;
+
+/** In menu order: off first. */
+export const FPS_CAPS: readonly FpsCap[] = [0, 45, 30];
+export const QUALITY_CHOICES: readonly QualityChoice[] = ['auto', 'low', 'medium', 'high'];
+
+/** Longest strings the store keeps (UTF-16 code units). */
+export const MAX_LAN_HOST_LENGTH = 253;
+export const MAX_TURN_FIELD_LENGTH = 512;
+
+/** `settings` with every absent field filled from DEFAULT_GAME_SETTINGS. Allocates: not per frame. */
+export function resolveSettings(settings: SettingsState): GameSettings {
+  return { ...DEFAULT_GAME_SETTINGS, ...settings };
+}
+
+/** The preset a quality choice means right now. `auto` is Medium until the test flight (T-6.2). */
+export function effectiveQuality(choice: QualityChoice): QualityPresetId {
+  return choice === 'auto' ? DEFAULT_QUALITY : choice;
+}
+
+/** The render scale a cap fraction stands for under `presetId`, e.g. Medium at 1 = 0.85. */
+export function renderScaleCapFor(presetId: QualityPresetId, capFraction: number): number {
+  const preset = QUALITY_PRESETS[presetId];
+  const t = capFraction >= 0 ? (capFraction <= 1 ? capFraction : 1) : 0;
+  return preset.renderScaleMin + (preset.renderScaleMax - preset.renderScaleMin) * t;
+}
+
+/** Inverse of `renderScaleCapFor`, clamped to 0..1. */
+export function renderScaleCapFraction(presetId: QualityPresetId, scale: number): number {
+  const preset = QUALITY_PRESETS[presetId];
+  const span = preset.renderScaleMax - preset.renderScaleMin;
+  if (!(span > 0)) return 1;
+  const t = (scale - preset.renderScaleMin) / span;
+  return t >= 0 ? (t <= 1 ? t : 1) : 0;
+}
+
+export type SettingsTab = 'video' | 'controls' | 'audio' | 'game';
+export const SETTINGS_TABS: readonly SettingsTab[] = ['video', 'controls', 'audio', 'game'];
+
+/**
+ * A rebind table as the UI sees it: action id to key codes (`KeyboardEvent.code`, or `Mouse0`..
+ * `Mouse4`). `src/input` owns the real type; `shared` only passes it through.
+ */
+export type BindingTable = Readonly<Record<string, readonly string[]>>;
+
+/**
+ * What the Controls tab needs to draw and edit key bindings. `src/game` fills it from
+ * `src/input` (the UI cannot import that module) and applies the `settings.rebind` /
+ * `settings.unbind` / `settings.resetBindings` intents with the pure functions there.
+ */
+export interface ControlsUiState {
+  /** Action ids in display order. */
+  readonly actions: readonly string[];
+  readonly bindings: BindingTable;
+  readonly defaults: BindingTable;
+  /** Codes that cannot be bound (Escape, the OS keys). */
+  readonly reservedCodes: readonly string[];
+  /** Key slots per action (primary + alternative). */
+  readonly slotsPerAction: number;
+}
 
 // --- State --------------------------------------------------------------------------------------
 
@@ -127,6 +261,9 @@ export interface KillfeedEntry {
   readonly victimTeam: TeamId;
   /** Seconds since it happened, so the HUD can fade it out. */
   readonly ageS: number;
+  /** What dealt the final blow and the killer's class: picks the row's glyph. Absent = plain. */
+  readonly source?: DamageSource;
+  readonly killerClassId?: DragonClassId | null;
 }
 
 export interface ScoreboardRow {
@@ -139,6 +276,8 @@ export interface ScoreboardRow {
   readonly damage: number;
   readonly pingMs: number;
   readonly alive: boolean;
+  /** Absent = 0. */
+  readonly assists?: number;
 }
 
 /** The local rider's own gauges. */
@@ -159,6 +298,66 @@ export interface HudLocalState {
   readonly respawnInS: number;
   /** Death cam target, or NO_PLAYER. */
   readonly killerId: PlayerId;
+
+  // --- Combat HUD (T-3.6). All optional: an absent field draws its plain default. -------------
+  /** Full health in HP (CLASS_TUNING), for the number next to the bar. Absent = no number. */
+  readonly healthMax?: number;
+  /** The local dragon's DRAGON_FLAG_* bits: status icons (slowed, burning, veiled…). */
+  readonly flags?: number;
+  /** Per slot index (ABILITY_SLOTS order), straight from `WorldView.local`. */
+  readonly cooldownS?: readonly number[];
+  readonly charges?: readonly number[];
+  readonly maxCharges?: readonly number[];
+  /** Absent = ready when its cooldown is 0 (and the ultimate is charged). */
+  readonly ready?: readonly boolean[];
+  /** The ability's effect is running (dash window, shield up, held breath). */
+  readonly active?: readonly boolean[];
+  /** Slot index being wound up, or -1; and how far along (0..1). */
+  readonly castSlot?: number;
+  readonly castProgress?: number;
+  /**
+   * The buttons held this frame (BUTTON_* bits of the InputFrame). The HUD lights a held slot
+   * and flashes one that is pressed while not ready.
+   */
+  readonly buttons?: number;
+  /** Seconds of blindness left (Night terror): the HUD closes a dark veil in. */
+  readonly blindS?: number;
+}
+
+/** Where the HUD draws the aim reticle. Absent / null = the HUD draws none. */
+export interface HudReticleState {
+  /** `InputState.reticleX/Y`: offset from the centre in -1..1, x right, y up. */
+  readonly x: number;
+  readonly y: number;
+  /** Pointer is locked. False shows the "click to fly" prompt instead of the reticle. */
+  readonly locked: boolean;
+}
+
+/** One "you were hurt from over there" arc. A fixed pool: `ageS` past its life = unused. */
+export interface HudDamageArc {
+  /**
+   * Screen angle to the source in radians, clockwise from straight ahead (0 = ahead / top,
+   * PI/2 = right, PI = behind). `src/game` computes it from the hit position and camera yaw.
+   */
+  readonly angle: number;
+  /** 0..1: how hard the hit was (arc weight). */
+  readonly strength: number;
+  /** Seconds since the hit; the arc fades over about a second. */
+  readonly ageS: number;
+}
+
+export type HudCompassKind = 'ally' | 'objective';
+
+/** A marker on the top strip. */
+export interface HudCompassMarker {
+  readonly kind: HudCompassKind;
+  /** Team colour and shape; null for a neutral objective. */
+  readonly team: TeamId | null;
+  /** Screen angle like `HudDamageArc.angle`: 0 = dead ahead, positive = to the right. */
+  readonly angle: number;
+  readonly distanceM: number;
+  /** A downed teammate is drawn dim. */
+  readonly alive: boolean;
 }
 
 export interface HudState {
@@ -179,7 +378,40 @@ export interface HudState {
   readonly scoreboard: readonly ScoreboardRow[];
   /** True once this client may skip the intro (not on its first match). */
   readonly canSkipIntro: boolean;
+
+  // --- Combat HUD (T-3.6 / T-3.7). All optional and additive. ----------------------------------
+  /** Own scoreboard row and the lookup for "who am I riding with". Absent = NO_PLAYER. */
+  readonly localPlayerId?: PlayerId;
+  /** Live entries in `killfeed` / `scoreboard` when `src/game` reuses longer pools. */
+  readonly killfeedCount?: number;
+  readonly scoreboardCount?: number;
+  readonly reticle?: HudReticleState | null;
+  /**
+   * Counters that go up by one each time the local rider lands a hit / gets a takedown. The HUD
+   * shows a hit marker when one changes, so no event object crosses the seam.
+   */
+  readonly hitSeq?: number;
+  readonly takedownSeq?: number;
+  /** Fixed pool (HUD_DAMAGE_ARCS entries). */
+  readonly damageArcs?: readonly HudDamageArc[];
+  readonly compass?: readonly HudCompassMarker[];
+  readonly compassCount?: number;
+  /** Who won the round / match being shown in `roundEnd` / `results`; null while playing. */
+  readonly winner?: MatchWinner | null;
+  /** Rider being watched while spectating or dead; '' = free camera. */
+  readonly spectatingName?: string;
+  /** Names of people watching, for the scoreboard footer. */
+  readonly spectators?: readonly string[];
+  /** Hold-to-show scoreboard, when `src/game` owns the binding (the HUD also listens for Tab). */
+  readonly scoreboardOpen?: boolean;
+  /** Key captions per slot index (rebinding). Absent = LMB / RMB / F / R. */
+  readonly keyLabels?: readonly string[];
 }
+
+/** Pool sizes the HUD draws; `src/game` sizes its arrays to match. */
+export const HUD_DAMAGE_ARCS = 4;
+export const HUD_KILLFEED_ROWS = 5;
+export const HUD_COMPASS_MARKERS = 6;
 
 /** TBD in T-5.x (results podium): awards beyond the three named in GAME_DESIGN.md. */
 export interface ResultsState {
@@ -212,6 +444,14 @@ export interface UiState {
   readonly playerPings?: readonly number[];
   /** Match: the escape menu (resume / leave) is showing. */
   readonly pauseMenuOpen?: boolean;
+  /**
+   * Settings panel (T-3.9). When present the panel follows it: it opens when this turns true and
+   * closes when it turns false. `settingsTab` picks the tab at the moment it opens.
+   */
+  readonly settingsOpen?: boolean;
+  readonly settingsTab?: SettingsTab;
+  /** Key bindings for the Controls tab. Absent = the tab shows no rebind list. */
+  readonly controls?: ControlsUiState;
 }
 
 // --- Intents ------------------------------------------------------------------------------------
@@ -252,6 +492,8 @@ export type UiIntent =
   | { readonly type: 'host.lockTeams'; readonly locked: boolean }
   | { readonly type: 'host.kick'; readonly playerId: PlayerId }
   | { readonly type: 'host.start' }
+  /** Bot riders (T-3.10): add / remove / fill / clear, and how well they fly. Host's page only. */
+  | LobbyBotIntent
   // Match
   | { readonly type: 'match.skipIntro' }
   | { readonly type: 'match.leave' }
@@ -266,7 +508,27 @@ export type UiIntent =
   | { readonly type: 'match.resume' }
   // Settings (local; a patch so one intent covers every field)
   | { readonly type: 'settings.update'; readonly patch: Partial<SettingsState> }
-  | { readonly type: 'settings.reset' };
+  /** Reset all: every setting and every key binding back to its default. */
+  | { readonly type: 'settings.reset' }
+  /** Show the settings panel (title screen, flight menu). In a match it releases the pointer. */
+  | { readonly type: 'settings.open'; readonly tab?: SettingsTab }
+  | { readonly type: 'settings.close' }
+  /**
+   * Bind `code` to slot `slot` of `action`. The code is taken from any action that had it; with
+   * `swap` that action gets the code this slot held before (when it held one).
+   */
+  | {
+      readonly type: 'settings.rebind';
+      readonly action: string;
+      readonly slot: number;
+      readonly code: string;
+      readonly swap: boolean;
+    }
+  | { readonly type: 'settings.unbind'; readonly action: string; readonly slot: number }
+  /** One action back to its default keys, or all of them with `action: null`. */
+  | { readonly type: 'settings.resetBindings'; readonly action: string | null }
+  /** Restart the dynamic-resolution scaler so it measures the display again (DECISIONS 16). */
+  | { readonly type: 'settings.redetectDisplay' };
 
 export type UiIntentType = UiIntent['type'];
 export type UiIntentOf<T extends UiIntentType> = Extract<UiIntent, { type: T }>;

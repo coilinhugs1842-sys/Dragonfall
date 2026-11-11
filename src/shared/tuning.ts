@@ -181,8 +181,12 @@ export const FLIGHT_TUNING: FlightTuning = {
   terrainLethalSpeed: 85, // PLACEHOLDER (T-1.7)
 };
 
-// --- Classes (TBD in T-3.x: combat fills in ability numbers) ------------------------------------
+// --- Classes -------------------------------------------------------------------------------------
+//
+// The ability numbers are NOT here: see ABILITY_TABLE in ./abilities.ts (T-3.2). `abilities`
+// below is the Phase 0 placeholder, kept only so older code that reads it still compiles.
 
+/** @deprecated Use `AbilityDef` and ABILITY_TABLE (./abilities.ts). */
 export interface AbilityTuning {
   cooldownS: number;
   damage: number;
@@ -194,8 +198,13 @@ export interface ClassTuning {
   speedScale: number;
   /** Extra multiplier on top speed while diving (Wraith is "fast in dives"). */
   diveSpeedScale: number;
-  /** Metres. Radius of the hit sphere; capsule shapes are TBD in T-3.x. */
+  /**
+   * Metres. Radius of the sphere that collides with terrain. Abilities hit a larger sphere:
+   * this times COMBAT_TUNING.hitRadiusScale (a sphere, not a capsule: one test per target, and
+   * generous enough for a body that is longer than it is wide).
+   */
   hitRadius: number;
+  /** @deprecated Placeholder; the real numbers are in ABILITY_TABLE (./abilities.ts). */
   abilities: Record<AbilitySlot, AbilityTuning>;
 }
 
@@ -211,8 +220,8 @@ function placeholderAbilities(): Record<AbilitySlot, AbilityTuning> {
 
 /**
  * The doc gives only relative HP and speed (Talon: low / fastest, Bastion: high / slow,
- * Tempest: medium / medium, Wraith: low-med / fast in dives). Every number is a PLACEHOLDER
- * that keeps that ordering.
+ * Tempest: medium / medium, Wraith: low-med / fast in dives). First-pass numbers that keep that
+ * ordering (T-3.1), tuned by playtest.
  */
 export const CLASS_TUNING: Record<DragonClassId, ClassTuning> = {
   talon: {

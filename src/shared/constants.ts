@@ -39,7 +39,7 @@ export const LAG_COMP_MAX_REWIND_MS = 200;
 export const RECONNECT_GRACE_MS = 30_000;
 
 /** Bump on any wire-format change; the host rejects a `hello` with a different version. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 // --- Rooms and signaling ------------------------------------------------------------------------
 

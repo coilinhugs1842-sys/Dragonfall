@@ -129,6 +129,8 @@ function makeRig(map: CollisionMapSource, options: RigOptions = {}): Rig {
     },
   });
   const sim = createSim({ flightTuning: flight, matchTuning: match, collisionWorld: world });
+  // These tests watch what a crash leaves behind: the dead stay where they fell.
+  sim.respawnPolicy.enabled = false;
   sim.spawnDragon(
     0,
     TEAM_EMBER,
@@ -581,8 +583,9 @@ describe('terrain: grazing and awkward geometry', () => {
   it('skips terrain for a phasing dragon', () => {
     const rig = makeRig(makeMap([PILLAR]));
     for (let i = 0; i < 150; i++) {
-      rig.dragon().flags |= DRAGON_FLAG_PHASING;
+      rig.dragon().phaseTicks = 2;
       rig.step();
+      expect(rig.dragon().flags & DRAGON_FLAG_PHASING).toBe(DRAGON_FLAG_PHASING);
     }
     expect(rig.hits).toHaveLength(0);
     expect(rig.dragon().position.z).toBeGreaterThan(20);
@@ -1048,7 +1051,10 @@ describe('greybox map', () => {
           const dragon = flock.sim.getDragon(id);
           if (dragon === undefined) throw new Error('missing dragon');
           expectFinite(dragon, `seed ${seed}, tick ${tick}, dragon ${id}`);
-          expectClearOfTerrain(dragon, flock.world, `seed ${seed}, tick ${tick}, dragon ${id}`);
+          // A phase dive (the random buttons find it) is inside the rock on purpose.
+          if (dragon.phaseTicks === 0) {
+            expectClearOfTerrain(dragon, flock.world, `seed ${seed}, tick ${tick}, dragon ${id}`);
+          }
           if ((dragon.flags & DRAGON_FLAG_IN_STORM) !== 0) stormTicks++;
           if (wasAlive[id] === true && !isAlive(dragon)) deaths++;
           wasAlive[id] = isAlive(dragon);

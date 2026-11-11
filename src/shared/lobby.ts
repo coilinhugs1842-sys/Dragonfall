@@ -7,7 +7,7 @@
 import type { DragonClassId } from './classes';
 import { DRAGON_CLASS_IDS } from './classes';
 import type { LobbySide, PlayerId, TeamId } from './constants';
-import { MAX_PLAYERS } from './constants';
+import { MAX_PLAYERS, TEAM_EMBER, TEAM_FROST } from './constants';
 import type { MapId, ModeId } from './match';
 
 /** Longest player name the host accepts, in Unicode code points (the host sanitises names). */
@@ -47,9 +47,56 @@ export interface LobbyPlayer {
    * freed; -1 while connected.
    */
   readonly reconnectDeadlineTick: number;
-  /** In-page fake client (`?bots=N`) or bot rider. */
+  /**
+   * A bot: either a rider the host added to fill a slot (`host.addBot`; flown by the host's sim
+   * directly, it has no connection) or an in-page fake client (`?bots=N`). Views show both with
+   * the same badge.
+   */
   readonly isBot: boolean;
 }
+
+// --- Bot riders (T-3.10) --------------------------------------------------------------------------
+
+/** How well the bots fly and fight. A match rule: every bot of the room uses it. */
+export type BotDifficulty = 'easy' | 'normal' | 'hard';
+/** Order is the display order (and the index a dev GUI or a wire format may use). Append only. */
+export const BOT_DIFFICULTIES: readonly BotDifficulty[] = ['easy', 'normal', 'hard'];
+export const DEFAULT_BOT_DIFFICULTY: BotDifficulty = 'normal';
+
+export function isBotDifficulty(value: unknown): value is BotDifficulty {
+  return typeof value === 'string' && (BOT_DIFFICULTIES as readonly string[]).includes(value);
+}
+
+/**
+ * Names the host gives the riders it adds (`host.addBot`). Invented for this game; each fits
+ * MAX_PLAYER_NAME_LENGTH. More names than seats, so a full room never repeats one.
+ */
+export const BOT_RIDER_NAMES: readonly string[] = [
+  'Ashka',
+  'Brennoch',
+  'Cindrael',
+  'Dravik',
+  'Eskarin',
+  'Fenwyth',
+  'Galdris',
+  'Hesperyn',
+  'Ilvane',
+  'Jorrund',
+  'Kessim',
+  'Lorvath',
+  'Myrrin',
+  'Nolveth',
+  'Orsika',
+  'Pyrrath',
+  'Rhuvane',
+  'Sylkar',
+  'Tovrin',
+  'Ulveth',
+  'Vaskyr',
+  'Wyndra',
+  'Yssel',
+  'Zharun',
+];
 
 /** Everything on the host panel (docs/GAME_DESIGN.md, "Cinematic lobby"). */
 export interface HostSettings {
@@ -67,6 +114,8 @@ export interface HostSettings {
   readonly allowedClasses: readonly DragonClassId[];
   /** When locked, players cannot be moved between teams. */
   readonly teamsLocked: boolean;
+  /** Skill of every bot rider in the match (T-3.10). */
+  readonly botDifficulty: BotDifficulty;
 }
 
 /**
@@ -83,6 +132,7 @@ export const DEFAULT_HOST_SETTINGS: HostSettings = {
   friendlyFire: false,
   allowedClasses: DRAGON_CLASS_IDS,
   teamsLocked: false,
+  botDifficulty: DEFAULT_BOT_DIFFICULTY,
 };
 
 /**
@@ -117,6 +167,60 @@ export type RejectReason = 'full' | 'versionMismatch' | 'kicked' | 'matchInProgr
 export interface LobbySwitchSideIntent {
   readonly type: 'lobby.switchSide';
   readonly side: LobbySide;
+}
+
+/**
+ * The host's bot controls (T-3.10). Part of the lobby's intent set like `lobby.switchSide`; they
+ * only ever come from the host's own panel, so they have no wire encoding (a client that sent
+ * one would be refused as `notHost` anyway).
+ */
+/** Seats a bot rider on a team (refused when the team is full). `classId` omitted = host picks. */
+export interface HostAddBotIntent {
+  readonly type: 'host.addBot';
+  readonly side: TeamId;
+  readonly classId?: DragonClassId;
+}
+/** Removes one bot rider. Refused for a human (that is `host.kick`). */
+export interface HostRemoveBotIntent {
+  readonly type: 'host.removeBot';
+  readonly playerId: PlayerId;
+}
+/** Seats a bot in every empty team slot (both teams up to `teamSize`). */
+export interface HostFillBotsIntent {
+  readonly type: 'host.fillBots';
+}
+/** Removes every bot rider the host added. */
+export interface HostClearBotsIntent {
+  readonly type: 'host.clearBots';
+}
+export interface HostSetBotDifficultyIntent {
+  readonly type: 'host.setBotDifficulty';
+  readonly difficulty: BotDifficulty;
+}
+
+export type LobbyBotIntent =
+  | HostAddBotIntent
+  | HostRemoveBotIntent
+  | HostFillBotsIntent
+  | HostClearBotsIntent
+  | HostSetBotDifficultyIntent;
+
+export const LOBBY_BOT_INTENT_TYPES: readonly LobbyBotIntent['type'][] = [
+  'host.addBot',
+  'host.removeBot',
+  'host.fillBots',
+  'host.clearBots',
+  'host.setBotDifficulty',
+];
+
+/** True for the host's bot intents (they go to `applyLobbyIntent` without crossing the wire). */
+export function isLobbyBotIntent(intent: { readonly type: string }): intent is LobbyBotIntent {
+  return (LOBBY_BOT_INTENT_TYPES as readonly string[]).includes(intent.type);
+}
+
+/** A team a bot can be seated on (not the spectators). */
+export function isBotSide(value: unknown): value is TeamId {
+  return value === TEAM_EMBER || value === TEAM_FROST;
 }
 
 // --- Match roster -------------------------------------------------------------------------------

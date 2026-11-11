@@ -2,28 +2,69 @@
  * The simulation: the seam the fixed loop drives. It keeps the previous and current tick states
  * so `game/` can interpolate between them with the loop's alpha when it builds the WorldView.
  *
- * Phase 1: dragons fly (flight.ts) and are handed to an optional collision world. Later phases
- * add projectiles, zones and scoring inside `step`.
+ * One tick (`step`):
+ *   1. every active dragon: abilities + flight (flight.ts, abilities.ts), collision, derived
+ *      fields. This is `stepDragon`, the part a client also runs to predict its own dragon;
+ *   2. combat (combat.ts): what the casts do to the world, projectiles, zones, statuses, the
+ *      damage pipeline, takedowns and respawns. Host only.
+ *
+ * Seams for the layers above (the session, the match modes, lag compensation):
+ * - `setEventSink`: where GameEvents go (hit, takedown, assist, spawn, abilityCast,
+ *   statusApplied, impact);
+ * - `rules`, `respawnPolicy`, `setStormRadius`, `respawnDragon`, `clearEffects`: what a mode
+ *   controls;
+ * - `setTargetPositions`: the lag-compensation hook;
+ * - `current.scores`, `current.teamTakedowns`: the running score sheet.
  */
 
-import { CLASS_TUNING, FLIGHT_TUNING, MATCH_TUNING, NO_PLAYER, TICK_DT_S } from '../shared';
+import {
+  ABILITY_TABLE,
+  CLASS_TUNING,
+  COMBAT_TUNING,
+  FLIGHT_TUNING,
+  MATCH_TUNING,
+  NO_PLAYER,
+  PROJECTILE_DEFS,
+  TICK_DT_S,
+  ZONE_DEFS,
+} from '../shared';
 import type {
+  AbilityTable,
+  ClassAbilities,
   ClassTuning,
+  CombatTuning,
+  DamageSource,
   DragonClassId,
   FlightTuning,
+  GameEventSink,
   InputFrame,
   MatchTuning,
   MutableVec3,
   PlayerId,
+  ProjectileDef,
+  ProjectileKind,
+  StatusKind,
   TeamId,
   Vec3,
+  ZoneDef,
+  ZoneKind,
 } from '../shared';
+import { DAMAGE_SOURCES } from '../shared';
 import { NULL_COLLISION_WORLD } from './collision-world';
 import type { SimCollisionWorld } from './collision-world';
+import { CURRENT_TARGET_POSITIONS, CombatSystem } from './combat';
+import type { RespawnPolicy, SimRules, TargetPositionSource } from './combat';
 import { copyDragonState, resetDragonState } from './dragon-state';
 import type { DragonState } from './dragon-state';
 import { finalizeDragon, initDragon, integrateDragon } from './flight';
-import { copySimState, createSimState, findDragonSlot, resetSimState } from './sim-state';
+import {
+  clearSimEffects,
+  copySimState,
+  createSimState,
+  findDragonSlot,
+  resetScoreState,
+  resetSimState,
+} from './sim-state';
 import type { SimState } from './sim-state';
 
 /**
@@ -39,8 +80,16 @@ export interface SimOptions {
   flightTuning?: FlightTuning;
   classTuning?: Record<DragonClassId, ClassTuning>;
   matchTuning?: MatchTuning;
+  abilityTable?: AbilityTable;
+  projectileDefs?: Record<ProjectileKind, ProjectileDef>;
+  zoneDefs?: Record<ZoneKind, ZoneDef>;
+  combatTuning?: CombatTuning;
   /** Default: open sky (NULL_COLLISION_WORLD). */
   collisionWorld?: SimCollisionWorld;
+  /** Where GameEvents go. Default: nowhere. */
+  events?: GameEventSink;
+  /** The lag-compensation hook. Default: current positions. */
+  targetPositions?: TargetPositionSource;
 }
 
 export interface Sim {
@@ -50,19 +99,25 @@ export interface Sim {
   readonly current: Readonly<SimState>;
   /** The flight table this sim reads (mutate it to tune live). */
   readonly flightTuning: FlightTuning;
+  /** Match rules, read every tick (mutate them: `sim.rules.friendlyFire = true`). */
+  readonly rules: SimRules;
+  /** How the dead come back, read every tick (mutate it: `sim.respawnPolicy.enabled = false`). */
+  readonly respawnPolicy: RespawnPolicy;
   /**
    * Advances exactly one fixed tick (`TICK_DT_S`): every active dragon is integrated with its
-   * input, resolved against the collision world and finalised. Deterministic, allocation-free.
+   * input, resolved against the collision world and finalised, then combat runs.
+   * Deterministic, allocation-free.
    */
   step(tick: number, inputs: SimInputs): void;
-  /** Despawns everything and rewinds time. Tuning and the collision world are kept. */
+  /** Despawns everything, clears scores and rewinds time. Tuning, rules and hooks are kept. */
   reset(): void;
   /**
    * Puts a living dragon into the world at cruise speed, level, facing `yaw` (radians about +Y,
-   * 0 = +Z). If the player already has a dragon it is re-initialised in place (respawn). The
-   * dragon is written to `prev` as well, so the view does not interpolate it in from stale data.
-   * Returns the dragon in `current`, or null if the id is not a valid player id or all
-   * MAX_PLAYERS slots are taken. Call between steps, not from inside one.
+   * 0 = +Z). The pose becomes its home: where it respawns. If the player already has a dragon it
+   * is re-initialised in place (its score is kept). The dragon is written to `prev` as well, so
+   * the view does not interpolate it in from stale data. Emits nothing (the caller announces
+   * the first spawn). Returns the dragon in `current`, or null if the id is not a valid player
+   * id or all MAX_PLAYERS slots are taken. Call between steps, not from inside one.
    */
   spawnDragon(
     playerId: PlayerId,
@@ -77,16 +132,58 @@ export interface Sim {
   getDragon(playerId: PlayerId): DragonState | undefined;
   /** Swaps the collision world (map load/unload); null = open sky. */
   setCollisionWorld(world: SimCollisionWorld | null): void;
+
+  // --- Combat seams -----------------------------------------------------------------------------
+  /** Where GameEvents go from now on; null = nowhere. */
+  setEventSink(sink: GameEventSink | null): void;
+  /** The lag-compensation hook; null = current positions. */
+  setTargetPositions(source: TargetPositionSource | null): void;
+  /**
+   * Moves the storm wall for the following ticks (a mode may call it every tick). A negative
+   * radius restores the map's own. Stored in the state (`current.stormRadius`) for snapshots.
+   */
+  setStormRadius(radius: number): void;
+  /**
+   * Respawns the player's dragon now, dead or alive, at its home pose or where the respawn
+   * policy puts it (a new Duel round). Emits `spawn`. False if the player has no dragon.
+   */
+  respawnDragon(playerId: PlayerId): boolean;
+  /** Removes every projectile and zone (a new round). */
+  clearEffects(): void;
+  /**
+   * The damage pipeline, for whatever is not an ability (objectives, modes, tests): see
+   * `CombatSystem.applyDamage`. `attackerId` NO_PLAYER = the environment. `originX/Y/Z` is where
+   * it comes from (a wing shield blocks its front). Returns the HP removed.
+   */
+  applyDamage(
+    targetId: PlayerId,
+    amount: number,
+    attackerId: PlayerId,
+    source: DamageSource,
+    flags?: number,
+    origin?: Vec3,
+  ): number;
+  /** Gives a dragon a timed effect: see `CombatSystem.applyStatus`. */
+  applyStatus(
+    targetId: PlayerId,
+    status: StatusKind,
+    seconds: number,
+    power: number,
+    sourceId: PlayerId,
+  ): boolean;
+  /** Adds ultimate charge (0..1) to a dragon: objectives charge the ultimate too. */
+  addUltimateCharge(playerId: PlayerId, amount: number): void;
 }
 
 /**
- * One dragon, one fixed tick: flight integration, collision, then the derived fields. This is
- * the whole per-dragon part of `Sim.step`, exported so client prediction (`src/net/prediction`)
- * replays exactly the code the host ran instead of a copy of it.
+ * One dragon, one fixed tick: abilities and flight integration, collision, then the derived
+ * fields. This is the whole per-dragon part of `Sim.step`, exported so client prediction
+ * (`src/net/prediction`) replays exactly the code the host ran instead of a copy of it.
  *
  * `input` undefined = no input for this tick: the dragon flies straight with the buttons it held
  * last tick (see `SimInputs`). `scratch` is overwritten with the position before the step.
- * Deterministic and allocation-free.
+ * `abilities` is the class's row of the ability table; without it the ability buttons do
+ * nothing. Deterministic and allocation-free.
  */
 export function stepDragon(
   dragon: DragonState,
@@ -95,11 +192,12 @@ export function stepDragon(
   cls: ClassTuning,
   collision: SimCollisionWorld,
   scratch: MutableVec3,
+  abilities?: ClassAbilities,
 ): void {
   scratch.x = dragon.position.x;
   scratch.y = dragon.position.y;
   scratch.z = dragon.position.z;
-  integrateDragon(dragon, input, flight, cls);
+  integrateDragon(dragon, input, flight, cls, abilities);
   collision.resolveDragon(dragon, scratch, TICK_DT_S, flight);
   finalizeDragon(dragon, flight, cls, scratch);
 }
@@ -108,6 +206,7 @@ export function createSim(options: SimOptions = {}): Sim {
   const flight = options.flightTuning ?? FLIGHT_TUNING;
   const classes = options.classTuning ?? CLASS_TUNING;
   const match = options.matchTuning ?? MATCH_TUNING;
+  const abilities = options.abilityTable ?? ABILITY_TABLE;
   let collision = options.collisionWorld ?? NULL_COLLISION_WORLD;
 
   // Two buffers swapped each tick: interpolation needs both ends and must not allocate.
@@ -115,6 +214,22 @@ export function createSim(options: SimOptions = {}): Sim {
   let current = createSimState();
   /** Reused for the `prevPosition` argument of the collision world. */
   const prevPosition: MutableVec3 = { x: 0, y: 0, z: 0 };
+
+  const combat = new CombatSystem(
+    {
+      flight,
+      classes,
+      match,
+      abilities,
+      projectiles: options.projectileDefs ?? PROJECTILE_DEFS,
+      zones: options.zoneDefs ?? ZONE_DEFS,
+      combat: options.combatTuning ?? COMBAT_TUNING,
+    },
+    collision,
+    current,
+  );
+  combat.events = options.events ?? null;
+  combat.targets = options.targetPositions ?? CURRENT_TARGET_POSITIONS;
 
   return {
     get prev() {
@@ -124,6 +239,8 @@ export function createSim(options: SimOptions = {}): Sim {
       return current;
     },
     flightTuning: flight,
+    rules: combat.rules,
+    respawnPolicy: combat.respawnPolicy,
 
     step(tick, inputs) {
       const next = prev;
@@ -146,14 +263,17 @@ export function createSim(options: SimOptions = {}): Sim {
           classes[dragon.classId],
           collision,
           prevPosition,
+          abilities[dragon.classId],
         );
       }
-      // Phase 3+: projectiles, zones, scoring.
+      combat.step(current, prev, tick);
     },
 
     reset() {
       resetSimState(prev);
       resetSimState(current);
+      combat.bind(current, prev);
+      collision.setStormRadius?.(-1);
     },
 
     spawnDragon(playerId, team, classId, position, yaw) {
@@ -188,7 +308,13 @@ export function createSim(options: SimOptions = {}): Sim {
       );
       const wasActiveInPrev = prevDragon.active;
       copyDragonState(prevDragon, dragon);
-      if (isNew) current.dragonCount++;
+      if (isNew) {
+        current.dragonCount++;
+        const score = current.scores[slot];
+        const prevScore = prev.scores[slot];
+        if (score !== undefined) resetScoreState(score);
+        if (prevScore !== undefined) resetScoreState(prevScore);
+      }
       if (!wasActiveInPrev) prev.dragonCount++;
       return dragon;
     },
@@ -216,6 +342,68 @@ export function createSim(options: SimOptions = {}): Sim {
 
     setCollisionWorld(world) {
       collision = world ?? NULL_COLLISION_WORLD;
+      combat.collision = collision;
+      if (current.stormRadius >= 0) collision.setStormRadius?.(current.stormRadius);
+    },
+
+    setEventSink(sink) {
+      combat.events = sink;
+    },
+
+    setTargetPositions(source) {
+      combat.targets = source ?? CURRENT_TARGET_POSITIONS;
+    },
+
+    setStormRadius(radius) {
+      const value = radius >= 0 && Number.isFinite(radius) ? radius : -1;
+      current.stormRadius = value;
+      collision.setStormRadius?.(value);
+    },
+
+    respawnDragon(playerId) {
+      const slot = findDragonSlot(current, playerId);
+      const dragon = current.dragons[slot];
+      if (slot < 0 || dragon === undefined) return false;
+      combat.bind(current, prev);
+      combat.respawn(dragon, slot);
+      return true;
+    },
+
+    clearEffects() {
+      clearSimEffects(current);
+    },
+
+    applyDamage(targetId, amount, attackerId, source, flags = 0, origin) {
+      const slot = findDragonSlot(current, targetId);
+      const target = current.dragons[slot];
+      if (slot < 0 || target === undefined) return 0;
+      const attackerSlot = attackerId === NO_PLAYER ? -1 : findDragonSlot(current, attackerId);
+      const attacker = attackerSlot < 0 ? null : (current.dragons[attackerSlot] ?? null);
+      combat.bind(current, prev);
+      // No origin: from straight ahead of the target, where its shield is.
+      if (origin !== undefined) combat.setDamageOrigin(origin.x, origin.y, origin.z);
+      else {
+        combat.setDamageOrigin(target.position.x, target.position.y, target.position.z);
+      }
+      const index = DAMAGE_SOURCES.indexOf(source);
+      return combat.applyDamage(target, amount, attacker, index < 0 ? 0 : index, flags);
+    },
+
+    applyStatus(targetId, status, seconds, power, sourceId) {
+      const slot = findDragonSlot(current, targetId);
+      const target = current.dragons[slot];
+      if (slot < 0 || target === undefined) return false;
+      const sourceSlot = sourceId === NO_PLAYER ? -1 : findDragonSlot(current, sourceId);
+      const source = sourceSlot < 0 ? null : (current.dragons[sourceSlot] ?? null);
+      combat.bind(current, prev);
+      combat.setDamageOrigin(target.position.x, target.position.y, target.position.z);
+      return combat.applyStatus(target, status, seconds, power, source, 0, 0);
+    },
+
+    addUltimateCharge(playerId, amount) {
+      const slot = findDragonSlot(current, playerId);
+      const dragon = current.dragons[slot];
+      if (slot >= 0 && dragon !== undefined) combat.addUltimateCharge(dragon, amount);
     },
   };
 }

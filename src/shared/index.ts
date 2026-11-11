@@ -3,6 +3,7 @@
  * net and a Web Worker can import it as freely as the views.
  */
 
+export * from './abilities';
 export * from './classes';
 export * from './collision-tuning';
 export * from './constants';

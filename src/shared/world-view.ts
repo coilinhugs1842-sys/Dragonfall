@@ -11,17 +11,19 @@
  *   different entity. Copy the numbers you need, keyed by `id`.
  */
 
+import { ABILITY_TABLE } from './abilities';
+import type { AbilityTable } from './abilities';
+import { ABILITY_SLOTS } from './classes';
 import type { DragonClassId } from './classes';
 import type { PlayerId, TeamId } from './constants';
-import { NO_PLAYER, TEAM_EMBER } from './constants';
+import { NO_PLAYER, TEAM_EMBER, TICK_DT_S, TICK_HZ } from './constants';
 import type { MatchPhase } from './match';
 import type { MutableQuat, MutableVec3, Quat, Vec3 } from './math-types';
 import { createQuat, createVec3 } from './math-types';
 
 // --- Dragon flags (a `u16` in the snapshot) ---------------------------------------------------------
 //
-// Bits 0-8 are taken; bits 9-15 are free for later statuses (DECISIONS 14 widened the field from
-// `u8` rather than dropping IN_STORM). Never renumber a shipped bit.
+// All 16 bits are taken (DECISIONS 14 widened the field from `u8`). Never renumber a shipped bit.
 
 export const DRAGON_FLAG_ALIVE = 1 << 0;
 export const DRAGON_FLAG_BOOSTING = 1 << 1;
@@ -38,6 +40,20 @@ export const DRAGON_FLAG_PHASING = 1 << 6;
 export const DRAGON_FLAG_IN_STORM = 1 << 7;
 /** Below stall speed: the nose is dropping and steering is weak until speed recovers. */
 export const DRAGON_FLAG_STALLED = 1 << 8;
+/** Slowed (static field). */
+export const DRAGON_FLAG_SLOWED = 1 << 9;
+/** Taking damage over time (shade breath, burn trail). */
+export const DRAGON_FLAG_BURNING = 1 << 10;
+/** Blinded (night terror). On the local dragon the HUD/post darkens the screen. */
+export const DRAGON_FLAG_BLINDED = 1 << 11;
+/** Speed buff (afterburn). */
+export const DRAGON_FLAG_HASTED = 1 << 12;
+/** Winding up an ability (lance charge, shield, veil, phase dive): play the wind-up. */
+export const DRAGON_FLAG_CHARGING = 1 << 13;
+/** Holding fire with a sustained primary (the breath or bolt stream is on). */
+export const DRAGON_FLAG_FIRING = 1 << 14;
+/** Being healed (rally roar). */
+export const DRAGON_FLAG_REGEN = 1 << 15;
 
 // --- Dragon animation state (a `u8` in the snapshot) ---------------------------------------------
 
@@ -99,9 +115,8 @@ export interface DragonView {
 }
 
 /**
- * What kind of thing a projectile is, for picking its mesh/trail.
- * TBD in T-3.x: the list follows the ability table and will change with the combat design.
- * Index = `u8` wire value. Append only.
+ * What kind of thing a projectile is, for picking its mesh/trail. The numbers of each kind are
+ * in PROJECTILE_DEFS (./abilities.ts). Index = `u8` wire value (at most 16). Append only.
  */
 export const PROJECTILE_KINDS = ['fireBolt', 'meteorBomb', 'staticMine'] as const;
 
@@ -117,11 +132,19 @@ export interface ProjectileView {
 }
 
 /**
- * Area volumes the views draw. `stormWall` is the arena edge (its radius shrinks per Duel
- * round). The other kinds are TBD in T-3.x (ability areas) and T-6.x (objectives).
- * Index = `u8` wire value. Append only.
+ * Area volumes the views draw. `stormWall` is the arena edge, a vertical cylinder (its radius
+ * shrinks per Duel round); every other kind is a sphere. The numbers of the ability zones are in
+ * ZONE_DEFS (./abilities.ts); objective zones are T-6.x.
+ * Index = `u8` wire value (at most 16). Append only.
  */
-export const ZONE_KINDS = ['stormWall', 'thunderhead', 'staticField', 'controlZone'] as const;
+export const ZONE_KINDS = [
+  'stormWall',
+  'thunderhead',
+  'staticField',
+  'controlZone',
+  'burnTrail',
+  'rallyAura',
+] as const;
 
 export type ZoneKind = (typeof ZONE_KINDS)[number];
 
@@ -133,6 +156,44 @@ export interface ZoneView {
   readonly position: Vec3;
   /** Metres. */
   readonly radius: number;
+  /** Who made it, or NO_PLAYER. A `rallyAura` stays on its owner: draw it at that dragon. */
+  readonly ownerId: PlayerId;
+  /** Seconds until it ends; Infinity for permanent zones (the storm wall). */
+  readonly remainingS: number;
+}
+
+/**
+ * The local rider's combat state, for the HUD (cooldowns, ultimate, respawn) and the death cam.
+ * Only this browser's own dragon has it: the numbers travel in the snapshot's owner block.
+ * Arrays are indexed like ABILITY_SLOTS (primary, secondary, utility, ultimate).
+ */
+export interface LocalCombatView {
+  /** False for spectators, outside a match, and when the builder had no data: ignore the rest. */
+  readonly valid: boolean;
+  /** Cooldown left per slot as a 0..1 fraction of the full cooldown (0 = ready). */
+  readonly cooldowns: readonly number[];
+  /** The same in seconds. */
+  readonly cooldownS: readonly number[];
+  /** Uses in store per slot (0 or 1 for a plain cooldown) and the most it can store. */
+  readonly charges: readonly number[];
+  readonly maxCharges: readonly number[];
+  /** True when pressing the slot's button now would start the ability. */
+  readonly ready: readonly boolean[];
+  /** The slot's effect is running (dash window, shield up, a held breath, a zone trail). */
+  readonly active: readonly boolean[];
+  /** 0..1; the ultimate is ready at 1. */
+  readonly ultimateCharge: number;
+  /** Slot index of the ability being wound up, or -1; and how far along it is (0..1). */
+  readonly castSlot: number;
+  readonly castProgress: number;
+  /** Barrel-roll cooldown left, 0..1. */
+  readonly dodgeCooldown: number;
+  /** Seconds until respawn; 0 while alive. Infinity when respawns are off (Duel). */
+  readonly respawnInS: number;
+  /** Who last hurt this dragon (the death cam target), or NO_PLAYER. */
+  readonly killerId: PlayerId;
+  /** Seconds of blindness left (0 = can see). */
+  readonly blindS: number;
 }
 
 export interface MatchClockView {
@@ -158,6 +219,7 @@ export interface WorldView {
   /** The dragon this browser controls, or NO_PLAYER for spectators and outside a match. */
   readonly localDragonId: PlayerId;
   readonly clock: MatchClockView;
+  readonly local: LocalCombatView;
 }
 
 // --- Writable side: only `src/game` (the builder) uses these ---------------------------------------
@@ -190,6 +252,25 @@ export interface MutableZoneView {
   team: TeamId | null;
   position: MutableVec3;
   radius: number;
+  ownerId: PlayerId;
+  remainingS: number;
+}
+
+export interface MutableLocalCombatView {
+  valid: boolean;
+  cooldowns: number[];
+  cooldownS: number[];
+  charges: number[];
+  maxCharges: number[];
+  ready: boolean[];
+  active: boolean[];
+  ultimateCharge: number;
+  castSlot: number;
+  castProgress: number;
+  dodgeCooldown: number;
+  respawnInS: number;
+  killerId: PlayerId;
+  blindS: number;
 }
 
 export interface MutableMatchClockView {
@@ -210,6 +291,26 @@ export interface MutableWorldView {
   zoneCount: number;
   localDragonId: PlayerId;
   clock: MutableMatchClockView;
+  local: MutableLocalCombatView;
+}
+
+export function createLocalCombatView(): MutableLocalCombatView {
+  return {
+    valid: false,
+    cooldowns: [0, 0, 0, 0],
+    cooldownS: [0, 0, 0, 0],
+    charges: [0, 0, 0, 0],
+    maxCharges: [1, 1, 1, 1],
+    ready: [false, false, false, false],
+    active: [false, false, false, false],
+    ultimateCharge: 0,
+    castSlot: -1,
+    castProgress: 0,
+    dodgeCooldown: 0,
+    respawnInS: 0,
+    killerId: NO_PLAYER,
+    blindS: 0,
+  };
 }
 
 export function createWorldView(): MutableWorldView {
@@ -222,6 +323,7 @@ export function createWorldView(): MutableWorldView {
     zoneCount: 0,
     localDragonId: NO_PLAYER,
     clock: { tick: 0, phase: 'lobby', phaseTimeS: 0, timeRemainingS: Infinity, round: 1 },
+    local: createLocalCombatView(),
   };
 }
 
@@ -230,6 +332,8 @@ export function beginWorldView(view: MutableWorldView): void {
   view.dragonCount = 0;
   view.projectileCount = 0;
   view.zoneCount = 0;
+  // A builder that knows the local dragon's combat state calls `writeLocalCombatView` after this.
+  view.local.valid = false;
 }
 
 /**
@@ -275,15 +379,116 @@ export function acquireProjectileView(view: MutableWorldView): MutableProjectile
   return slot;
 }
 
-/** Same contract as acquireDragonView: the caller must write every field. */
+/**
+ * Same contract as acquireDragonView: the caller must write every field, except `ownerId` and
+ * `remainingS`, which come back as "nobody" and "permanent" (what the storm wall wants).
+ */
 export function acquireZoneView(view: MutableWorldView): MutableZoneView {
   let slot = view.zones[view.zoneCount];
   if (slot === undefined) {
-    slot = { id: 0, kind: 'stormWall', team: null, position: createVec3(), radius: 0 };
+    slot = {
+      id: 0,
+      kind: 'stormWall',
+      team: null,
+      position: createVec3(),
+      radius: 0,
+      ownerId: NO_PLAYER,
+      remainingS: Infinity,
+    };
     view.zones.push(slot);
   }
+  slot.ownerId = NO_PLAYER;
+  slot.remainingS = Infinity;
   view.zoneCount++;
   return slot;
+}
+
+/**
+ * What `writeLocalCombatView` reads of a dragon. The sim's `DragonState`, the client predictor's
+ * dragon and the host worker's view dragon all fit.
+ */
+export interface LocalCombatSource {
+  readonly classId: DragonClassId;
+  readonly flags: number;
+  readonly stamina: number;
+  readonly abilityCooldownTicks: ArrayLike<number>;
+  readonly abilityChargesUsed: ArrayLike<number>;
+  readonly abilityActiveTicks: ArrayLike<number>;
+  readonly castSlot: number;
+  readonly castTicks: number;
+  readonly ultCharge: number;
+  readonly dodgeCooldownTicks: number;
+  readonly deadTicks: number;
+  readonly lastDamagerId: PlayerId;
+  readonly blindTicks: number;
+}
+
+function ticksFor(seconds: number): number {
+  return seconds > 0 ? Math.ceil(seconds * TICK_HZ - 1e-6) : 0;
+}
+
+/**
+ * Fills the frame's `view.local` from the local dragon (see LocalCombatView). Call it after
+ * `beginWorldView`, once per frame; without the call the HUD sees `valid: false`.
+ *
+ * @param respawnDelayS MATCH_TUNING.respawnDelayS, or Infinity while respawns are off.
+ * @param dodgeCooldownS FLIGHT_TUNING.dodgeCooldownS.
+ */
+export function writeLocalCombatView(
+  out: MutableLocalCombatView,
+  dragon: LocalCombatSource,
+  respawnDelayS: number,
+  dodgeCooldownS: number,
+  abilities: AbilityTable = ABILITY_TABLE,
+): MutableLocalCombatView {
+  const defs = abilities[dragon.classId];
+  const castFree = dragon.castSlot < 0;
+  const alive = (dragon.flags & DRAGON_FLAG_ALIVE) !== 0;
+  for (let i = 0; i < ABILITY_SLOTS.length; i++) {
+    const slot = ABILITY_SLOTS[i];
+    if (slot === undefined) continue;
+    const def = defs[slot];
+    const left = dragon.abilityCooldownTicks[i] ?? 0;
+    const used = dragon.abilityChargesUsed[i] ?? 0;
+    const max = def.maxCharges > 1 ? Math.floor(def.maxCharges) : 1;
+    const full = ticksFor(def.cooldownS);
+    const charges = max > 1 ? Math.max(0, max - used) : left > 0 ? 0 : 1;
+    // With charges in store the slot is usable although the next charge is still loading.
+    const waiting = max > 1 ? (charges > 0 ? 0 : left) : left;
+    out.cooldowns[i] = full > 0 ? Math.max(0, Math.min(1, waiting / full)) : 0;
+    out.cooldownS[i] = waiting * TICK_DT_S;
+    out.charges[i] = charges;
+    out.maxCharges[i] = max;
+    out.ready[i] =
+      alive &&
+      castFree &&
+      charges > 0 &&
+      (dragon.abilityActiveTicks[i] ?? 0) === 0 &&
+      dragon.stamina >= def.staminaCost &&
+      (def.ultCost <= 0 || dragon.ultCharge >= def.ultCost);
+    out.active[i] = alive && (dragon.abilityActiveTicks[i] ?? 0) > 0;
+  }
+  out.valid = true;
+  out.ultimateCharge = Math.max(0, Math.min(1, dragon.ultCharge));
+  out.castSlot = dragon.castSlot;
+  out.castProgress = 0;
+  if (dragon.castSlot >= 0) {
+    const slot = ABILITY_SLOTS[dragon.castSlot];
+    const windup = slot !== undefined ? ticksFor(defs[slot].windupS) : 0;
+    out.castProgress = windup > 0 ? Math.max(0, Math.min(1, 1 - dragon.castTicks / windup)) : 1;
+  }
+  const dodgeFull = ticksFor(dodgeCooldownS);
+  out.dodgeCooldown =
+    dodgeFull > 0 ? Math.max(0, Math.min(1, dragon.dodgeCooldownTicks / dodgeFull)) : 0;
+  if (!alive) {
+    const left = respawnDelayS - dragon.deadTicks * TICK_DT_S;
+    out.respawnInS = left > 0 ? left : 0;
+  } else {
+    out.respawnInS = 0;
+  }
+  out.killerId = dragon.lastDamagerId;
+  out.blindS = dragon.blindTicks * TICK_DT_S;
+  return out;
 }
 
 /** Linear scan (at most 10 dragons). Returns undefined when the dragon is not in this view. */

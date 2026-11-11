@@ -52,10 +52,12 @@ import type {
   FlightTuning,
   MapManifest,
   MatchTuning,
+  MutableVec3,
   TerrainQuery,
   Vec3,
 } from '../../shared';
-import type { SimCollisionWorld } from '../collision-world';
+import { ENV_SOURCE_NONE, ENV_SOURCE_STORM, ENV_SOURCE_TERRAIN } from '../collision-world';
+import type { SimCollisionWorld, TerrainRay } from '../collision-world';
 import type { DragonState } from '../dragon-state';
 import { damageDragon, secondsToTicks, setDragonVelocity } from '../flight';
 import { TerrainBvh } from './terrain-bvh';
@@ -72,6 +74,12 @@ const MAX_MARCH_STEPS = 32;
 /** Push-out attempts for one contact before giving up and going back. */
 const MAX_PUSH_OUTS = 6;
 const EPSILON = 1e-6;
+/** Metres searched for the way out when a phase dive ends inside the rock. */
+const PHASE_EJECT_REACH = 400;
+/** Lines tried for the way out: along and against the velocity, then the six axes. */
+const EJECT_DIRECTIONS = 8;
+/** Surfaces a line may pass (stacked and overlapping solids) before it is given up. */
+const MAX_EJECT_HOPS = 8;
 /**
  * The centre counts as BEHIND the closest face (inside the rock) when the offset from the
  * closest point runs against the face normal by at least this cosine. It has to be this strict:
@@ -146,6 +154,8 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
   stormCenterX: number;
   stormCenterZ: number;
   stormRadius: number;
+  /** The map's own radius: what `setStormRadius` falls back to. */
+  readonly mapStormRadius: number;
   ceilingY: number;
   floorY: number;
   onTerrainHit: TerrainHitListener | null;
@@ -167,6 +177,7 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
     this.stormCenterX = colliders.stormCenter.x;
     this.stormCenterZ = colliders.stormCenter.z;
     this.stormRadius = colliders.stormRadius;
+    this.mapStormRadius = colliders.stormRadius;
     this.ceilingY = colliders.ceilingY;
     this.floorY = colliders.floorY;
 
@@ -195,10 +206,140 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
       return;
     }
     this.limitStormDepth(dragon);
-    if (this.terrain !== null && (dragon.flags & DRAGON_FLAG_PHASING) === 0) {
-      this.resolveTerrain(this.terrain, dragon, prevPosition, dtS, tuning);
+    // The timer decides, not DRAGON_FLAG_PHASING: the bit is only refreshed at the end of the
+    // tick. That makes the bit "was phasing last tick", which is how the end of a phase shows.
+    if (this.terrain !== null && dragon.phaseTicks <= 0) {
+      if (
+        (dragon.flags & DRAGON_FLAG_PHASING) !== 0 &&
+        this.ejectFromTerrain(this.terrain, dragon)
+      ) {
+        // Put back outside the rock this tick; the sweep carries on from there next tick.
+      } else {
+        this.resolveTerrain(this.terrain, dragon, prevPosition, dtS, tuning);
+      }
     }
     this.resolveStorm(dragon, dtS);
+  }
+
+  /**
+   * End of a phase dive: a dragon whose phase ran out inside the rock is put outside it (the
+   * sweep alone would only notice it once it came within a radius of a face). Returns true when
+   * it moved the dragon.
+   *
+   * "Inside" is `TerrainBvh.solidDepth`, not "behind the closest face": where solids overlap or
+   * are stacked, the closest face can belong to another solid and face the dragon from within
+   * the rock. The way out is the nearest surface if open air is behind it; otherwise (that
+   * surface was such an inner face) the shortest of a few straight lines to open air.
+   */
+  private ejectFromTerrain(terrain: TerrainBvh, dragon: DragonState): boolean {
+    const position = dragon.position;
+    const tunedRadius = this.classes[dragon.classId].hitRadius;
+    const radius = tunedRadius > MIN_RADIUS ? tunedRadius : MIN_RADIUS;
+    const out = radius + CONTACT_SKIN;
+    const startX = position.x;
+    const startY = position.y;
+    const startZ = position.z;
+
+    if (terrain.solidDepth(startX, startY, startZ) <= 0) {
+      // In open air. Touching a surface gets the ordinary contact answer.
+      if (terrain.closestPoint(startX, startY, startZ, radius) < 0) return false;
+      this.settleOutside(terrain, position, radius);
+      return true;
+    }
+
+    // Through the nearest surface, if that is the way out.
+    const distance = terrain.closestPoint(startX, startY, startZ, PHASE_EJECT_REACH);
+    if (distance > EPSILON) {
+      const scale = (distance + out) / distance;
+      const x = startX + (terrain.closestX - startX) * scale;
+      const y = startY + (terrain.closestY - startY) * scale;
+      const z = startZ + (terrain.closestZ - startZ) * scale;
+      if (terrain.solidDepth(x, y, z) <= 0) {
+        position.x = x;
+        position.y = y;
+        position.z = z;
+        this.settleOutside(terrain, position, radius);
+        return true;
+      }
+    }
+
+    // Straight lines to open air: the way it was going, the way it came, and the six axes.
+    const speed = Math.sqrt(
+      dragon.velocity.x * dragon.velocity.x +
+        dragon.velocity.y * dragon.velocity.y +
+        dragon.velocity.z * dragon.velocity.z,
+    );
+    let best = Infinity;
+    let bestX = 0;
+    let bestY = 0;
+    let bestZ = 0;
+    for (let i = 0; i < EJECT_DIRECTIONS; i++) {
+      let dx = 0;
+      let dy = 0;
+      let dz = 0;
+      if (i < 2) {
+        if (!(speed > EPSILON)) continue;
+        const sign = i === 0 ? 1 : -1;
+        dx = (dragon.velocity.x / speed) * sign;
+        dy = (dragon.velocity.y / speed) * sign;
+        dz = (dragon.velocity.z / speed) * sign;
+      } else {
+        const sign = (i & 1) === 0 ? 1 : -1;
+        if (i < 4) dx = sign;
+        else if (i < 6) dy = sign;
+        else dz = sign;
+      }
+      // Hop from surface to surface until the far side of one is open air.
+      let travelled = 0;
+      for (let hop = 0; hop < MAX_EJECT_HOPS && travelled < best; hop++) {
+        const hit = terrain.raycast(
+          startX + dx * travelled,
+          startY + dy * travelled,
+          startZ + dz * travelled,
+          dx,
+          dy,
+          dz,
+          PHASE_EJECT_REACH,
+        );
+        if (hit < 0) break;
+        travelled += hit + out;
+        const x = startX + dx * travelled;
+        const y = startY + dy * travelled;
+        const z = startZ + dz * travelled;
+        if (terrain.solidDepth(x, y, z) > 0) continue;
+        if (travelled < best) {
+          best = travelled;
+          bestX = x;
+          bestY = y;
+          bestZ = z;
+        }
+        break;
+      }
+    }
+    if (best === Infinity) return false;
+    position.x = bestX;
+    position.y = bestY;
+    position.z = bestZ;
+    this.settleOutside(terrain, position, radius);
+    return true;
+  }
+
+  /** A centre in open air that may still touch a surface: pushed clear of it, a few times. */
+  private settleOutside(terrain: TerrainBvh, position: MutableVec3, radius: number): void {
+    for (let attempt = 0; attempt < MAX_PUSH_OUTS; attempt++) {
+      const distance = terrain.closestPoint(position.x, position.y, position.z, radius);
+      if (distance < 0) return;
+      this.contactNormal(terrain, position.x, position.y, position.z, distance);
+      const out = radius + CONTACT_SKIN;
+      position.x = terrain.closestX + this.normalX * out;
+      position.y = terrain.closestY + this.normalY * out;
+      position.z = terrain.closestZ + this.normalZ * out;
+    }
+  }
+
+  /** Moves the storm wall (a mode shrinking the arena). Not a number: back to the map's radius. */
+  setStormRadius(radius: number): void {
+    this.stormRadius = radius >= 0 && Number.isFinite(radius) ? radius : this.mapStormRadius;
   }
 
   // --- TerrainQuery -----------------------------------------------------------------------------
@@ -222,6 +363,11 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
       directionZ,
       maxDistance,
     );
+  }
+
+  /** `SimCollisionWorld.raycastRay`: the terrain ray of the abilities. */
+  raycastRay(ray: Readonly<TerrainRay>): number {
+    return this.terrain === null ? -1 : this.terrain.raycastRay(ray);
   }
 
   clearance(x: number, y: number, z: number, maxDistance: number): number {
@@ -416,6 +562,12 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
       }
     }
 
+    if (damage > 0) {
+      // For the host's damage pipeline: credit, the `hit` event, the takedown source.
+      dragon.envDamage += damage;
+      dragon.envSource = ENV_SOURCE_TERRAIN;
+    }
+
     if (this.onTerrainHit !== null) {
       this.onTerrainHit(
         dragon,
@@ -583,7 +735,12 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
     // re-hit grace is not held open by the storm. Death is applied by finalizeDragon.
     if (dragon.spawnProtectTicks <= 0) {
       const damage = positive(this.match.stormDamagePerS) * dtS;
-      dragon.health = dragon.health > damage ? dragon.health - damage : 0;
+      const applied = dragon.health > damage ? damage : dragon.health;
+      dragon.health -= applied;
+      if (applied > 0) {
+        dragon.envDamage += applied;
+        if (dragon.envSource === ENV_SOURCE_NONE) dragon.envSource = ENV_SOURCE_STORM;
+      }
     }
   }
 }

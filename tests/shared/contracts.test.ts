@@ -53,7 +53,7 @@ describe('InputFrame', () => {
     frame.buttons = BUTTON_BOOST | BUTTON_PRIMARY;
     expect(hasButton(frame, BUTTON_BOOST)).toBe(true);
     expect(resetInputFrame(frame, 42)).toBe(frame);
-    expect(frame).toEqual({ tick: 42, steerX: 0, steerY: 0, buttons: 0 });
+    expect(frame).toEqual({ tick: 42, steerX: 0, steerY: 0, buttons: 0, aimYaw: 0, aimPitch: 0 });
   });
 
   it('sanitizes out-of-range and NaN input', () => {
@@ -239,6 +239,40 @@ describe('GameEventBus', () => {
     bus.clear();
     bus.flush();
     expect(count).toBe(0);
+  });
+
+  it('dropExcept keeps one type queued, in order, and frees the rest', () => {
+    const bus = createGameEventBus();
+    const seen: string[] = [];
+    bus.on('takedown', (e) => seen.push(`takedown:${e.victimId}`));
+    bus.on('matchPhase', (e) => seen.push(`phase:${e.phase}:${e.round}`));
+    // A backlog: the same scratch objects reused by the emitter, as the decoders do.
+    bus.emit(takedown);
+    bus.emit({ ...phase, phase: 'roundEnd', round: 1 });
+    bus.emit(takedown);
+    bus.emit({ ...phase, phase: 'countdown', round: 2 });
+    bus.emit(takedown);
+    bus.dropExcept('matchPhase');
+    expect(bus.pending).toBe(2);
+    // What is emitted afterwards must not overwrite what was kept.
+    bus.emit({ ...phase, phase: 'playing', round: 2 });
+    bus.emit({ ...takedown, victimId: 7 });
+    bus.flush();
+    expect(seen).toEqual([
+      'phase:roundEnd:1',
+      'phase:countdown:2',
+      'phase:playing:2',
+      'takedown:7',
+    ]);
+    expect(bus.pending).toBe(0);
+    // From a handler it does nothing: the flush goes on.
+    seen.length = 0;
+    const off = bus.on('matchPhase', () => bus.dropExcept('matchPhase'));
+    bus.emit(phase);
+    bus.emit(takedown);
+    bus.flush();
+    off();
+    expect(seen).toEqual([`phase:${phase.phase}:${phase.round}`, `takedown:${takedown.victimId}`]);
   });
 });
 

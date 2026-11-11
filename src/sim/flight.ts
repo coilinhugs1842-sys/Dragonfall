@@ -30,6 +30,7 @@
  */
 
 import {
+  BUTTON_AIM,
   BUTTON_BOOST,
   BUTTON_DIVE,
   BUTTON_DODGE_LEFT,
@@ -47,14 +48,24 @@ import {
   DRAGON_ANIM_GLIDE,
   DRAGON_ANIM_HIT,
   DRAGON_FLAG_ALIVE,
+  DRAGON_FLAG_BLINDED,
   DRAGON_FLAG_BOOSTING,
+  DRAGON_FLAG_BURNING,
+  DRAGON_FLAG_CHARGING,
   DRAGON_FLAG_DODGING,
+  DRAGON_FLAG_FIRING,
+  DRAGON_FLAG_HASTED,
+  DRAGON_FLAG_PHASING,
+  DRAGON_FLAG_REGEN,
+  DRAGON_FLAG_SHIELDED,
+  DRAGON_FLAG_SLOWED,
   DRAGON_FLAG_SPAWN_PROTECTED,
   DRAGON_FLAG_STALLED,
+  DRAGON_FLAG_VEILED,
   TICK_DT_S,
-  TICK_HZ,
 } from '../shared';
 import type {
+  ClassAbilities,
   ClassTuning,
   DragonClassId,
   FlightTuning,
@@ -64,15 +75,33 @@ import type {
   TeamId,
   Vec3,
 } from '../shared';
+import { cancelAbilities, moveScaleOf, stepAbilities } from './abilities';
 import { resetDragonState } from './dragon-state';
 import type { DragonState } from './dragon-state';
+import { secondsToTicks } from './ticks';
+
+export { secondsToTicks };
 
 const TWO_PI = Math.PI * 2;
 const EPSILON = 1e-6;
 /** Pitch can never reach straight up/down whatever the tuning says (keeps cos(pitch) > 0). */
 const PITCH_HARD_LIMIT = 1.5;
-/** Cap for a duration from a broken tuning value (Infinity): about 9 hours of ticks. */
-const MAX_TIMER_TICKS = 1_000_000;
+/** The flag bits `writeStatusFlags` owns. */
+const STATUS_FLAG_MASK =
+  DRAGON_FLAG_DODGING |
+  DRAGON_FLAG_SPAWN_PROTECTED |
+  DRAGON_FLAG_SHIELDED |
+  DRAGON_FLAG_VEILED |
+  DRAGON_FLAG_PHASING |
+  DRAGON_FLAG_SLOWED |
+  DRAGON_FLAG_BURNING |
+  DRAGON_FLAG_BLINDED |
+  DRAGON_FLAG_HASTED |
+  DRAGON_FLAG_CHARGING |
+  DRAGON_FLAG_FIRING |
+  DRAGON_FLAG_REGEN;
+/** A cruise speed lowered by a slow stays this far above the stall speed. */
+const SLOWED_CRUISE_OVER_STALL = 1.15;
 
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
@@ -93,16 +122,6 @@ function pitchLimit(tuned: number): number {
   return tuned > 0 ? (tuned < PITCH_HARD_LIMIT ? tuned : PITCH_HARD_LIMIT) : 0;
 }
 
-/**
- * Whole ticks covering at least `seconds` (0.25 s at 30 Hz = 8 ticks). Zero, negative and NaN
- * give 0.
- */
-export function secondsToTicks(seconds: number): number {
-  if (!(seconds > 0)) return 0;
-  const ticks = Math.ceil(seconds * TICK_HZ - EPSILON);
-  return ticks < MAX_TIMER_TICKS ? ticks : MAX_TIMER_TICKS;
-}
-
 /** Lowest airspeed a living dragon of this class can have. */
 export function minFlightSpeed(flight: FlightTuning, cls: ClassTuning): number {
   return flight.stallSpeed * cls.speedScale * flight.minSpeedFraction;
@@ -114,9 +133,17 @@ export function maxFlightSpeed(flight: FlightTuning, cls: ClassTuning): number {
   return flight.maxSpeed * cls.speedScale * dive;
 }
 
-/** Speed cap at the given nose angle: the class dive bonus fades in as the nose goes down. */
-function speedCapAt(flight: FlightTuning, cls: ClassTuning, sinPitch: number): number {
-  let cap = flight.maxSpeed * cls.speedScale;
+/**
+ * Speed cap at the given nose angle: the class dive bonus fades in as the nose goes down, and
+ * the dragon's slow / haste statuses scale it.
+ */
+function speedCapAt(
+  flight: FlightTuning,
+  cls: ClassTuning,
+  dragon: Readonly<DragonState>,
+  sinPitch: number,
+): number {
+  let cap = flight.maxSpeed * cls.speedScale * moveScaleOf(dragon);
   if (sinPitch < 0) {
     const sinLimit = Math.sin(pitchLimit(flight.maxDivePitch));
     const diveFraction = sinLimit > EPSILON ? clamp(-sinPitch / sinLimit, 0, 1) : 1;
@@ -157,6 +184,10 @@ export function initDragon(
   dragon.health = cls.maxHp;
   dragon.flags = DRAGON_FLAG_ALIVE;
   dragon.spawnProtectTicks = secondsToTicks(match.spawnProtectionS);
+  dragon.home.x = dragon.position.x;
+  dragon.home.y = dragon.position.y;
+  dragon.home.z = dragon.position.z;
+  dragon.homeYaw = dragon.yaw;
   finalizeDragon(dragon, flight, cls, null);
 }
 
@@ -165,6 +196,9 @@ export function initDragon(
  * NaN steers as 0, out-of-range values are clamped, unknown button bits are dropped).
  * `input` undefined = no input this tick: the dragon flies straight with the buttons it held.
  * Writes the primary fields only; call `finalizeDragon` afterwards.
+ *
+ * `abilities` is the class's row of the ability table: with it the dragon's ability buttons
+ * work (`stepAbilities`); without it they are ignored (flight only).
  *
  * The frame is taken as an object on purpose: a float passed as an argument to a function the
  * JIT does not inline is boxed (32 B per call, measured), and this runs per dragon per tick on
@@ -175,8 +209,25 @@ export function integrateDragon(
   input: Readonly<InputFrame> | undefined,
   flight: FlightTuning,
   cls: ClassTuning,
+  abilities?: ClassAbilities,
 ): void {
   const dt = TICK_DT_S;
+
+  dragon.envDamage = 0;
+  dragon.envSource = 0;
+  if (dragon.slowTicks > 0) dragon.slowTicks--;
+  if (dragon.hasteTicks > 0) dragon.hasteTicks--;
+  if (dragon.burnTicks > 0) dragon.burnTicks--;
+  if (dragon.regenTicks > 0) dragon.regenTicks--;
+  if (dragon.blindTicks > 0) dragon.blindTicks--;
+  if (dragon.veilTicks > 0) dragon.veilTicks--;
+  if (dragon.phaseTicks > 0) dragon.phaseTicks--;
+  if (dragon.shieldTicks > 0) dragon.shieldTicks--;
+  if (dragon.lastDamagerTicks > 0) dragon.lastDamagerTicks--;
+  for (let i = 0; i < dragon.assistTicks.length; i++) {
+    const left = dragon.assistTicks[i] ?? 0;
+    if (left > 0) dragon.assistTicks[i] = left - 1;
+  }
 
   if (dragon.dodgeTicks > 0) dragon.dodgeTicks--;
   if (dragon.dodgeImmunityTicks > 0) dragon.dodgeImmunityTicks--;
@@ -187,9 +238,12 @@ export function integrateDragon(
   if (dragon.terrainGraceTicks > 0) dragon.terrainGraceTicks--;
 
   if ((dragon.flags & DRAGON_FLAG_ALIVE) === 0) {
+    dragon.deadTicks++;
+    cancelAbilities(dragon);
     integrateDeathFall(dragon, flight);
     return;
   }
+  dragon.deadTicks = 0;
 
   const steerX = input !== undefined ? clampUnit(input.steerX) : 0;
   const steerY = input !== undefined ? clampUnit(input.steerY) : 0;
@@ -197,10 +251,26 @@ export function integrateDragon(
   const buttons = ((input !== undefined ? input.buttons : dragon.prevButtons) | 0) & BUTTON_MASK;
   const pressed = buttons & ~dragon.prevButtons;
   dragon.prevButtons = buttons;
+  if (input !== undefined && (buttons & BUTTON_AIM) !== 0) {
+    // Kept on the dragon so a tick without input still fires where the rider last aimed.
+    dragon.aimYaw = Number.isFinite(input.aimYaw) ? input.aimYaw : 0;
+    dragon.aimPitch = Number.isFinite(input.aimPitch) ? input.aimPitch : 0;
+  }
 
+  if (abilities !== undefined) stepAbilities(dragon, buttons, pressed, abilities, flight);
+  else {
+    dragon.castStarted = 0;
+    dragon.castPulse = 0;
+  }
+
+  // Slow and haste scale the speeds the dragon settles at and tops out at, not the stall speed.
+  const moveScale = moveScaleOf(dragon);
   const stallSpeed = flight.stallSpeed * cls.speedScale;
-  const cruiseSpeed = flight.cruiseSpeed * cls.speedScale;
-  const levelMaxSpeed = flight.maxSpeed * cls.speedScale;
+  let cruiseSpeed = flight.cruiseSpeed * cls.speedScale * moveScale;
+  if (moveScale < 1 && cruiseSpeed < stallSpeed * SLOWED_CRUISE_OVER_STALL) {
+    cruiseSpeed = stallSpeed * SLOWED_CRUISE_OVER_STALL;
+  }
+  const levelMaxSpeed = flight.maxSpeed * cls.speedScale * moveScale;
   const diveHeld = (buttons & BUTTON_DIVE) !== 0;
 
   // --- Stall, with hysteresis so it does not flicker around the threshold ---------------------
@@ -332,7 +402,7 @@ export function integrateDragon(
       (boosting ? flight.boostAccel : 0)) *
       dt;
   const minSpeed = stallSpeed * flight.minSpeedFraction;
-  const maxSpeed = speedCapAt(flight, cls, sinPitch);
+  const maxSpeed = speedCapAt(flight, cls, dragon, sinPitch);
   // `!(a >= b)` also catches NaN.
   if (!(speed >= minSpeed)) speed = minSpeed;
   if (speed > maxSpeed) speed = maxSpeed;
@@ -424,7 +494,7 @@ export function finalizeDragon(
 
   // --- Speed, stamina, burst --------------------------------------------------------------------
   const minSpeed = alive ? minFlightSpeed(flight, cls) : 0;
-  const maxSpeed = speedCapAt(flight, cls, sinPitch);
+  const maxSpeed = speedCapAt(flight, cls, dragon, sinPitch);
   let speed = dragon.speed;
   if (!(speed >= minSpeed)) speed = minSpeed;
   if (speed > maxSpeed) speed = maxSpeed;
@@ -433,6 +503,8 @@ export function finalizeDragon(
 
   if (!(dragon.stamina >= 0)) dragon.stamina = 0;
   else if (dragon.stamina > 1) dragon.stamina = 1;
+  if (!(dragon.ultCharge >= 0)) dragon.ultCharge = 0;
+  else if (dragon.ultCharge > 1) dragon.ultCharge = 1;
 
   const burst = dragon.burst;
   const burstSq = burst.x * burst.x + burst.y * burst.y + burst.z * burst.z;
@@ -497,16 +569,13 @@ export function finalizeDragon(
   dragon.orientation.w = qw;
 
   // --- Derived: flags and the animation hint ----------------------------------------------------
-  let flags = dragon.flags & ~(DRAGON_FLAG_DODGING | DRAGON_FLAG_SPAWN_PROTECTED);
+  writeStatusFlags(dragon);
   if (!alive) {
-    flags &= ~(DRAGON_FLAG_BOOSTING | DRAGON_FLAG_STALLED);
-    dragon.flags = flags;
+    dragon.flags &= ~(DRAGON_FLAG_BOOSTING | DRAGON_FLAG_STALLED);
     dragon.anim = DRAGON_ANIM_DEATH_FALL;
     return;
   }
-  if (dragon.dodgeImmunityTicks > 0) flags |= DRAGON_FLAG_DODGING;
-  if (dragon.spawnProtectTicks > 0) flags |= DRAGON_FLAG_SPAWN_PROTECTED;
-  dragon.flags = flags;
+  const flags = dragon.flags;
 
   // The list has no dodge clip: the spin is in `orientation`, the hint leans the same way.
   if (dragon.hitTicks > 0) dragon.anim = DRAGON_ANIM_HIT;
@@ -522,9 +591,38 @@ export function finalizeDragon(
 }
 
 /**
+ * Rewrites the flag bits that mirror timers (dodge, spawn protection and every status) from
+ * those timers; a dead dragon carries none of them. `finalizeDragon` calls it every tick, and
+ * the host calls it again after combat changed a timer, so the bits a snapshot carries are never
+ * a tick behind. A pure function of the timers: a client that predicts the timers predicts the
+ * bits.
+ */
+export function writeStatusFlags(dragon: DragonState): void {
+  let flags = dragon.flags & ~STATUS_FLAG_MASK;
+  if ((flags & DRAGON_FLAG_ALIVE) !== 0) {
+    if (dragon.dodgeImmunityTicks > 0) flags |= DRAGON_FLAG_DODGING;
+    if (dragon.spawnProtectTicks > 0) flags |= DRAGON_FLAG_SPAWN_PROTECTED;
+    if (dragon.shieldTicks > 0) flags |= DRAGON_FLAG_SHIELDED;
+    if (dragon.veilTicks > 0) flags |= DRAGON_FLAG_VEILED;
+    if (dragon.phaseTicks > 0) flags |= DRAGON_FLAG_PHASING;
+    if (dragon.slowTicks > 0) flags |= DRAGON_FLAG_SLOWED;
+    if (dragon.burnTicks > 0) flags |= DRAGON_FLAG_BURNING;
+    if (dragon.blindTicks > 0) flags |= DRAGON_FLAG_BLINDED;
+    if (dragon.hasteTicks > 0) flags |= DRAGON_FLAG_HASTED;
+    if (dragon.castSlot >= 0) flags |= DRAGON_FLAG_CHARGING;
+    if (dragon.firingTicks > 0) flags |= DRAGON_FLAG_FIRING;
+    if (dragon.regenTicks > 0) flags |= DRAGON_FLAG_REGEN;
+  }
+  dragon.flags = flags;
+}
+
+/**
  * Takes `amount` HP off a living dragon and returns what was actually removed. Does nothing
  * during dodge immunity or spawn protection unless `ignoreImmunity` is set. At 0 HP the dragon
  * loses DRAGON_FLAG_ALIVE at once and starts its death fall on the next tick.
+ *
+ * This is the bare HP step. Abilities go through the host's damage pipeline (`combat.ts`),
+ * which adds shields, friendly fire, credit and events on top of it.
  */
 export function damageDragon(
   dragon: DragonState,
