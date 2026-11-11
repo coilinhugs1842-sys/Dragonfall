@@ -10,6 +10,7 @@
 
 import type { DragonClassId } from './classes';
 import type { TeamId } from './constants';
+import type { MapSolid } from './maps/solids';
 import type { MapId } from './match';
 import type { Quat, Vec3 } from './math-types';
 import type { DragonAnimClip } from './world-view';
@@ -97,19 +98,33 @@ export interface MapPropSet {
 }
 
 export interface MapColliders {
-  /** Low-poly collision mesh the sim builds its BVH from (no textures). */
-  readonly terrain: string;
-  /** Storm wall: a vertical cylinder around the arena. */
+  /**
+   * Low-poly collision mesh the sim builds its BVH from (no textures). Absent on a greybox map,
+   * whose collision mesh is triangulated from `MapManifest.solids` instead.
+   */
+  readonly terrain?: string;
+  /**
+   * Storm wall: a vertical cylinder around the arena, from `floorY` to `ceilingY`. The sim seeds
+   * the `stormWall` zone (world-view.ts) from `stormCenter` + `stormRadius`.
+   */
   readonly stormCenter: Vec3;
   readonly stormRadius: number;
-  /** Flight ceiling and the cloud-sea floor, metres. */
+  /** Flight ceiling and the hazard floor inside the cloud sea, world Y in metres. */
   readonly ceilingY: number;
   readonly floorY: number;
+  /**
+   * World Y of the cloud-sea surface the view draws. At or a little above `floorY`, so a dragon
+   * can skim the cloud tops before the floor hazard applies. Defaults to `floorY` when absent.
+   */
+  readonly cloudSeaY?: number;
 }
 
 export interface MapSky {
-  /** 2:1 KTX2 panorama of distant clouds and mountains (no sun disk). */
-  readonly panorama: string;
+  /**
+   * 2:1 KTX2 panorama of distant clouds and mountains (no sun disk). Absent on a greybox map:
+   * the view falls back to its procedural gradient sky.
+   */
+  readonly panorama?: string;
   /** Unit vector pointing toward the sun. */
   readonly sunDirection: Vec3;
   /** sRGB hex. */
@@ -128,11 +143,21 @@ export interface MapManifest {
   readonly name: string;
   /** Playable extent in metres (Shattered Spires is 2000 x 2000). */
   readonly size: number;
+  /** Authored chunk files. Empty on a greybox map (see `solids`). */
   readonly chunks: readonly MapChunk[];
   readonly props: readonly MapPropSet[];
   readonly sky: MapSky;
+  /** One gate per team, indexed by TeamId. */
   readonly spawnGates: readonly SpawnGate[];
   readonly colliders: MapColliders;
+  /**
+   * Greybox geometry as primitive solids. When present, both the collision mesh and the render
+   * meshes are built from it with `buildMapTriangles` (src/shared/maps), instead of from
+   * `colliders.terrain` and `chunks`.
+   */
+  readonly solids?: readonly MapSolid[];
+  /** Edge of a world chunk in metres (about 250, docs/PERFORMANCE.md); the grid spans `size`. */
+  readonly chunkSize?: number;
   /** Camera path for the match-intro flyby (format TBD in T-5.x). */
   readonly introSpline?: readonly Vec3[];
   readonly audio?: MapAudio;
