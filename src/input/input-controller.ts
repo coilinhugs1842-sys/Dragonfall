@@ -34,12 +34,14 @@ import { mouseButtonCode } from './bindings';
 import type { InputBindings } from './bindings';
 import {
   createInputState,
+  clearInputAim,
   inputCodeDown,
   inputCodeUp,
   inputMouseMove,
   isCodeBound,
   releaseAllInput,
   sampleInput,
+  setInputAim,
   setInputBindings,
 } from './input-state';
 import type { InputOptions, InputState } from './input-state';
@@ -160,6 +162,19 @@ export class InputController implements EventListenerObject {
     return dtS === undefined
       ? sampleInput(this.state, tick, out)
       : sampleInput(this.state, tick, out, dtS);
+  }
+
+  /**
+   * Where abilities are aimed, as a world-space direction (`InputFrame.aimYaw/aimPitch`). The
+   * game layer calls it once per rendered frame from the camera's reticle ray; `clearAim`
+   * while there is nothing to aim with. Allocation-free.
+   */
+  setAim(yaw: number, pitch: number): void {
+    setInputAim(this.state, yaw, pitch);
+  }
+
+  clearAim(): void {
+    clearInputAim(this.state);
   }
 
   /** Installs a rebind table (releases all keys). */

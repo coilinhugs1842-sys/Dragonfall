@@ -14,16 +14,35 @@
  */
 
 import { PerspectiveCamera, Scene } from 'three';
+import type { WebGLRenderer } from 'three';
 import { createPlaceholderDragons } from '../dragons';
 import type { PlaceholderDragons } from '../dragons';
 import { createCameraRig } from '../render';
 import type { CameraRig } from '../render';
-import { DRAGON_FLAG_ALIVE, NO_PLAYER, QUALITY_PRESETS, findDragonView } from '../shared';
-import type { DragonView, GreyboxMap, PlayerId, QualityPresetId, WorldView } from '../shared';
+import {
+  DRAGON_FLAG_ALIVE,
+  DRAGON_FLAG_VEILED,
+  NO_PLAYER,
+  QUALITY_PRESETS,
+  findDragonView,
+} from '../shared';
+import type {
+  DragonView,
+  GameEventSource,
+  GreyboxMap,
+  PlayerId,
+  QualityPresetId,
+  Unsubscribe,
+  WorldView,
+} from '../shared';
+import { createVfx } from '../vfx';
+import type { Vfx, VfxStats } from '../vfx';
 import { cloudFieldFromMap, createCloudBillboards, createCloudSea } from '../world/clouds';
 import { createMapView } from '../world/map';
 import type { MapView } from '../world/map';
 import { applySkyFog, createSkyDome, createSkyLights } from '../world/sky';
+import { createStormWallView } from '../world/storm';
+import type { StormWallView } from '../world/storm';
 import type { MatchAssets } from './match-assets';
 
 /**
@@ -35,6 +54,11 @@ export const STAGE_MAP_CHUNK_SIZE = 500;
 const CAMERA_SEA_CLEARANCE = 1.5;
 /** Squared metres in one frame beyond which the camera's subject was respawned, not flown. */
 const TELEPORT_DISTANCE_SQ = 60 * 60;
+/**
+ * Death cam placeholder (the 3 s orbit is T-5.5): the camera holds its last pose this long
+ * after the local dragon went down, then cuts to whoever got the takedown.
+ */
+const DEATH_CAM_HOLD_S = 0.9;
 
 // --- Backdrop drift (title, lobby) -----------------------------------------------------------------
 const BACKDROP_FOV = 55;
@@ -54,6 +78,10 @@ export interface StageOptions {
   readonly quality: QualityPresetId;
   /** The sky, fog and cloud field come from this map's data (every map shares them for now). */
   readonly map: GreyboxMap;
+  /** The match's GameEvents: the effects subscribe while a match is loaded. */
+  readonly events?: GameEventSource | null;
+  /** Compiles the effect shaders at match load, so the first shot does not hitch. */
+  readonly webgl?: WebGLRenderer | null;
 }
 
 export interface Stage {
@@ -76,6 +104,19 @@ export interface Stage {
   updateMatch(view: WorldView, steerX: number, steerY: number, dtS: number): void;
   /** Next camera subject for a spectator (wraps round). */
   cycleSpectateTarget(): void;
+  /**
+   * Whose dragon the camera is on this frame: the local rider's own, the rider a spectator
+   * watches, the killer during the death cam; NO_PLAYER while it holds still or drifts.
+   */
+  readonly watchedId: PlayerId;
+  /** The effects of the loaded match (cosmetic local shots); null with none loaded. */
+  readonly vfx: Vfx | null;
+  /** Live effect counters for the perf HUD; null with no match loaded. */
+  readonly vfxStats: Readonly<VfxStats> | null;
+  /** Settings: base FOV in degrees, shake 0..1, and the reduce-motion switch. */
+  setCameraSettings(fovDeg: number, shake: number, reduceMotion: boolean): void;
+  /** Drops every live effect (a new round). */
+  clearEffects(): void;
   /** Place the camera directly on the next match frame (spawn, scene cut). */
   snapCamera(): void;
   setAspect(aspect: number): void;
@@ -89,6 +130,9 @@ interface MatchViews {
   readonly mapView: MapView;
   readonly dragons: PlaceholderDragons;
   readonly rig: CameraRig;
+  readonly vfx: Vfx;
+  readonly storm: StormWallView;
+  readonly unsubscribe: Unsubscribe | null;
 }
 
 export function createStage(options: StageOptions): Stage {
@@ -115,6 +159,14 @@ export function createStage(options: StageOptions): Stage {
   const sunYaw = Math.atan2(map.sky.sunDirection.x, map.sky.sunDirection.z);
 
   let match: MatchViews | null = null;
+  const events = options.events ?? null;
+  const webgl = options.webgl ?? null;
+  let cameraFov = Number.NaN;
+  let cameraShake = 1;
+  let cameraReduceMotion = false;
+  let watchedId: PlayerId = NO_PLAYER;
+  /** Seconds the local dragon has been down (the death cam's clock). */
+  let downForS = 0;
   let spectateId: PlayerId = NO_PLAYER;
   /** True on a frame where the chase camera had somebody to follow. */
   let chasing = false;
@@ -126,6 +178,14 @@ export function createStage(options: StageOptions): Stage {
     clouds.setQuality(preset);
     match?.mapView.setQuality(preset);
     match?.dragons.setQuality(preset);
+    match?.vfx.setQuality(preset);
+    match?.storm.setQuality(preset);
+  }
+
+  function applyCameraSettings(rig: CameraRig): void {
+    if (Number.isFinite(cameraFov)) rig.setBaseFov(cameraFov);
+    rig.setShakeScale(cameraShake);
+    rig.setReduceMotion(cameraReduceMotion);
   }
 
   function placeBackdropCamera(): void {
@@ -192,12 +252,17 @@ export function createStage(options: StageOptions): Stage {
 
   function unloadMatch(): void {
     if (match === null) return;
-    scene.remove(match.mapView.object, match.dragons.object);
+    scene.remove(match.mapView.object, match.dragons.object, match.storm.object);
+    match.unsubscribe?.();
+    match.vfx.dispose();
+    match.storm.dispose();
     match.mapView.dispose();
     match.dragons.dispose();
     match.rig.dispose();
     match = null;
     chasing = false;
+    watchedId = NO_PLAYER;
+    downForS = 0;
     lastSubjectId = NO_PLAYER;
   }
 
@@ -231,8 +296,24 @@ export function createStage(options: StageOptions): Stage {
       });
       rig.setAspect(aspect);
       rig.snap();
-      scene.add(mapView.object, dragons.object);
-      match = { seed: assets.seed, mapView, dragons, rig };
+      applyCameraSettings(rig);
+      const storm = createStormWallView(preset, {
+        floorY: cloudSeaY,
+        ceilingY: assets.map.colliders.ceilingY,
+      });
+      scene.add(mapView.object, dragons.object, storm.object);
+      // The effects add their own objects to the scene (and take them out again on dispose).
+      const vfx = createVfx({
+        scene,
+        quality: preset,
+        terrain: assets.collision,
+        seed: assets.seed,
+      });
+      if (webgl !== null) vfx.warmUp(webgl, rig.camera);
+      const unsubscribe = events !== null ? vfx.connect(events) : null;
+      match = { seed: assets.seed, mapView, dragons, rig, vfx, storm, unsubscribe };
+      watchedId = NO_PLAYER;
+      downForS = 0;
       spectateId = NO_PLAYER;
       seenCount = 0;
       chasing = false;
@@ -264,23 +345,60 @@ export function createStage(options: StageOptions): Stage {
       for (let i = 0; i < seenCount; i++) seenIds[i] = view.dragons[i]?.id ?? NO_PLAYER;
 
       const local = findDragonView(view, view.localDragonId);
-      if (local !== undefined) {
+      if (local !== undefined && (local.flags & DRAGON_FLAG_ALIVE) !== 0) {
+        downForS = 0;
+        watchedId = local.id;
         rig.setAim(steerX, steerY);
         followSubject(rig, local, dtS);
+      } else if (local !== undefined) {
+        // Down: hold the last pose for a beat, then watch whoever got the takedown. With no
+        // killer to show (terrain, storm, a veiled enemy) the camera stays where it was.
+        downForS += dtS;
+        const killer =
+          downForS >= DEATH_CAM_HOLD_S && view.local.valid
+            ? findDragonView(view, view.local.killerId)
+            : undefined;
+        if (
+          killer !== undefined &&
+          killer.id !== local.id &&
+          (killer.flags & DRAGON_FLAG_ALIVE) !== 0 &&
+          ((killer.flags & DRAGON_FLAG_VEILED) === 0 || killer.team === local.team)
+        ) {
+          watchedId = killer.id;
+          rig.setAim(0, 0);
+          followSubject(rig, killer, dtS);
+        } else {
+          watchedId = NO_PLAYER;
+          if (!chasing) {
+            // Never had a pose (joined dead): start from the place of the fall.
+            rig.setAim(0, 0);
+            followSubject(rig, local, dtS);
+          } else {
+            // The next subject (the killer, or the respawned dragon) is a cut, not a sweep.
+            lastSubjectId = NO_PLAYER;
+          }
+        }
       } else {
+        downForS = 0;
         const subject = spectateSubject(view);
         if (subject !== undefined) {
+          watchedId = subject.id;
           rig.setAim(0, 0);
           followSubject(rig, subject, dtS);
-        } else if (!chasing) {
+        } else {
+          watchedId = NO_PLAYER;
           // Nobody to watch yet (the first snapshot has not arrived): keep drifting.
-          placeBackdropCamera();
+          if (!chasing) placeBackdropCamera();
         }
       }
       const camera = chasing ? rig.camera : backdropCamera;
       updateSky(camera);
       views.mapView.update(camera.position);
       views.dragons.update(view, dtS);
+      views.storm.update(view, camera.position, timeS);
+      // Last: the effects read the placed camera (billboards, near fade).
+      camera.updateMatrixWorld();
+      views.vfx.update(view, timeS, dtS, camera);
     },
 
     cycleSpectateTarget(): void {
@@ -297,6 +415,27 @@ export function createStage(options: StageOptions): Stage {
 
     snapCamera(): void {
       lastSubjectId = NO_PLAYER;
+    },
+
+    get watchedId() {
+      return watchedId;
+    },
+    get vfx() {
+      return match === null ? null : match.vfx;
+    },
+    get vfxStats() {
+      return match === null ? null : match.vfx.stats;
+    },
+
+    setCameraSettings(fovDeg: number, shake: number, reduceMotion: boolean): void {
+      cameraFov = fovDeg;
+      cameraShake = shake;
+      cameraReduceMotion = reduceMotion;
+      if (match !== null) applyCameraSettings(match.rig);
+    },
+
+    clearEffects(): void {
+      match?.vfx.clear();
     },
 
     setAspect(next: number): void {

@@ -3,6 +3,7 @@ import { STORM_WALL_ZONE_ID, buildWorldView, nlerpQuat } from '../../src/game/wo
 import type { WorldViewBuildOptions } from '../../src/game/world-view-builder';
 import {
   DRAGON_FLAG_ALIVE,
+  DRAGON_FLAG_VEILED,
   NO_PLAYER,
   TEAM_EMBER,
   TEAM_FROST,
@@ -112,6 +113,34 @@ describe('buildWorldView', () => {
     expect(view.dragons).toHaveLength(1);
   });
 
+  it('leaves a veiled dragon out for the other team only, as a snapshot would', () => {
+    const sim = createSim();
+    sim.spawnDragon(4, TEAM_EMBER, 'talon', { x: 0, y: 300, z: 0 }, 0);
+    sim.spawnDragon(5, TEAM_FROST, 'wraith', { x: 30, y: 300, z: 0 }, 0);
+    sim.spawnDragon(6, TEAM_FROST, 'talon', { x: 60, y: 300, z: 0 }, 0);
+    const wraith = sim.getDragon(5);
+    if (wraith === undefined) throw new Error('no dragon');
+    wraith.veilTicks = 90;
+    sim.step(0, []);
+    sim.step(1, []);
+    expect(wraith.flags & DRAGON_FLAG_VEILED).not.toBe(0);
+
+    const view = createWorldView();
+    // An enemy rider: nothing of the veiled dragon reaches any view.
+    buildWorldView(view, sim.prev, sim.current, 1, OPTIONS);
+    expect(view.dragonCount).toBe(2);
+    expect(findDragonView(view, 5)).toBeUndefined();
+    // Its own team and a spectator still get it, flagged.
+    buildWorldView(view, sim.prev, sim.current, 1, { ...OPTIONS, localDragonId: 6 });
+    expect((findDragonView(view, 5)?.flags ?? 0) & DRAGON_FLAG_VEILED).not.toBe(0);
+    buildWorldView(view, sim.prev, sim.current, 1, { ...OPTIONS, localDragonId: NO_PLAYER });
+    expect(view.dragonCount).toBe(3);
+    // The veil ends: it is back.
+    for (let tick = 2; tick < 100; tick++) sim.step(tick, []);
+    buildWorldView(view, sim.prev, sim.current, 1, OPTIONS);
+    expect(findDragonView(view, 5)).toBeDefined();
+  });
+
   it('clamps alpha and copies the discrete fields from the current tick', () => {
     const sim = createSim();
     sim.spawnDragon(4, TEAM_FROST, 'bastion', { x: 0, y: 300, z: 0 }, 1);
@@ -199,6 +228,8 @@ describe('buildWorldView', () => {
       team: null,
       position: { x: 10, y: 0, z: -20 },
       radius: 1000,
+      ownerId: NO_PLAYER,
+      remainingS: Infinity,
     });
     storm.stormRadius = 600;
     buildWorldView(view, sim.prev, sim.current, 0, options);

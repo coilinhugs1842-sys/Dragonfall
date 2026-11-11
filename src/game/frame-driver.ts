@@ -35,6 +35,11 @@ export interface FrameDriverOptions {
    * timers to about one a second). Created once and called often: it must not allocate.
    */
   background?: () => void;
+  /**
+   * A frame cap: asked once per animation-frame callback with its timestamp; false skips the
+   * callback (no sim step, no draw). Created once and called every callback: no allocation.
+   */
+  shouldRender?: (timeMs: number) => boolean;
   /** Defaults to the real browser (`createBrowserFrameHost`). */
   host?: FrameHost;
 }
@@ -64,6 +69,7 @@ export class FrameDriver {
   private readonly render: FrameRenderFn;
   private readonly host: FrameHost;
   private readonly background: (() => void) | null;
+  private readonly gate: ((timeMs: number) => boolean) | null;
   private wanted = false;
   private handle: number | null = null;
   private timer: number | null = null;
@@ -77,6 +83,7 @@ export class FrameDriver {
     this.loop = options.loop;
     this.render = options.render;
     this.background = options.background ?? null;
+    this.gate = options.shouldRender ?? null;
     this.host = options.host ?? createBrowserFrameHost();
   }
 
@@ -159,6 +166,9 @@ export class FrameDriver {
     if (!this.wanted) return;
     // Re-arm first so an exception in sim or render does not freeze the game for good.
     this.handle = this.host.requestFrame(this.onFrame);
+    // A frame cap turns this callback down: nothing is stepped or drawn, and the time it
+    // covered is counted by the next callback that is let through.
+    if (this.gate !== null && !Number.isNaN(this.lastTimeMs) && !this.gate(timeMs)) return;
 
     const elapsedMs = timeMs - this.lastTimeMs;
     this.lastTimeMs = timeMs;

@@ -172,7 +172,14 @@ describe('autopilot', () => {
     frame.steerX = 1;
     frame.buttons = 3;
     writeAutopilotFrame(12, undefined, course, frame);
-    expect(frame).toEqual({ tick: 12, steerX: 0, steerY: 0, buttons: 0 });
+    expect(frame).toEqual({
+      tick: 12,
+      steerX: 0,
+      steerY: 0,
+      buttons: 0,
+      aimYaw: 0,
+      aimPitch: 0,
+    });
     const still = { position: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 } };
     expect(writeAutopilotFrame(3, still, course, frame).steerX).toBe(0);
     const lost = { position: { x: NaN, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 40 } };

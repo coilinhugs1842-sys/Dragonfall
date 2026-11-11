@@ -15,7 +15,14 @@
  * per dragon slot, never afterwards).
  */
 
-import { MAX_PLAYERS, acquireDragonView, acquireZoneView, beginWorldView } from '../shared';
+import {
+  DRAGON_FLAG_VEILED,
+  MAX_PLAYERS,
+  NO_PLAYER,
+  acquireDragonView,
+  acquireZoneView,
+  beginWorldView,
+} from '../shared';
 import type { MatchPhase, MutableQuat, MutableWorldView, PlayerId, Quat } from '../shared';
 import type { HostViewState } from '../net';
 
@@ -92,9 +99,25 @@ export function buildWorldView(
   const t = alpha > 0 ? (alpha < limit ? alpha : limit) : 0;
   beginWorldView(view);
 
+  // The host's page sees what a client would: a veiled dragon of the other team is left out,
+  // exactly as `HostSnapshotBuilder.forRecipient` leaves it out of an enemy's snapshot, so no
+  // view (mesh, particles, sound, HUD) has anything to give it away with. Spectators see all.
+  let localTeam = -1;
+  if (options.localDragonId !== NO_PLAYER) {
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+      const dragon = current.dragons[i];
+      if (dragon !== undefined && dragon.active && dragon.id === options.localDragonId) {
+        localTeam = dragon.team;
+        break;
+      }
+    }
+  }
+
   for (let i = 0; i < MAX_PLAYERS; i++) {
     const now = current.dragons[i];
     if (now === undefined || !now.active) continue;
+    if (localTeam >= 0 && now.team !== localTeam && (now.flags & DRAGON_FLAG_VEILED) !== 0)
+      continue;
     const before = prev.dragons[i];
     const from = before !== undefined && before.active && before.id === now.id ? before : now;
 

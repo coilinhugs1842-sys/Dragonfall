@@ -22,6 +22,15 @@ describe('parseQueryFlags', () => {
       solo: false,
       autostart: false,
       noWorker: false,
+      autopilotBot: false,
+      mode: null,
+      scoreLimit: 0,
+      timeLimitS: -1,
+      teamSize: 0,
+      botLevel: null,
+      fillBots: false,
+      lagCompensation: true,
+      joinCode: '',
     };
     expect(parseQueryFlags('')).toEqual(off);
     expect(parseQueryFlags('?')).toEqual(off);
@@ -116,6 +125,39 @@ describe('parseQueryFlags', () => {
   });
 });
 
+describe('match set-up flags', () => {
+  it('reads the mode, limits, team size, bot skill and fill', () => {
+    const flags = parseQueryFlags('?mode=Duel&score=5&time=0&teamsize=2&botlevel=hard&fill');
+    expect(flags).toMatchObject({
+      mode: 'duel',
+      scoreLimit: 5,
+      timeLimitS: 0,
+      teamSize: 2,
+      botLevel: 'hard',
+      fillBots: true,
+    });
+    // A mode that has not shipped, and junk, are ignored.
+    expect(parseQueryFlags('?mode=skyCrown').mode).toBeNull();
+    expect(parseQueryFlags('?mode=x&score=-3&teamsize=9&botlevel=god')).toMatchObject({
+      mode: null,
+      scoreLimit: 0,
+      teamSize: 5,
+      botLevel: null,
+    });
+  });
+
+  it('reads ?autopilot=bot, ?lagcomp=0 and ?join', () => {
+    expect(parseQueryFlags('?autopilot=bot')).toMatchObject({
+      autopilot: true,
+      autopilotBot: true,
+    });
+    expect(parseQueryFlags('?autopilot').autopilotBot).toBe(false);
+    expect(parseQueryFlags('?lagcomp=0').lagCompensation).toBe(false);
+    expect(parseQueryFlags('?lagcomp').lagCompensation).toBe(true);
+    expect(parseQueryFlags('?join=abcde').joinCode).toBe('ABCDE');
+  });
+});
+
 describe('getQueryFlags', () => {
   it('is all off where there is no location (node)', () => {
     expect(getQueryFlags()).toEqual({
@@ -131,6 +173,15 @@ describe('getQueryFlags', () => {
       solo: false,
       autostart: false,
       noWorker: false,
+      autopilotBot: false,
+      mode: null,
+      scoreLimit: 0,
+      timeLimitS: -1,
+      teamSize: 0,
+      botLevel: null,
+      fillBots: false,
+      lagCompensation: true,
+      joinCode: '',
     });
   });
 });

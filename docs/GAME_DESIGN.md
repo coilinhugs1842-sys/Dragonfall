@@ -57,6 +57,10 @@ that charges by dealing damage and capturing objectives.
 
 Exact numbers live in `src/shared` tuning tables so they can be balanced without code changes.
 
+Rules that follow from the build (DECISIONS 27, 28): every ability that can hurt an enemy, Afterburn included,
+ends spawn protection and Veil. While a Wraith is veiled, enemies get no hit markers, status icons or cast
+effects for it, on the host's screen too.
+
 ## Modes
 
 | Mode | Teams | Win condition | Phase |

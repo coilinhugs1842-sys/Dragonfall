@@ -35,6 +35,11 @@ export interface PerfHudOptions {
    * snapshot loss and prediction error). Called at the text rate; '' = no session.
    */
   getNetText?: () => string;
+  /**
+   * The effect lines, already formatted: particles alive against the preset's cap (with the
+   * peak) and audio voices playing against theirs. Called at the text rate.
+   */
+  getFxText?: () => string;
   /** Where to mount. Defaults to `#ui`, then `document.body`. */
   parent?: HTMLElement;
 }
@@ -71,7 +76,7 @@ function formatCount(n: number): string {
 }
 
 export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
-  const { renderer, getSimMs, getNetText } = opts;
+  const { renderer, getSimMs, getNetText, getFxText } = opts;
   const webgl = renderer.webgl;
   const canvas = webgl.domElement;
   const info = webgl.info;
@@ -124,6 +129,7 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
     // Three decimals: a 10-dragon tick is tens of microseconds.
     const simText = getSimMs ? `${getSimMs().toFixed(3)} ms` : NO_VALUE;
     const netText = getNetText ? getNetText() : '';
+    const fxText = getFxText ? getFxText() : '';
     text.data =
       `fps ${summary.fps.toFixed(1)}  1% low ${summary.onePercentLowFps.toFixed(1)}\n` +
       `ms  avg ${summary.avgMs.toFixed(2)}  1% ${summary.onePercentLowMs.toFixed(2)}` +
@@ -134,7 +140,8 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
       `  ${renderer.presetId}\n` +
       `sim ${simText}
 ` +
-      `${netText === '' ? `net ${NO_VALUE}` : netText}`;
+      `${netText === '' ? `net ${NO_VALUE}` : netText}` +
+      `${fxText === '' ? '' : `\n${fxText}`}`;
   }
 
   return {

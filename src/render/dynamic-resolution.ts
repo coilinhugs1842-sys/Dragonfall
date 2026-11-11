@@ -29,6 +29,10 @@
  *   created. Any faster half second seen later tightens the budget again, back to 60 fps at
  *   most. Known gap: a display that slows down AFTER a faster cadence was seen (refresh rate
  *   switched mid-session) still holds the scale at its minimum.
+ * - A frame cap the PLAYER chose (Settings: 30 / 45 fps) is not a slow GPU either, and here
+ *   nothing has to be inferred: `setFrameCap` makes the cap's interval the budget. Capped
+ *   frames come in whole display refreshes (45 fps on a 60 Hz panel alternates 16.7 and 33.3
+ *   ms), so while capped a frame only counts as missed when it is most of a refresh late.
  */
 
 /** 60 fps. */
@@ -49,6 +53,11 @@ const ON_BUDGET_FACTOR = 1.02;
 const SAMPLE_CLAMP_FACTOR = 2;
 /** A frame longer than this missed at least one vsync. */
 const MISSED_FRAME_FACTOR = 1.5;
+/**
+ * Under a frame cap a frame is missed when it is this much of a 60 Hz refresh over the budget
+ * (the longer of a cap's alternating intervals is at most two thirds of a refresh over it).
+ */
+const CAPPED_MISSED_REFRESHES = 0.75;
 
 /** Frames longer than this are tab switches, GC pauses or loading hitches, not GPU load... */
 const OUTLIER_MS = 100;
@@ -114,6 +123,9 @@ export class DynamicResolution {
   private steadyWindows = 0;
   /** Fastest cadence-window average ever seen. Outlives `reset`: it describes the display. */
   private fastestCadenceMs = Infinity;
+  /** The frame time asked for: 60 fps, or the interval of the player's frame cap. */
+  private targetMs = DYNRES_TARGET_FRAME_MS;
+  private capped = false;
 
   constructor(min = 1, max = 1) {
     this.min = 1;
@@ -141,9 +153,25 @@ export class DynamicResolution {
     return this.ema;
   }
 
-  /** Frame time the scaler holds: 1000 / 60, or longer on a display slower than 60 Hz. */
+  /** Frame time the scaler holds: 1000 / 60, or longer on a slower display or under a cap. */
   get frameBudgetMs(): number {
     return this.budget;
+  }
+
+  /**
+   * The page draws at most `fps` frames a second by the player's choice (0 or less = no cap).
+   * The budget becomes the cap's interval, so capped frames read as on time and not as a GPU
+   * that cannot hold 60 fps. The scale stays where it is and finds its way from there.
+   */
+  setFrameCap(fps: number): void {
+    const capMs = fps > 0 && Number.isFinite(fps) ? 1000 / fps : 0;
+    const target = capMs > DYNRES_TARGET_FRAME_MS ? capMs : DYNRES_TARGET_FRAME_MS;
+    const capped = capMs > 0;
+    if (target === this.targetMs && capped === this.capped) return;
+    this.targetMs = target;
+    this.capped = capped;
+    this.budget = target;
+    this.clearHistory();
   }
 
   /** Sets the preset's bounds and clamps the current scale into them. */
@@ -201,7 +229,10 @@ export class DynamicResolution {
 
     // Checked before the probe window below: both end on the same frame, and a probe that
     // juddered has failed.
-    if (sampleMs > budget * MISSED_FRAME_FACTOR) this.missedFrames++;
+    const missedMs = this.capped
+      ? budget + DYNRES_TARGET_FRAME_MS * CAPPED_MISSED_REFRESHES
+      : budget * MISSED_FRAME_FACTOR;
+    if (sampleMs > missedMs) this.missedFrames++;
     this.judderFrames++;
     if (this.judderFrames === JUDDER_WINDOW_FRAMES) {
       const juddering = this.missedFrames >= JUDDER_MISSED_FRAMES;
@@ -259,11 +290,9 @@ export class DynamicResolution {
     this.cadenceFrames = 0;
 
     if (average < this.fastestCadenceMs) this.fastestCadenceMs = average;
-    // The best the display has shown it can do, but never asking for more than 60 fps.
-    const proven =
-      this.fastestCadenceMs > DYNRES_TARGET_FRAME_MS
-        ? this.fastestCadenceMs
-        : DYNRES_TARGET_FRAME_MS;
+    // The best the display has shown it can do, but never asking for more than the target
+    // (60 fps, or the player's frame cap).
+    const proven = this.fastestCadenceMs > this.targetMs ? this.fastestCadenceMs : this.targetMs;
 
     if (proven < this.budget) {
       // Faster frames than the relaxed budget assumed possible: tighten it.

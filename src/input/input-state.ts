@@ -15,6 +15,7 @@
  * is latched and still reported as held for exactly one frame.
  */
 import {
+  BUTTON_AIM,
   BUTTON_BOOST,
   BUTTON_DIVE,
   BUTTON_DODGE_LEFT,
@@ -57,6 +58,8 @@ export interface InputOptions {
    * sometimes report one huge bogus delta right after pointer lock or a window switch.
    */
   maxMouseDeltaCounts: number;
+  /** true: one press of the boost key turns boost on, the next turns it off. */
+  boostToggle: boolean;
 }
 
 /** First-pass feel values; tune with the dev GUI (the object is read on every call). */
@@ -71,6 +74,7 @@ export const DEFAULT_INPUT_OPTIONS: Readonly<InputOptions> = {
   keyPitchSteer: 0.6,
   keyYawSteer: 0.3,
   maxMouseDeltaCounts: 1500,
+  boostToggle: false,
 };
 
 export const MIN_SENSITIVITY = 0.1;
@@ -91,6 +95,16 @@ export interface InputState {
   latchedActions: number;
   /** Sum of `heldActions` as sampled for the most recent frame (includes latched taps). */
   sampledActions: number;
+  /** `options.boostToggle`: boost is latched on (flipped by each press of the boost key). */
+  boostLatched: boolean;
+  /**
+   * Where abilities are aimed (`InputFrame.aimYaw/aimPitch`: a world-space direction). The
+   * module that owns the camera writes it once per rendered frame with `setInputAim`; while
+   * `aimValid` is false the frames carry no aim and shots go along the nose.
+   */
+  aimYaw: number;
+  aimPitch: number;
+  aimValid: boolean;
   // --- Lookup tables, rebuilt by setInputBindings ---
   bindings: InputBindings;
   /** Code -> slot index in the two arrays below. */
@@ -124,6 +138,7 @@ const BIT_PITCH_UP = inputActionBit('pitchUp');
 const BIT_PITCH_DOWN = inputActionBit('pitchDown');
 const BIT_TURN_LEFT = inputActionBit('turnLeft');
 const BIT_TURN_RIGHT = inputActionBit('turnRight');
+const BIT_BOOST = inputActionBit('boost');
 
 function clampUnit(value: number): number {
   if (!(value >= -1)) return value < -1 ? -1 : 0;
@@ -145,6 +160,10 @@ export function createInputState(
     heldActions: 0,
     latchedActions: 0,
     sampledActions: 0,
+    boostLatched: false,
+    aimYaw: 0,
+    aimPitch: 0,
+    aimValid: false,
     bindings,
     codeSlots: new Map(),
     slotActions: new Int32Array(0),
@@ -181,6 +200,7 @@ export function setInputBindings(state: InputState, bindings: InputBindings): vo
   state.heldActions = 0;
   state.latchedActions = 0;
   state.sampledActions = 0;
+  state.boostLatched = false;
 }
 
 /** True when the code is bound to an action (the shell calls preventDefault for those only). */
@@ -193,6 +213,15 @@ export function inputCodeDown(state: InputState, code: InputCode): boolean {
   const slot = state.codeSlots.get(code);
   if (slot === undefined) return false;
   const actions = state.slotActions[slot] ?? 0;
+  // A press edge of the boost key flips the latch (a second key bound to boost, or a repeat
+  // the caller did not filter, does not).
+  if (
+    (actions & BIT_BOOST) !== 0 &&
+    state.slotHeld[slot] !== 1 &&
+    (state.heldActions & BIT_BOOST) === 0
+  ) {
+    state.boostLatched = !state.boostLatched;
+  }
   state.slotHeld[slot] = 1;
   state.heldActions |= actions;
   state.latchedActions |= actions;
@@ -236,6 +265,26 @@ export function releaseAllInput(state: InputState): void {
   state.heldActions = 0;
   state.latchedActions = 0;
   state.sampledActions = 0;
+  state.boostLatched = false;
+}
+
+/**
+ * Sets where abilities are aimed: a world-space heading and angle above the horizon (see
+ * `InputFrame.aimYaw`). Non-finite values clear the aim.
+ */
+export function setInputAim(state: InputState, yaw: number, pitch: number): void {
+  if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) {
+    state.aimValid = false;
+    return;
+  }
+  state.aimYaw = yaw;
+  state.aimPitch = pitch;
+  state.aimValid = true;
+}
+
+/** The next frames carry no aim (no camera, a spectator, the pointer is free). */
+export function clearInputAim(state: InputState): void {
+  state.aimValid = false;
 }
 
 /** Releases everything and centres the reticle. */
@@ -269,8 +318,14 @@ export function sampleInput(
   dtS: number = TICK_DT_S,
 ): InputFrame {
   const options = state.options;
-  const actions = state.heldActions | state.latchedActions;
+  let actions = state.heldActions | state.latchedActions;
   state.latchedActions = 0;
+  if (options.boostToggle) {
+    // The key only flips the latch; the latch is what boosts.
+    actions = state.boostLatched ? actions | BIT_BOOST : actions & ~BIT_BOOST;
+  } else {
+    state.boostLatched = false;
+  }
   state.sampledActions = actions;
 
   let rx = state.reticleX;
@@ -299,7 +354,9 @@ export function sampleInput(
   out.tick = tick;
   out.steerX = clampUnit(rx * gain + yawKeys * clampFraction(options.keyYawSteer));
   out.steerY = clampUnit(ry * gain + pitchKeys * clampFraction(options.keyPitchSteer));
-  out.buttons = buttons;
+  out.buttons = state.aimValid ? buttons | BUTTON_AIM : buttons;
+  out.aimYaw = state.aimValid ? state.aimYaw : 0;
+  out.aimPitch = state.aimValid ? state.aimPitch : 0;
 
   const decay = reticleDecay(options.recenterRate, dtS);
   state.reticleX = rx * decay;

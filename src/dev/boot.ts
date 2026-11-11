@@ -19,6 +19,8 @@ export interface DevToolsOptions {
   getSimMs?: () => number;
   /** See `PerfHudOptions.getNetText`. */
   getNetText?: () => string;
+  /** See `PerfHudOptions.getFxText`. */
+  getFxText?: () => string;
   /** Mount point of the perf HUD. Defaults to `#ui`. */
   parent?: HTMLElement;
 }

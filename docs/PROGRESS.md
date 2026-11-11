@@ -5,12 +5,69 @@ up where the last one stopped.
 
 ## Current state
 
-- **Phase:** 2 (Netcode core) built; Phase 3 in progress. The user asked (2026-11-10) for all remaining phases
-  to be built back to back without stopping; gates for Phases 0-2 are still theirs to run on real laptops.
-- **Next:** T-3.1.
+- **Phase:** 3 (Combat + MVP modes) built; Phase 4 (art pass) is next. The user asked (2026-11-10) for all
+  remaining phases to be built back to back without stopping; gates for Phases 0-3 are still theirs to run on
+  real laptops.
+- **Next:** T-4.1.
 - **Open issues:** see the latest entry.
 
 ## Log
+
+### 2026-11-11: Phase 3 combat + MVP modes (T-3.1 to T-3.10)
+- A full Duel and a full Skirmish play start to finish against bots or a second player: countdown, rounds,
+  results table, back to the lobby with teams kept. Graphics are still greybox and placeholder dragons; the
+  real look lands in Phase 4.
+- **T-3.1** Health, damage, takedowns with assists, 5 s respawn with spawn protection, GameEvents.
+- **T-3.2** All 16 abilities, data-driven in `src/shared/abilities.ts` (bolts, cones, beams, dash, shield,
+  heal, zones, veil, phase dive, blind).
+- **T-3.3** Host lag compensation (rewind at most 200 ms). Client on `netsim=bad` firing at a circling host:
+  44.6 % hit rate with it, 6.7 % with `?lagcomp=0`.
+- **T-3.4** Skirmish (first to N or time) and Duel (rounds, no respawn, storm wall closes after a 20 s hold).
+- **T-3.5** Pooled instanced particles, beams and shield shells in `src/vfx`, capped per preset; storm wall
+  view in `src/world/storm`.
+- **T-3.6 / T-3.7** HUD: health, stamina, four ability slots, ultimate, reticle + hit marker, killfeed, score
+  and timer, compass, status chips, respawn panel, damage arcs, low-health vignette, scoreboard (Tab,
+  rebindable), results panel.
+- **T-3.8** WebAudio engine with voice cap and panning; every sound is synthesised placeholder (DECISIONS 35).
+- **T-3.9** Settings panel (Video, Controls, Audio, Game & Network): preset, dynamic resolution, frame cap,
+  FOV, shake, sensitivity, invert Y, rebinding, volumes, UI scale. Saved in `localStorage`.
+- **T-3.10** Bot pilots (Easy / Normal / Hard) fill seats from the lobby and fly inside the host sim.
+- 1732 tests in 85 files; typecheck, test, build pass. Two reviews raised 12 findings: 11 fixed, bandwidth
+  partly (DECISIONS 24-26).
+- **Measured in headless Edge on the dev desktop, 5v5 bot Skirmish, 62 s per preset (not the U-series target):**
+
+  | | Low | Medium | High | Budget (L / M / H) |
+  | --- | --- | --- | --- | --- |
+  | Draw calls, max | 27 | 28 | 28 | 120 / 180 / 350 |
+  | Triangles, max | 21.5k | 19.8k | 25.4k | 250k / 450k / 1.2M |
+  | Particles, peak | 176 | 254 | 406 | 600 / 1200 / 3000 |
+  | Audio voices, peak | 14 | 13 | 15 | 16 / 24 / 32 |
+  | Host tick in worker, ms | 0.052 | 0.080 | 0.066 | 1.5 |
+  | KB/s per client | 6.20 | 6.46 | 6.31 | about 7 |
+
+  Phase 2 figures for comparison: 20 draw calls on Medium, host tick 0.025 ms, 5.7 KB/s (flight only).
+- Build: entry 550 kB (180 gzip), three 544 kB, host worker 435 kB, audio 30 kB and settings 18 kB lazy.
+- New dev flags: `?autopilot=bot`, `?mode=`, `?score=`, `?time=`, `?teamsize=`, `?botlevel=`, `?fill`,
+  `?lagcomp=0`, `?join=CODE`.
+- **Phase 3 gate for the user (two real laptops):**
+  1. Host: `npm run dev:lan` and `npm run peer:lan`, open `http://<ip>:5173/?lan&perf`, Host a room; the
+     second laptop joins by code.
+  2. Duel 1v1 to three round wins: 3-2-1, round pips, storm wall closing after 20 s, results, lobby.
+  3. Skirmish 2v2 with "Fill with bots": killfeed, score, respawn count, Tab scoreboard, damage arcs point at
+     the attacker.
+  4. Each class: all four abilities read clearly; Talon dash hits once; a veiled enemy Wraith is fully hidden
+     until it attacks; a phase dive that ends in rock pops you out.
+  5. Client with `&netsim=bad`: own shots appear at once and hits feel fair.
+  6. 60 fps on the U-series host with `?perf`; set a 30 fps cap and check the scale does not drop.
+- **Not verified:** anything on real hardware; real pointer lock (headless Edge refuses it, so mouse aim ran
+  with a simulated lock); nobody has listened to the audio; the storm wall has not been seen up close in a
+  match; veil/phase translucency has no screenshot; spectator HUD and mid-match reconnect in a browser.
+- **Open issues:** Talon looks weak 1v1 against Bastion (hard bots, 0-3); bots fly straight during round end
+  and results; compass labels overlap when markers bunch; the debug GUI combat tables do not reach a worker
+  host (use `?noworker`); rewind assumes a 100 ms interpolation delay instead of the client's real one; Duel
+  storm fractions barely show on the greybox map (DECISIONS 34).
+- **Repair:** `docs/TASKS.md` was committed empty in `d6bba62` by mistake. It is restored from `d41c844` with
+  Phases 2 and 3 ticked.
 
 ### 2026-11-11: Phase 2 netcode core (T-2.1 to T-2.10)
 - Full flow works: title → Host / Join by room code / Fly solo → lobby → match → back to lobby or title.

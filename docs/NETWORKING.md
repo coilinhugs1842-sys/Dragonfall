@@ -89,8 +89,12 @@ Spike result (DECISIONS 19): PeerJS 1.5's `reliable: false` still retransmits, s
 - **Dragon state in a snapshot (~23 bytes):** `u8 id`, position as 3 × `i16` (map space quantized to about
   6 cm), orientation as a smallest-three quaternion packed into `u32`, velocity as 3 × `i8` scaled, `u8`
   health, `u8` stamina, `u16` flags, `u8` animation state.
-- **Budget:** 10 dragons × 23 B + projectiles + header ≈ 360 B × 20 Hz ≈ **7 KB/s per client**. The host
-  uploads about 63 KB/s to 9 clients (about 0.5 Mbps). Laptop Wi-Fi handles that easily.
+- **Budget:** about **7 KB/s per client** in an average fight. A quiet 10-dragon snapshot is about 255 B
+  (5 KB/s) because the owner block is byte-mask packed (DECISIONS 24) and standing zones are refreshed every
+  5th snapshot (DECISIONS 25). Measured 6.2-6.5 KB/s in a 5v5 bot fight; the host uploads about 60 KB/s to 9
+  clients. Worst-case ability spam reaches about 12 KB/s (DECISIONS 26).
+- **Events per audience:** GameEvents are batched per team so a veiled dragon's hits and casts do not reach
+  the other team (DECISIONS 27). Per-rider scores go out as `MSG_SCOREBOARD` on `ctrl`.
 - Delta compression is optional (Phase 6) and only if measurements show it's needed.
 
 ## Lobby protocol (on `ctrl`)

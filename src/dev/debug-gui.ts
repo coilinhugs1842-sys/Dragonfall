@@ -10,14 +10,18 @@
  * Heavy module (pulls in lil-gui): only ever load it with a dynamic import, see ./boot.ts.
  */
 import { GUI } from 'lil-gui';
+import { AUDIO_TUNING, SPATIAL_TUNING } from '../audio';
 import { APP_STATE_IDS } from '../game/app';
 import type { App, AppStateId } from '../game/app';
 import { CAMERA_RIG_TUNING } from '../render';
 import type { GameRenderer } from '../render';
+import { ABILITY_TABLE, COMBAT_TUNING, PROJECTILE_DEFS, ZONE_DEFS } from '../shared/abilities';
 import { COLLISION_TUNING } from '../shared/collision-tuning';
+import { MODE_TUNING } from '../shared/match';
 import { QUALITY_PRESET_IDS } from '../shared/quality';
 import type { QualityPresetId } from '../shared/quality';
 import { FLIGHT_TUNING } from '../shared/tuning';
+import { BOT_DIFFICULTY_TUNING, BOT_TUNING } from '../sim/bots';
 
 export interface DebugGui {
   /** The root panel, for anything `addFolder` does not cover. */
@@ -40,6 +44,24 @@ function addTuningTable<T extends object>(parent: GUI, title: string, table: T):
   const folder = parent.addFolder(title);
   for (const key in table) {
     if (typeof table[key] === 'number') folder.add(table, key);
+  }
+  folder.close();
+  return folder;
+}
+
+/**
+ * `addTuningTable` for a table of tables (class -> slot -> ability, mode -> rules): a folder per
+ * nested object, a field per number or boolean, all bound to the live objects. Arrays and
+ * strings are left alone.
+ */
+function addTuningTree<T extends object>(parent: GUI, title: string, table: T): GUI {
+  const folder = parent.addFolder(title);
+  for (const key in table) {
+    const value = table[key];
+    if (typeof value === 'number' || typeof value === 'boolean') folder.add(table, key);
+    else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      addTuningTree(folder, key, value);
+    }
   }
   folder.close();
   return folder;
@@ -102,6 +124,23 @@ export function createDebugGui(opts: DebugGuiOptions): DebugGui {
   addTuningTable(flight, 'Terrain + storm', COLLISION_TUNING);
   addTuningTable(flight, 'Chase camera', CAMERA_RIG_TUNING);
   flight.close();
+
+  // The host's rules run where its sim runs: these tables are this page's copies, so with the
+  // host in a worker (the default) only `?noworker` hosts and clients' prediction see an edit.
+  const combat = gui.addFolder('Combat (host: use ?noworker)');
+  addTuningTree(combat, 'Abilities', ABILITY_TABLE);
+  addTuningTree(combat, 'Projectiles', PROJECTILE_DEFS);
+  addTuningTree(combat, 'Zones', ZONE_DEFS);
+  addTuningTable(combat, 'Combat rules', COMBAT_TUNING);
+  addTuningTree(combat, 'Modes', MODE_TUNING);
+  addTuningTree(combat, 'Bots', BOT_TUNING);
+  addTuningTree(combat, 'Bot skill', BOT_DIFFICULTY_TUNING);
+  combat.close();
+
+  const sound = gui.addFolder('Audio');
+  addTuningTree(sound, 'Mix', AUDIO_TUNING);
+  addTuningTree(sound, 'Distance', SPATIAL_TUNING);
+  sound.close();
 
   let disposed = false;
   return {

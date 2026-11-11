@@ -28,20 +28,30 @@
  *   `host.fixedStep()`: local input for tick T (devices or `?autopilot`) -> inputs of every
  *   rider -> sim.step -> snapshots out. A host worker runs the same step on its own timer.
  * PER FRAME:
- *   host:   pump netsim -> `host.update(now)` -> syncRun -> buildWorldView
+ *   host:   pump netsim -> `host.update(now)` -> syncRun -> events -> buildWorldView +
+ *           `appendHostEffects` (projectiles, zones, the local rider's combat state)
  *   client: pump netsim -> `client.advance(now, sampler)` (pings, due ticks: predict + send
- *           input) -> syncRun -> `client.writeWorldView`
- *   both:   stage update -> render -> UiState -> `ui.update`
+ *           input) -> syncRun -> events -> `client.writeWorldView` -> the rider's own predicted
+ *           casts shown and heard at once (`takeLocalCasts`)
+ *   both:   stage update (camera, dragons, effects) -> aim for the next input sample -> audio
+ *           -> HUD state -> render -> UiState -> `ui.update` (+ the settings panel)
+ *
+ * EVENTS. Every GameEvent of the match lands in ONE bus on this page, whatever the session:
+ * the host session emits into it on this thread, a host worker's batches are decoded into it,
+ * a client's GAME_EVENTS messages are. It is flushed once per frame, before the WorldView is
+ * built; the effects, the audio and the HUD feed subscribe while a match is loaded.
  * WHILE THE TAB IS HIDDEN no frames run. `background()` (about once a second, from the frame
  * driver's timer) keeps a client's link alive instead: pings out, reconnect if it drops. A
  * host needs nothing here: its worker has its own clock, and on the main thread its transport
  * callbacks answer pings by themselves.
  */
 
-import { createFlightOverlay, createInputController } from '../input';
+import type { AudioEngine } from '../audio';
+import { createFlightOverlay, createInputController, isActionActive } from '../input';
 import type { FlightOverlay, InputController } from '../input';
 import {
   VIEW_EXTRAPOLATE_TICKS,
+  appendHostEffects,
   createClientSession,
   createHost,
   createReconnectToken,
@@ -52,6 +62,8 @@ import type {
   ClientInputSampler,
   ClientSession,
   ClientTransport,
+  HostAutoSettings,
+  HostEffectsOptions,
   HostHandle,
   HostMetrics,
   HostTransport,
@@ -62,28 +74,50 @@ import type {
 import type { SnapshotOwner } from '../net/protocol';
 import type { GameRenderer } from '../render';
 import {
-  DEFAULT_SETTINGS,
+  ABILITY_SLOTS,
+  ABILITY_TABLE,
   DRAGON_FLAG_ALIVE,
   FALLBACK_PLAYER_NAME,
+  MATCH_TUNING,
   NO_PLAYER,
+  QUALITY_PRESETS,
   TICK_DT_S,
   TICK_HZ,
+  copyInputFrame,
+  createGameEventBus,
+  createInputFrame,
+  createVec3,
+  beginWorldView,
   createWorldView,
+  findDragonView,
   resetInputFrame,
 } from '../shared';
 import type {
+  GameEventBus,
   InputFrame,
   LobbyState,
   MatchPhase,
+  MatchPhaseEvent,
+  MatchPlayerStats,
+  MatchWinner,
   MutableWorldView,
   PlayerId,
+  QualityPresetId,
+  ResultsState,
   SettingsState,
+  SettingsTab,
   UiError,
   UiIntent,
+  Unsubscribe,
   WorldView,
 } from '../shared';
-import { PLAYER_NAME_STORAGE_KEY, createUi } from '../ui';
+import { fireDirectionOf } from '../sim';
+import { createModeConfig } from '../sim/match';
+import { createUi } from '../ui';
 import type { Ui } from '../ui';
+import type { SettingsPanel } from '../ui/settings';
+import { applyPageSettings } from '../ui/settings/page-settings';
+import { codeShortLabel } from '../ui/settings/rebind-model';
 import { App } from './app';
 import type { AppStateId } from './app';
 import { writeAutopilotFrame } from './autopilot';
@@ -91,18 +125,21 @@ import type { AutopilotCourse } from './autopilot';
 import { createDebugProbe } from './debug-probe';
 import type { DebugProbe, MotionReport } from './debug-probe';
 import { hostWorkerSupported, spawnHostWorker } from './host-worker';
+import { createHudBuilder, createHudFrameInput } from './hud-builder';
+import type { HudBuilder } from './hud-builder';
 import { createMatchAssetsCache } from './match-assets';
 import type { MatchAssets } from './match-assets';
 import { createStage } from './stage';
 import type { Stage } from './stage';
 import {
-  createStorageTokenStore,
-  loadClientId,
-  loadSettings,
-  readRejoin,
-  saveSettings,
-  writeRejoin,
-} from './storage';
+  FrameCap,
+  bindSettingsTargets,
+  createSettingsNameStore,
+  createSettingsStore,
+  handleSettingsIntent,
+} from './settings';
+import type { SettingsStore } from './settings';
+import { createStorageTokenStore, loadClientId, readRejoin, writeRejoin } from './storage';
 import {
   applySessionFacts,
   connectFailure,
@@ -110,6 +147,7 @@ import {
   createUiState,
   peerConfigFor,
 } from './ui-model';
+import { writeViewPilotFrame } from './view-pilot';
 import { buildWorldView } from './world-view-builder';
 import type { StormWallSource } from './world-view-builder';
 
@@ -118,6 +156,17 @@ const AUTOPILOT_RADIUS = 380;
 const AUTOPILOT_ALTITUDE = 400;
 /** EMA weight for the HUD's per-tick cost figures. */
 const COST_SMOOTHING = 0.05;
+/** A gap between two frames longer than this makes the events queued meanwhile stale. */
+const STALE_EVENTS_GAP_S = 0.5;
+/**
+ * Metres ahead of the camera at which shots cross the reticle (`InputFrame.aimYaw`): the camera
+ * sits behind and above the dragon, so the aim is the direction from the dragon to this point
+ * on the reticle's ray.
+ */
+const AIM_CONVERGENCE_M = 170;
+/** Radius of the on-screen steering circle in CSS pixels (the HUD and the overlay draw it). */
+const RETICLE_RADIUS_PX = 110;
+const DEG_TO_RAD = Math.PI / 180;
 
 /**
  * Artificial network conditions for this page's transport (`dev/netsim` fits). `src/game` does
@@ -133,6 +182,16 @@ export interface TransportShaper {
 /** The URL switches the game layer reads (a subset of `dev/query-flags`). */
 export interface GameFlags {
   readonly autopilot: boolean;
+  /** `?autopilot=bot`: a fighting bot flies the local dragon (see `dev/query-flags`). */
+  readonly autopilotBot?: boolean;
+  /** `?quality=`: the settings store does not override a preset forced by the URL. */
+  readonly forcedQuality?: QualityPresetId | null;
+  /** `?mode=`, `?score=`, `?time=`, `?teamsize=`, `?botlevel=`, `?fill`: the host's room set-up. */
+  readonly autoSettings?: HostAutoSettings | null;
+  /** `?lagcomp=0`: host without lag compensation. */
+  readonly lagCompensation?: boolean;
+  /** `?join=CODE`: join this room at boot. */
+  readonly joinCode?: string;
   readonly skipSeconds: number;
   readonly bots: number;
   readonly lan: boolean;
@@ -179,6 +238,64 @@ export interface GameReport {
   readonly inMatch: boolean;
   readonly isRider: boolean;
   readonly phase: MatchPhase;
+  /** The match clock and score as the HUD shows them. */
+  readonly match: {
+    readonly mode: string;
+    readonly round: number;
+    readonly scores: readonly [number, number];
+    readonly scoreLimit: number;
+    readonly timeRemainingS: number;
+    readonly winner: MatchWinner | null;
+    readonly stormRadius: number;
+    readonly killfeed: readonly string[];
+    readonly stats: readonly MatchPlayerStats[];
+    readonly results: ResultsState | null;
+    readonly projectiles: number;
+    readonly zones: number;
+    /** Events of each type delivered since the page loaded. */
+    readonly events: Readonly<Record<string, number>>;
+    /** Hits the local rider landed / took, and its own casts, since the page loaded. */
+    readonly localHits: number;
+    readonly localHitsTaken: number;
+    readonly localCasts: number;
+  };
+  /** The local rider's HUD gauges, or null. */
+  readonly local: {
+    readonly classId: string;
+    readonly alive: boolean;
+    readonly health: number;
+    readonly ultimateCharge: number;
+    readonly cooldownS: readonly number[];
+    readonly respawnInS: number;
+  } | null;
+  /** The newest local input sample. */
+  readonly input: InputFrame;
+  readonly camera: { readonly fov: number; readonly yaw: number };
+  readonly vfx: {
+    readonly particles: number;
+    readonly peak: number;
+    readonly capacity: number;
+    readonly drawCalls: number;
+  } | null;
+  readonly audio: {
+    readonly voices: number;
+    readonly peak: number;
+    readonly capacity: number;
+    readonly ready: boolean;
+    /** The master gain node's live value (the master volume squared). */
+    readonly masterGain: number;
+    readonly errors: number;
+  } | null;
+  readonly render: {
+    readonly calls: number;
+    readonly triangles: number;
+    readonly preset: string;
+    readonly scale: number;
+  };
+  readonly settings: SettingsState;
+  /** Action id -> key codes, as the input layer has them. */
+  readonly bindings: Readonly<Record<string, readonly string[]>>;
+  readonly settingsOpen: boolean;
   /** Host: the host tick. Client: the snapshot playback tick (fractional). */
   readonly tick: number;
   readonly dragons: readonly {
@@ -250,6 +367,15 @@ export interface Game {
   background(): void;
   /** Canvas width / height. */
   setAspect(aspect: number): void;
+  /** Canvas size in CSS pixels (the reticle's place on screen, for the aim). */
+  setViewportSize(width: number, height: number): void;
+  /**
+   * The "30 / 45 fps" cap: false = skip this animation-frame callback altogether. `nowMs` is
+   * the callback's timestamp.
+   */
+  shouldRender(nowMs: number): boolean;
+  /** The perf HUD's effect lines (particles alive, audio voices). Builds a string. */
+  getFxText(): string;
   /** Every menu action arrives here; also callable by tests and the debug console. */
   handleIntent(intent: UiIntent): void;
   /** Averaged cost of the fixed-step work in ms, for the perf HUD's `sim` line. */
@@ -291,6 +417,34 @@ interface HostViewOptions {
   maxAlpha: number;
 }
 
+/** `HostEffectsOptions` with the fields rewritten each frame. */
+interface MutableEffectsOptions {
+  localDragonId: PlayerId;
+  respawnDelayS: number;
+}
+
+/** What the page remembers about the match on screen (set when its views load). */
+interface MatchFacts {
+  mode: string;
+  scoreLimit: number;
+  /** Seconds a dead dragon waits; Infinity while the mode has no respawns (Duel). */
+  respawnDelayS: number;
+  round: number;
+  results: ResultsState | null;
+}
+
+const EVENT_TYPES = [
+  'hit',
+  'takedown',
+  'spawn',
+  'abilityCast',
+  'objective',
+  'matchPhase',
+  'assist',
+  'statusApplied',
+  'impact',
+] as const;
+
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -299,7 +453,14 @@ export function createGame(options: GameOptions): Game {
   const { canvas, renderer, flags, storage, now } = options;
   const app = new App('title');
   const assets = createMatchAssetsCache();
-  const stage: Stage = createStage({ quality: renderer.presetId, map: assets.defaultMap });
+  /** Every GameEvent of the match on screen (see the file header). */
+  const bus: GameEventBus = createGameEventBus();
+  const stage: Stage = createStage({
+    quality: renderer.presetId,
+    map: assets.defaultMap,
+    events: bus,
+    webgl: renderer.webgl,
+  });
   const probe = flags.measure ? createDebugProbe() : null;
   const tokenStore: ReconnectTokenStore = createStorageTokenStore(storage.session);
   // One per browser, so a kick also keeps out a new tab that has no token.
@@ -307,11 +468,28 @@ export function createGame(options: GameOptions): Game {
   const shaperPromise: Promise<TransportShaper | null> = options.shaper ?? Promise.resolve(null);
   let shaper: TransportShaper | null = null;
 
-  let settings: SettingsState = loadSettings(storage.local);
-  if (flags.lan) settings = { ...settings, signaling: 'lan' };
+  // --- Settings ------------------------------------------------------------------------------------
+  const store: SettingsStore = createSettingsStore({ storage: storage.local });
+  const forcedQuality = flags.forcedQuality ?? null;
+  /**
+   * What the menus show. `?lan` is not written into the store (it would be saved): it is laid
+   * over the stored settings here, and read again when a room is hosted or joined.
+   */
+  function shownSettingsOf(): SettingsState {
+    return flags.lan ? { ...store.settings, signaling: 'lan' } : store.settings;
+  }
+  let shownSettings: SettingsState = shownSettingsOf();
+  const frameCap = new FrameCap();
+  let settingsOpen = false;
+  let settingsTab: SettingsTab = 'video';
+  let settingsPanel: SettingsPanel | null = null;
+  let settingsPanelLoading = false;
+  let audio: AudioEngine | null = null;
+  let audioUnsubscribe: Unsubscribe | null = null;
+  let audioScene: 'title' | 'lobby' | 'match' = 'title';
 
   const facts = createSessionFacts();
-  const uiState = createUiState(settings);
+  const uiState = createUiState(shownSettings);
   let lastError: UiError | null = null;
   let pauseOpen = false;
 
@@ -323,6 +501,56 @@ export function createGame(options: GameOptions): Game {
 
   // --- Local input ---------------------------------------------------------------------------------
   const worldView: MutableWorldView = createWorldView();
+  const hudBuilder: HudBuilder = createHudBuilder(worldView);
+  const hudInput = createHudFrameInput();
+  let hudUnsubscribe: Unsubscribe | null = null;
+  const matchFacts: MatchFacts = {
+    mode: 'skirmish',
+    scoreLimit: 0,
+    respawnDelayS: MATCH_TUNING.respawnDelayS,
+    round: 1,
+    results: null,
+  };
+  const effectsOptions: MutableEffectsOptions = {
+    localDragonId: NO_PLAYER,
+    respawnDelayS: MATCH_TUNING.respawnDelayS,
+  };
+  /** The newest local input sample (HUD button lights, the test report). */
+  const lastInput: InputFrame = createInputFrame();
+  let viewportWidth = 0;
+  let viewportHeight = 0;
+  let cameraYaw = 0;
+  const shotDirection = createVec3();
+  const listener = { position: createVec3(), forward: createVec3(), up: createVec3() };
+  // Counters for the test driver.
+  const eventCounts: Record<string, number> = {};
+  for (const type of EVENT_TYPES) eventCounts[type] = 0;
+  let localHits = 0;
+  let localHitsTaken = 0;
+  let localCastCount = 0;
+  let particlePeak = 0;
+  let voicePeak = 0;
+  for (const type of EVENT_TYPES) {
+    bus.on(type, () => {
+      eventCounts[type] = (eventCounts[type] ?? 0) + 1;
+    });
+  }
+  bus.on('hit', (event) => {
+    const me = uiState.connection.localPlayerId;
+    if (me === NO_PLAYER) return;
+    if (event.attackerId === me && event.targetId !== me) localHits++;
+    if (event.targetId === me) localHitsTaken++;
+  });
+  bus.on('abilityCast', (event) => {
+    // A client counts its casts when its prediction fires them (`showLocalCasts`).
+    const hosting = run !== null && run.kind !== 'client';
+    if (hosting && event.dragonId === uiState.connection.localPlayerId) localCastCount++;
+  });
+  bus.on('matchPhase', (event: MatchPhaseEvent) => {
+    // A new round starts clean: no smoke of the last one hanging over the gates.
+    if (event.phase === 'countdown' && event.round !== matchFacts.round) stage.clearEffects();
+    matchFacts.round = event.round;
+  });
   const course: AutopilotCourse = {
     centerX: assets.defaultMap.colliders.stormCenter.x,
     centerZ: assets.defaultMap.colliders.stormCenter.z,
@@ -346,20 +574,42 @@ export function createGame(options: GameOptions): Game {
     },
   });
   input.setEnabled(false);
-  const flightOverlay: FlightOverlay = createFlightOverlay();
-  flightOverlay.setVisible(false);
+  // A rider's steering ring and "click to fly" prompt are the HUD's; this overlay is only the
+  // spectator's prompt.
   const watchOverlay: FlightOverlay = createFlightOverlay({
     promptText: 'Watching · click to follow the next rider',
   });
   watchOverlay.setVisible(false);
   watchOverlay.update(0, 0, false);
-  let flightOverlayShown = false;
   let watchOverlayShown = false;
 
   const onCanvasClick = (): void => {
     if (stage.matchLoaded && !isRider) stage.cycleSpectateTarget();
   };
   canvas.addEventListener('click', onCanvasClick);
+
+  // The scoreboard is the `scoreboard` input action (rebindable, default Tab). While the pointer
+  // is locked the input controller reads it with every other action; a spectator, a rider who is
+  // down or anyone with the pointer free has no lock, so the same binding is read here.
+  let scoreboardCodes: readonly string[] = [];
+  let scoreboardKeyHeld = false;
+  const boardKeyUsable = (): boolean =>
+    stage.matchLoaded && !pauseOpen && !settingsOpen && !input.locked;
+  const onBoardKeyDown = (event: KeyboardEvent): void => {
+    if (!scoreboardCodes.includes(event.code) || !boardKeyUsable()) return;
+    // Tab would otherwise walk the focus through the page behind the HUD.
+    event.preventDefault();
+    scoreboardKeyHeld = true;
+  };
+  const onBoardKeyUp = (event: KeyboardEvent): void => {
+    if (scoreboardCodes.includes(event.code)) scoreboardKeyHeld = false;
+  };
+  const onBoardBlur = (): void => {
+    scoreboardKeyHeld = false;
+  };
+  document.addEventListener('keydown', onBoardKeyDown);
+  document.addEventListener('keyup', onBoardKeyUp);
+  window.addEventListener('blur', onBoardBlur);
 
   /**
    * Writes the local player's input for one tick. `subject` is the own dragon, if any; `dtS`
@@ -371,7 +621,11 @@ export function createGame(options: GameOptions): Game {
     out: InputFrame,
     dtS: number,
   ): void {
-    if (flags.autopilot) {
+    const current = run;
+    if (flags.autopilotBot === true && current !== null && current.kind === 'client') {
+      // A client has no sim state for the real bot brain: a simple pilot flies from the view.
+      writeViewPilotFrame(tick, worldView, worldView.localDragonId, course, out);
+    } else if (flags.autopilot) {
       writeAutopilotFrame(tick, subject, course, out);
     } else if (inputActive) {
       input.sample(tick, out, dtS);
@@ -380,6 +634,7 @@ export function createGame(options: GameOptions): Game {
     }
     aimX = out.steerX;
     aimY = out.steerY;
+    copyInputFrame(lastInput, out);
   }
 
   const clientSampler: ClientInputSampler = {
@@ -416,8 +671,120 @@ export function createGame(options: GameOptions): Game {
   let starvedFrames = 0;
   let matchFrames = 0;
 
-  const ui: Ui = createUi(options.uiRoot, handleIntent);
-  const unsubscribePreset = renderer.onPresetChange((id) => stage.setQuality(id));
+  const ui: Ui = createUi(options.uiRoot, handleIntent, {
+    nameStore: createSettingsNameStore(store),
+  });
+  const unsubscribePreset = renderer.onPresetChange((id) => {
+    stage.setQuality(id);
+    audio?.setQuality(id);
+  });
+
+  // --- Settings -> the modules that act on them ------------------------------------------------------
+  function applyVolumes(): void {
+    const s = store.settings;
+    audio?.setVolumes({
+      master: s.masterVolume,
+      sfx: s.sfxVolume,
+      music: s.musicVolume,
+      ui: s.uiVolume,
+    });
+  }
+
+  const unbindSettings = bindSettingsTargets(store, {
+    setQuality(preset): void {
+      // `?quality=` pins the preset for this page load, whatever is saved.
+      if (forcedQuality === null && renderer.presetId !== preset) renderer.setPreset(preset);
+    },
+    setResolution(dynamic, minScale, capScale): void {
+      const preset = QUALITY_PRESETS[renderer.presetId];
+      // With a forced preset the saved cap still applies, inside that preset's own bounds.
+      const min = forcedQuality === null ? minScale : preset.renderScaleMin;
+      const cap =
+        forcedQuality === null
+          ? capScale
+          : preset.renderScaleMin +
+            (preset.renderScaleMax - preset.renderScaleMin) * store.settings.renderScaleCap;
+      renderer.resolution.setBounds(min, cap > min ? cap : min);
+      renderer.resolution.enabled = dynamic;
+      if (!dynamic) renderer.resolution.setScale(cap);
+    },
+    setFrameCap(fps): void {
+      frameCap.setCap(fps);
+      // The scaler must know: capped frames are slow by choice, not a GPU over budget.
+      renderer.resolution.setFrameCap(fps);
+    },
+    setCamera(fovDeg, shake, reduceMotion): void {
+      stage.setCameraSettings(fovDeg, shake, reduceMotion);
+    },
+    setInput(sensitivity, invertY, boostToggle): void {
+      const inputOptions = input.state.options;
+      inputOptions.sensitivity = sensitivity;
+      inputOptions.invertY = invertY;
+      inputOptions.boostToggle = boostToggle;
+    },
+    setBindings(bindings): void {
+      input.setBindings(bindings);
+      const labels: string[] = [];
+      for (const slot of ABILITY_SLOTS) {
+        const code = bindings[slot][0];
+        // The short caption: the slots were laid out for "LMB", not "Left mouse".
+        labels.push(code === undefined ? '' : codeShortLabel(code));
+      }
+      hudBuilder.setKeyLabels(labels);
+      scoreboardCodes = bindings.scoreboard;
+      scoreboardKeyHeld = false;
+    },
+    setVolumes(): void {
+      applyVolumes();
+    },
+    setUi(uiScale, colorBlindMarkers, _showNetChip, reduceMotion): void {
+      applyPageSettings(document.documentElement, uiScale, colorBlindMarkers, reduceMotion);
+    },
+  });
+  const unsubscribeShown = store.subscribe(() => {
+    shownSettings = shownSettingsOf();
+  });
+
+  /** The settings panel is its own chunk: fetched the first time it is opened. */
+  function ensureSettingsPanel(): void {
+    if (settingsPanel !== null || settingsPanelLoading) return;
+    settingsPanelLoading = true;
+    import('../ui/settings').then(
+      (module) => {
+        settingsPanelLoading = false;
+        if (disposed) return;
+        settingsPanel = module.createSettingsPanel(options.uiRoot, handleIntent);
+      },
+      (error: unknown) => {
+        settingsPanelLoading = false;
+        settingsOpen = false;
+        console.warn('The settings panel failed to load', error);
+      },
+    );
+  }
+
+  /** The audio engine (synthesis tables and all) is its own chunk too, fetched after boot. */
+  function loadAudio(): void {
+    import('../audio').then(
+      (module) => {
+        if (disposed) return;
+        const engine = module.createAudio({ quality: renderer.presetId });
+        audio = engine;
+        audioUnsubscribe = engine.connect(bus);
+        applyVolumes();
+        engine.setScene(audioScene);
+      },
+      (error: unknown) => {
+        console.warn('Audio failed to load', error);
+      },
+    );
+  }
+  const unlockAudio = (): void => {
+    audio?.unlock();
+  };
+  window.addEventListener('pointerdown', unlockAudio);
+  window.addEventListener('keydown', unlockAudio);
+  loadAudio();
 
   // --- Starting and ending a run -------------------------------------------------------------------
 
@@ -444,6 +811,8 @@ export function createGame(options: GameOptions): Game {
     }
     if (!keepRejoin) writeRejoin(storage.session, null);
     stage.unloadMatch();
+    endMatchViews();
+    bus.clear();
     matchAssets = null;
     pauseOpen = false;
     isRider = false;
@@ -487,7 +856,11 @@ export function createGame(options: GameOptions): Game {
       epochNow,
       recycledBuffers: shaper !== null,
       localInput: hostInput,
-      autopilot: flags.autopilot ? course : null,
+      events: bus,
+      localBot: flags.autopilotBot === true,
+      lagCompensation: flags.lagCompensation !== false,
+      autoSettings: kind === 'host' ? (flags.autoSettings ?? null) : null,
+      autopilot: flags.autopilot && flags.autopilotBot !== true ? course : null,
       spawnWorker: !flags.noWorker && hostWorkerSupported() ? spawnHostWorker : null,
       onWorkerFallback: (reason: string): void => {
         console.warn(`Host worker unavailable (${reason}); hosting on the main thread.`);
@@ -518,9 +891,9 @@ export function createGame(options: GameOptions): Game {
     pendingKind = 'host';
     const hostName = cleanName(name);
     const config = peerConfigFor(
-      settings.signaling,
-      settings.lanHost,
-      settings.turn,
+      shownSettings.signaling,
+      shownSettings.lanHost,
+      shownSettings.turn,
       options.pageHostname,
     );
     Promise.all([import('../net/transport/peerjs'), shaperPromise]).then(
@@ -549,9 +922,9 @@ export function createGame(options: GameOptions): Game {
     const riderName = cleanName(name);
     const code = normalizeRoomCode(roomCode);
     const config = peerConfigFor(
-      settings.signaling,
-      settings.lanHost,
-      settings.turn,
+      shownSettings.signaling,
+      shownSettings.lanHost,
+      shownSettings.turn,
       options.pageHostname,
     );
     Promise.all([import('../net/transport/peerjs'), shaperPromise]).then(
@@ -568,6 +941,7 @@ export function createGame(options: GameOptions): Game {
           createMatchWorld: assets.factory,
           now,
           recycledBuffers: loadedShaper !== null,
+          events: bus,
         });
         run = { kind: 'client', session, name: riderName, wasConnected: false };
         session.connect(code, riderName, now());
@@ -581,7 +955,29 @@ export function createGame(options: GameOptions): Game {
 
   // --- Intents ---------------------------------------------------------------------------------------
 
+  const settingsHooks = {
+    open(tab: SettingsTab | undefined): void {
+      settingsOpen = true;
+      if (tab !== undefined) settingsTab = tab;
+      ensureSettingsPanel();
+      // In a match the panel needs the pointer: flight input is muted until it closes.
+      input.releaseLock();
+    },
+    close(): void {
+      // Back to whichever of the flight menu or the title was showing underneath.
+      settingsOpen = false;
+    },
+    redetectDisplay(): void {
+      renderer.resolution.reset();
+    },
+  };
+
   function handleIntent(intent: UiIntent): void {
+    if (handleSettingsIntent(store, intent, settingsHooks)) return;
+    if (audio !== null) {
+      if (intent.type === 'lobby.ready' && intent.ready) audio.playUi('ready');
+      else if (intent.type !== 'title.dismissError') audio.playUi('click');
+    }
     switch (intent.type) {
       case 'title.host':
         startHost(intent.name, false);
@@ -620,14 +1016,6 @@ export function createGame(options: GameOptions): Game {
           setInputActive(true);
           input.requestLock();
         }
-        return;
-      case 'settings.update':
-        settings = { ...settings, ...intent.patch };
-        saveSettings(storage.local, settings);
-        return;
-      case 'settings.reset':
-        settings = DEFAULT_SETTINGS;
-        saveSettings(storage.local, settings);
         return;
       case 'lobby.focusPlayer':
       case 'match.skipIntro':
@@ -737,6 +1125,7 @@ export function createGame(options: GameOptions): Game {
       matchAssets = assets.get(seed);
       stage.loadMatch(matchAssets);
       pauseOpen = false;
+      beginMatchViews(current);
       if (current !== null && current.kind !== 'client' && current.snapOnLoad) {
         // `?skip`: the host flew that far before its first state was shown.
         current.snapOnLoad = false;
@@ -746,6 +1135,7 @@ export function createGame(options: GameOptions): Game {
       stage.unloadMatch();
       matchAssets = null;
       pauseOpen = false;
+      endMatchViews();
     }
     facts.inMatch = stage.matchLoaded;
     // In that same gap the session has no match and so no rider. The controls are not let go
@@ -754,13 +1144,8 @@ export function createGame(options: GameOptions): Game {
     const rejoining = current !== null && current.kind === 'client' && !inMatch && keepMatch;
     if (!rejoining) isRider = stage.matchLoaded && rider;
 
-    setInputActive(isRider && !flags.autopilot && !pauseOpen);
-    const showFlight = isRider && !flags.autopilot && !pauseOpen;
-    if (showFlight !== flightOverlayShown) {
-      flightOverlayShown = showFlight;
-      flightOverlay.setVisible(showFlight);
-    }
-    const showWatch = stage.matchLoaded && !isRider && !pauseOpen;
+    setInputActive(isRider && !flags.autopilot && !pauseOpen && !settingsOpen);
+    const showWatch = stage.matchLoaded && !isRider && !pauseOpen && !settingsOpen;
     if (showWatch !== watchOverlayShown) {
       watchOverlayShown = showWatch;
       watchOverlay.setVisible(showWatch);
@@ -773,6 +1158,50 @@ export function createGame(options: GameOptions): Game {
           ? 'lobby'
           : 'title',
     );
+    const scene = stage.matchLoaded ? 'match' : app.state === 'lobby' ? 'lobby' : 'title';
+    if (scene !== audioScene) {
+      audioScene = scene;
+      audio?.setScene(scene);
+    }
+  }
+
+  /** The match views were just loaded: what is fixed for the match, and the HUD's feed. */
+  function beginMatchViews(current: Run | null): void {
+    const lobby = facts.lobby;
+    const localId = current === null ? NO_PLAYER : current.session.localPlayerId;
+    if (lobby !== null) {
+      const config = createModeConfig(lobby.settings, current !== null && current.kind === 'solo');
+      matchFacts.mode = config.mode;
+      matchFacts.scoreLimit = config.sandbox ? 0 : config.scoreLimit;
+      matchFacts.respawnDelayS = config.respawns ? MATCH_TUNING.respawnDelayS : Infinity;
+      hudBuilder.begin(config.mode, matchFacts.scoreLimit, localId);
+    } else {
+      matchFacts.mode = 'skirmish';
+      matchFacts.scoreLimit = 0;
+      matchFacts.respawnDelayS = MATCH_TUNING.respawnDelayS;
+      hudBuilder.begin('skirmish', 0, localId);
+    }
+    matchFacts.round = 1;
+    matchFacts.results = null;
+    hudUnsubscribe?.();
+    hudUnsubscribe = hudBuilder.connect(bus);
+    if (current !== null && current.kind === 'client') {
+      current.session.respawnDelayS = matchFacts.respawnDelayS;
+    }
+    uiState.hud = hudBuilder.hud;
+    uiState.results = null;
+  }
+
+  function endMatchViews(): void {
+    hudUnsubscribe?.();
+    hudUnsubscribe = null;
+    uiState.hud = null;
+    uiState.results = null;
+    matchFacts.results = null;
+    input.clearAim();
+    // Nothing of this match is left for the next one to draw.
+    beginWorldView(worldView);
+    worldView.localDragonId = NO_PLAYER;
   }
 
   /** The frame's WorldView. Returns false when there is no match picture to draw. */
@@ -788,22 +1217,160 @@ export function createGame(options: GameOptions): Game {
     const session = current.session;
     const before = session.prev;
     const latest = session.current;
-    // A host worker's first state is a moment behind the news that the match began.
-    if (before === null || latest === null) return true;
+    // A host worker's first state is a moment behind the news that the match began: there is
+    // no picture of this match yet (and the view still holds the end of the last one, which
+    // must not be shown with this match's freshly made views).
+    if (before === null || latest === null) return false;
     const view = hostViewOptions;
     view.localDragonId = isRider ? session.localPlayerId : NO_PLAYER;
     view.stormWall = matchAssets.collision;
     view.phase = session.matchPhase;
-    buildWorldView(worldView, before, latest, session.viewAlpha(alpha, nowMs), view);
+    const blend = session.viewAlpha(alpha, nowMs);
+    buildWorldView(worldView, before, latest, blend, view);
+    const effects: HostEffectsOptions = effectsOptions;
+    effectsOptions.localDragonId = view.localDragonId;
+    effectsOptions.respawnDelayS = matchFacts.respawnDelayS;
+    appendHostEffects(worldView, latest, blend, effects);
     // The same clock a client reads from its snapshots.
-    worldView.clock.phaseTimeS = session.phaseTimeS;
-    worldView.clock.tick = session.hostTick;
+    const clock = worldView.clock;
+    clock.phaseTimeS = session.phaseTimeS;
+    clock.tick = session.hostTick;
+    clock.round = session.matchRound;
+    clock.timeRemainingS = session.timeRemainingS;
     return true;
+  }
+
+  /**
+   * A client's own casts, as its prediction fired them: shown and heard now. (The host's echo
+   * of each arrives a round trip later and is skipped once by the effects and the audio.)
+   */
+  function showLocalCasts(session: ClientSession): void {
+    const casts = session.takeLocalCasts();
+    if (casts === 0 || !session.predictor.active) return;
+    const dragon = session.predictor.dragon;
+    const vfx = stage.vfx;
+    const abilities = ABILITY_TABLE[dragon.classId];
+    for (let i = 0; i < ABILITY_SLOTS.length; i++) {
+      const slot = ABILITY_SLOTS[i];
+      if (slot === undefined || (casts & (1 << i)) === 0) continue;
+      fireDirectionOf(dragon, abilities[slot], shotDirection);
+      vfx?.spawnLocalShot(dragon.classId, slot, dragon.position, shotDirection);
+      audio?.playLocalCast(dragon.classId, slot);
+      localCastCount++;
+    }
+  }
+
+  /**
+   * Where the next input samples aim: from the local dragon to the point where the camera's ray
+   * through the reticle reaches the convergence range. Allocation-free.
+   */
+  function updateAim(): void {
+    const local = isRider ? findDragonView(worldView, worldView.localDragonId) : undefined;
+    if (
+      local === undefined ||
+      flags.autopilot ||
+      !input.locked ||
+      viewportHeight <= 0 ||
+      (local.flags & DRAGON_FLAG_ALIVE) === 0
+    ) {
+      input.clearAim();
+      return;
+    }
+    const camera = stage.camera;
+    const state = input.state;
+    const tan = Math.tan(camera.fov * 0.5 * DEG_TO_RAD);
+    // The reticle sits `reticle * radius` pixels from the centre; NDC is +-1 at half the height.
+    const scale = (RETICLE_RADIUS_PX * 2) / viewportHeight;
+    const rx = state.reticleX * scale * tan;
+    const ry = state.reticleY * scale * tan;
+    // Camera space (-Z forward) into the world.
+    const e = camera.matrixWorld.elements;
+    let dx = (e[0] ?? 0) * rx + (e[4] ?? 0) * ry - (e[8] ?? 0);
+    let dy = (e[1] ?? 0) * rx + (e[5] ?? 0) * ry - (e[9] ?? 0);
+    let dz = (e[2] ?? 0) * rx + (e[6] ?? 0) * ry - (e[10] ?? 0);
+    const rayLength = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(rayLength > 1e-6)) {
+      input.clearAim();
+      return;
+    }
+    const reach = AIM_CONVERGENCE_M / rayLength;
+    dx = camera.position.x + dx * reach - local.position.x;
+    dy = camera.position.y + dy * reach - local.position.y;
+    dz = camera.position.z + dz * reach - local.position.z;
+    const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(length > 1e-3)) {
+      input.clearAim();
+      return;
+    }
+    input.setAim(Math.atan2(dx, dz), Math.asin(dy / length));
+  }
+
+  /** The HUD state and the results table for the frame just built. */
+  function writeHud(dtS: number): void {
+    const current = run;
+    if (current === null) return;
+    const info = hudInput;
+    info.cameraYaw = cameraYaw;
+    info.isRider = isRider;
+    info.buttons = lastInput.buttons;
+    info.showReticle = isRider && !flags.autopilot && !pauseOpen && !settingsOpen;
+    info.reticleX = input.state.reticleX;
+    info.reticleY = input.state.reticleY;
+    info.pointerLocked = input.locked;
+    info.watchedId = stage.watchedId;
+    let phase: MatchPhase;
+    if (current.kind === 'client') {
+      const session = current.session;
+      const sample = session.sample;
+      info.scoreEmber = sample.scoreEmber;
+      info.scoreFrost = sample.scoreFrost;
+      info.winner = session.matchWinner;
+      info.stats = session.scores.rows;
+      info.statsCount = session.scores.count;
+      info.pings = session.playerPings;
+      phase = session.matchPhase;
+    } else {
+      const session = current.session;
+      info.scoreEmber = session.scoreEmber;
+      info.scoreFrost = session.scoreFrost;
+      info.winner = session.matchWinner;
+      info.stats = session.matchStats;
+      info.statsCount = session.matchStatsCount;
+      info.pings = session.playerPings;
+      phase = session.matchPhase;
+    }
+    hudBuilder.setLobby(facts.lobby);
+    hudBuilder.frame(dtS, info);
+    // Held, not toggled; never over the pause menu or the settings.
+    if (pauseOpen || settingsOpen || !stage.matchLoaded) scoreboardKeyHeld = false;
+    hudBuilder.hud.scoreboardOpen =
+      !pauseOpen &&
+      !settingsOpen &&
+      (scoreboardKeyHeld || (input.locked && isActionActive(input.state, 'scoreboard')));
+    // The results panel is the headline of a finished match: no second banner behind it.
+    if (phase === 'results') hudBuilder.hud.winner = null;
+    // The results table is made once, when the match is decided (allocates: once per match).
+    if (phase === 'results' && info.winner !== null) {
+      if (matchFacts.results === null) {
+        matchFacts.results = hudBuilder.buildResults(info.winner);
+        uiState.results = matchFacts.results;
+      }
+    } else if (matchFacts.results !== null && phase !== 'lobby') {
+      matchFacts.results = null;
+      uiState.results = null;
+    }
   }
 
   function writeUiState(): void {
     applySessionFacts(uiState, facts);
-    uiState.settings = settings;
+    uiState.settings = shownSettings;
+    uiState.controls = store.controls;
+    uiState.settingsOpen = settingsOpen;
+    uiState.settingsTab = settingsTab;
+    if (!stage.matchLoaded) {
+      uiState.hud = null;
+      uiState.results = null;
+    }
     uiState.connection.error = lastError;
     uiState.pauseMenuOpen = pauseOpen && stage.matchLoaded;
     const current = run;
@@ -838,6 +1405,11 @@ export function createGame(options: GameOptions): Game {
     const elapsedS = lastFrameNowMs < 0 ? 0 : (nowMs - lastFrameNowMs) / 1000;
     lastFrameNowMs = nowMs;
     const dtS = frameMs / 1000;
+    // Frames stopped for a while (a hidden tab, a long stall) but a host worker's or a client's
+    // messages kept arriving: what happened meanwhile is not shown all at once on the first
+    // frame back. The state (score, health, who is where) comes from the view, not from events.
+    // Before this frame's own update, so what that produces is still heard.
+    if (elapsedS > STALE_EVENTS_GAP_S) bus.dropExcept('matchPhase');
 
     let current = run;
     if (current !== null) {
@@ -852,9 +1424,39 @@ export function createGame(options: GameOptions): Game {
       if (!reapRun(current)) current = null;
     }
     syncRun();
+    // Before the picture is built: the effects, the audio and the HUD feed hear this frame's
+    // events and the frame then draws what they started.
+    bus.flush();
 
     if (buildView(alpha, nowMs)) {
+      if (current !== null && current.kind === 'client') showLocalCasts(current.session);
       stage.updateMatch(worldView, aimX, aimY, dtS);
+      const camera = stage.camera;
+      const e = camera.matrixWorld.elements;
+      // The camera looks down its -Z: heading about +Y with 0 = +Z, like a dragon's yaw.
+      cameraYaw = Math.atan2(-(e[8] ?? 0), -(e[10] ?? 1));
+      updateAim();
+      if (audio !== null) {
+        listener.position.x = camera.position.x;
+        listener.position.y = camera.position.y;
+        listener.position.z = camera.position.z;
+        listener.forward.x = -(e[8] ?? 0);
+        listener.forward.y = -(e[9] ?? 0);
+        listener.forward.z = -(e[10] ?? 1);
+        listener.up.x = e[4] ?? 0;
+        listener.up.y = e[5] ?? 1;
+        listener.up.z = e[6] ?? 0;
+        audio.update(worldView, listener, dtS);
+        if (flags.measure) {
+          const voices = audio.stats().activeVoices;
+          if (voices > voicePeak) voicePeak = voices;
+        }
+      }
+      if (flags.measure) {
+        const alive = stage.vfxStats?.aliveParticles ?? 0;
+        if (alive > particlePeak) particlePeak = alive;
+      }
+      writeHud(dtS);
       if (probe !== null) {
         probe.trackFrame(worldView, elapsedS);
         if (current !== null && current.kind === 'client' && current.session.sample.valid) {
@@ -865,16 +1467,16 @@ export function createGame(options: GameOptions): Game {
     } else {
       stage.updateBackdrop(dtS);
     }
-    if (flightOverlayShown) {
-      flightOverlay.update(input.state.reticleX, input.state.reticleY, input.locked);
-    }
     renderer.render(stage.scene, stage.camera, frameMs);
 
     writeUiState();
     ui.update(uiState);
+    settingsPanel?.update(uiState);
   }
 
   function background(): void {
+    // Nobody is watching: the bus must not grow with every cast and hit of the time away.
+    bus.dropExcept('matchPhase');
     const current = run;
     if (current === null) return;
     const nowMs = now();
@@ -883,27 +1485,97 @@ export function createGame(options: GameOptions): Game {
     if (current.kind === 'client') current.session.update(nowMs);
   }
 
+  // --- The test driver's report (allocates: never per frame) -------------------------------------------
+
+  function reportMatch(): GameReport['match'] {
+    const hud = hudBuilder.hud;
+    const killfeed: string[] = [];
+    for (let i = 0; i < hud.killfeedCount; i++) {
+      const entry = hud.killfeed[i];
+      if (entry !== undefined) killfeed.push(`${entry.killerName} > ${entry.victimName}`);
+    }
+    const stats: MatchPlayerStats[] = [];
+    for (let i = 0; i < hudInput.statsCount; i++) {
+      const row = hudInput.stats[i];
+      if (row !== undefined) stats.push({ ...row });
+    }
+    let stormRadius = -1;
+    for (let i = 0; i < worldView.zoneCount; i++) {
+      const zone = worldView.zones[i];
+      if (zone !== undefined && zone.kind === 'stormWall') stormRadius = zone.radius;
+    }
+    const loaded = stage.matchLoaded;
+    return {
+      mode: matchFacts.mode,
+      round: loaded ? worldView.clock.round : 1,
+      scores: [hud.scores[0], hud.scores[1]],
+      scoreLimit: matchFacts.scoreLimit,
+      timeRemainingS: loaded ? worldView.clock.timeRemainingS : Infinity,
+      winner: loaded ? hudInput.winner : null,
+      stormRadius,
+      killfeed,
+      stats,
+      results: matchFacts.results,
+      projectiles: loaded ? worldView.projectileCount : 0,
+      zones: loaded ? worldView.zoneCount : 0,
+      events: { ...eventCounts },
+      localHits,
+      localHitsTaken,
+      localCasts: localCastCount,
+    };
+  }
+
+  function reportLocal(): GameReport['local'] {
+    const local = stage.matchLoaded ? hudBuilder.hud.local : null;
+    if (local === null) return null;
+    return {
+      classId: local.classId,
+      alive: local.alive,
+      health: local.health,
+      ultimateCharge: local.ultimateCharge,
+      cooldownS: [...local.cooldownS],
+      respawnInS: local.respawnInS,
+    };
+  }
+
+  function reportAudio(): GameReport['audio'] {
+    if (audio === null) return null;
+    const stats = audio.stats();
+    return {
+      voices: stats.activeVoices,
+      peak: voicePeak,
+      capacity: stats.capacity,
+      ready: stats.ready,
+      masterGain: stats.masterGain,
+      errors: stats.errors,
+    };
+  }
+
   // --- Boot-time shortcuts -----------------------------------------------------------------------------
 
   function bootName(): string {
-    try {
-      return storage.local?.getItem(PLAYER_NAME_STORAGE_KEY) ?? '';
-    } catch {
-      return '';
-    }
+    return store.settings.playerName;
   }
 
+  // Declared before the boot shortcuts below: they can load chunks that check it.
+  let disposed = false;
+  const flushSettings = (): void => {
+    store.flush();
+  };
+  window.addEventListener('pagehide', flushSettings);
+
+  const joinCode = flags.joinCode ?? '';
   if (flags.solo) {
     startSolo(bootName());
   } else if (flags.autostart) {
     startHost(bootName(), true);
+  } else if (joinCode !== '') {
+    startJoin(bootName(), joinCode);
   } else {
     // A reload inside a room goes straight back to it; the stored token returns the old seat.
     const rejoin = readRejoin(storage.session);
     if (rejoin !== null) startJoin(rejoin.name, rejoin.roomCode);
   }
-
-  let disposed = false;
 
   return {
     app,
@@ -915,6 +1587,31 @@ export function createGame(options: GameOptions): Game {
 
     setAspect(aspect: number): void {
       stage.setAspect(aspect);
+    },
+
+    setViewportSize(width: number, height: number): void {
+      viewportWidth = width;
+      viewportHeight = height;
+    },
+
+    shouldRender(nowMs: number): boolean {
+      return frameCap.shouldRender(nowMs);
+    },
+
+    getFxText(): string {
+      const vfx = stage.vfxStats;
+      const stats = audio !== null ? audio.stats() : null;
+      const fx =
+        vfx === null
+          ? 'fx —'
+          : `fx ${vfx.aliveParticles}/${vfx.particleCapacity} particles (peak ${particlePeak})` +
+            `  ${vfx.drawCalls} calls`;
+      const sound =
+        stats === null
+          ? 'audio —'
+          : `audio ${stats.activeVoices}/${stats.capacity} voices (peak ${voicePeak})` +
+            (stats.ready ? '' : '  loading');
+      return `${fx}\n${sound}`;
     },
 
     getSimMs(): number {
@@ -991,6 +1688,29 @@ export function createGame(options: GameOptions): Game {
         isRider,
         phase:
           client !== null ? client.matchPhase : host !== null ? host.session.matchPhase : 'lobby',
+        match: reportMatch(),
+        local: reportLocal(),
+        input: { ...lastInput },
+        camera: { fov: stage.camera.fov, yaw: cameraYaw },
+        vfx:
+          stage.vfxStats === null
+            ? null
+            : {
+                particles: stage.vfxStats.aliveParticles,
+                peak: particlePeak,
+                capacity: stage.vfxStats.particleCapacity,
+                drawCalls: stage.vfxStats.drawCalls,
+              },
+        audio: reportAudio(),
+        render: {
+          calls: renderer.webgl.info.render.calls,
+          triangles: renderer.webgl.info.render.triangles,
+          preset: renderer.presetId,
+          scale: renderer.resolution.scale,
+        },
+        settings: { ...store.settings, turn: null },
+        bindings: store.bindings,
+        settingsOpen,
         tick: client !== null ? client.sample.playTick : host !== null ? host.session.hostTick : 0,
         dragons,
         lobby: facts.lobby,
@@ -1051,11 +1771,23 @@ export function createGame(options: GameOptions): Game {
       if (disposed) return;
       disposed = true;
       endRun(false);
+      window.removeEventListener('pagehide', flushSettings);
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+      unbindSettings();
+      unsubscribeShown();
+      store.dispose();
+      settingsPanel?.dispose();
+      hudUnsubscribe?.();
+      audioUnsubscribe?.();
+      audio?.dispose();
       canvas.removeEventListener('click', onCanvasClick);
+      document.removeEventListener('keydown', onBoardKeyDown);
+      document.removeEventListener('keyup', onBoardKeyUp);
+      window.removeEventListener('blur', onBoardBlur);
       unsubscribePreset();
       ui.dispose();
       input.dispose();
-      flightOverlay.dispose();
       watchOverlay.dispose();
       stage.dispose();
     },

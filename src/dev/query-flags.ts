@@ -1,11 +1,17 @@
 /**
  * Dev/test switches read from the page URL (`?perf`, `?debug`, `?bench`, `?autopilot`, `?skip=20`,
- * `?quality=low`, `?netsim=bad`, `?bots=8`, `?lan`, `?solo`, `?autostart`, `?noworker`).
+ * `?quality=low`, `?netsim=bad`, `?bots=8`, `?lan`, `?solo`, `?autostart`, `?noworker`, and the
+ * match set-up switches `?mode=duel`, `?score=5`, `?time=0`, `?teamsize=2`, `?botlevel=hard`,
+ * `?fill`, `?lagcomp=0`, `?join=CODE`).
  * This module is deliberately tiny and dependency-free (shared types and the pure netsim profile
  * table only): main.ts imports it statically to decide whether the heavy dev chunks (stats-gl,
  * lil-gui) get fetched at all.
  */
 import { MAX_CLIENT_RIDERS } from '../shared/constants';
+import { isBotDifficulty } from '../shared/lobby';
+import type { BotDifficulty } from '../shared/lobby';
+import { MODES } from '../shared/match';
+import type { ModeId } from '../shared/match';
 import { isQualityPresetId } from '../shared/quality';
 import type { QualityPresetId } from '../shared/quality';
 import { parseNetsimProfile } from './netsim/profile';
@@ -23,6 +29,13 @@ export interface QueryFlags {
    * headless screenshots and soak tests show real flight without pointer lock.
    */
   readonly autopilot: boolean;
+  /**
+   * `?autopilot=bot`: the local dragon is flown by a fighting bot instead of the scripted
+   * circle. On a host that is the bot brain of the slot-fill bots (so a whole match can be
+   * played headless); on a client a simple pursue-and-fire pilot working from what the client
+   * sees. Implies `autopilot`.
+   */
+  readonly autopilotBot: boolean;
   /**
    * `?skip=<seconds>`: a `?solo` flight starts that many seconds in (the ticks are simulated
    * when the match starts, not shown). With `?autopilot` this picks the moment a headless
@@ -63,6 +76,22 @@ export interface QueryFlags {
    * of in the host worker (the fallback path, and the "before" of a worker measurement).
    */
   readonly noWorker: boolean;
+  /** `?mode=skirmish|duel`: the host's room starts in this mode. Null = the lobby default. */
+  readonly mode: ModeId | null;
+  /** `?score=N`: score limit of the host's room (clamped by the lobby). 0 = the default. */
+  readonly scoreLimit: number;
+  /** `?time=S`: time limit in seconds; `?time=0` = none. -1 = not in the URL. */
+  readonly timeLimitS: number;
+  /** `?teamsize=N`: riders per side. 0 = not in the URL. */
+  readonly teamSize: number;
+  /** `?botlevel=easy|normal|hard`. Null = the lobby default. */
+  readonly botLevel: BotDifficulty | null;
+  /** `?fill`: with `?autostart`, seat a host-flown bot in every empty team slot. */
+  readonly fillBots: boolean;
+  /** `?lagcomp=0`: the host tests hits against current positions (A/B tests). Default on. */
+  readonly lagCompensation: boolean;
+  /** `?join=CODE`: skip the title and join this room at once (two-page tests). '' = off. */
+  readonly joinCode: string;
 }
 
 /** A bare `?perf` or `?perf=1` turns a flag on; `?perf=0|false|off|no` keeps it off. */
@@ -94,15 +123,37 @@ function parseBots(value: string | null): number {
   return count < MAX_BOTS ? count : MAX_BOTS;
 }
 
+/** A whole number in [min, max], else `fallback`. */
+function parseWhole(value: string | null, min: number, max: number, fallback: number): number {
+  if (value === null || value.trim() === '') return fallback;
+  const number = Math.floor(Number(value));
+  if (!(number >= min)) return fallback;
+  return number < max ? number : max;
+}
+
+const FLAG_MODE_IDS: readonly ModeId[] = ['skirmish', 'duel', 'emberRelay', 'skyCrown'];
+
+function parseMode(value: string | null): ModeId | null {
+  if (value === null) return null;
+  const lower = value.trim().toLowerCase();
+  for (const id of FLAG_MODE_IDS) {
+    if (id.toLowerCase() === lower && MODES[id].available) return id;
+  }
+  return null;
+}
+
 /** Pure: takes `location.search` (with or without the leading `?`) so it is testable in node. */
 export function parseQueryFlags(search: string): QueryFlags {
   const params = new URLSearchParams(search);
   const quality = params.get('quality')?.trim().toLowerCase();
+  const botLevel = params.get('botlevel')?.trim().toLowerCase();
+  const autopilotBot = params.get('autopilot')?.trim().toLowerCase() === 'bot';
   return {
     perf: isOn(params, 'perf'),
     debug: isOn(params, 'debug'),
     bench: isOn(params, 'bench'),
     autopilot: isOn(params, 'autopilot'),
+    autopilotBot,
     skipSeconds: parseSeconds(params.get('skip'), MAX_SKIP_SECONDS),
     quality: isQualityPresetId(quality) ? quality : null,
     netsim: parseNetsimProfile(params.get('netsim')),
@@ -111,6 +162,14 @@ export function parseQueryFlags(search: string): QueryFlags {
     solo: isOn(params, 'solo'),
     autostart: isOn(params, 'autostart'),
     noWorker: isOn(params, 'noworker'),
+    mode: parseMode(params.get('mode')),
+    scoreLimit: parseWhole(params.get('score'), 1, 1000, 0),
+    timeLimitS: parseWhole(params.get('time'), 0, 24 * 3600, -1),
+    teamSize: parseWhole(params.get('teamsize'), 1, 5, 0),
+    botLevel: isBotDifficulty(botLevel) ? botLevel : null,
+    fillBots: isOn(params, 'fill'),
+    lagCompensation: params.get('lagcomp') === null || isOn(params, 'lagcomp'),
+    joinCode: (params.get('join') ?? '').trim().toUpperCase().slice(0, 12),
   };
 }
 

@@ -10,12 +10,14 @@ import { DEFAULT_SETTINGS, NO_PLAYER } from '../shared';
 import type {
   ConnectFailureReason,
   ConnectionStatus,
+  ControlsUiState,
   HudState,
   LoadingState,
   LobbyState,
   PlayerId,
   ResultsState,
   SettingsState,
+  SettingsTab,
   SignalingMode,
   TurnSettings,
   UiError,
@@ -89,6 +91,10 @@ export interface MutableUiState {
   startBlocker: UiStartBlocker | null;
   playerPings: readonly number[];
   pauseMenuOpen: boolean;
+  settingsOpen: boolean;
+  settingsTab: SettingsTab;
+  /** Absent until `src/game` has a binding table to show. */
+  controls?: ControlsUiState;
 }
 
 const NO_PINGS: readonly number[] = Object.freeze([]);
@@ -111,6 +117,8 @@ export function createUiState(settings: SettingsState = DEFAULT_SETTINGS): Mutab
     startBlocker: null,
     playerPings: NO_PINGS,
     pauseMenuOpen: false,
+    settingsOpen: false,
+    settingsTab: 'video',
   };
 }
 

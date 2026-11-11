@@ -21,6 +21,8 @@ import { FixedStepLoop } from './sim';
 /** What a dev build (and `?debug`) hangs on `window` for the console and the browser tests. */
 interface DebugHook {
   readonly game: Game;
+  /** For browser tests that draw something of their own with the page's renderer. */
+  readonly renderer: GameRenderer;
   report(): unknown;
 }
 
@@ -95,6 +97,18 @@ function boot(): void {
     renderer,
     flags: {
       autopilot: flags.autopilot,
+      autopilotBot: flags.autopilotBot,
+      forcedQuality: flags.quality,
+      autoSettings: {
+        ...(flags.mode !== null ? { mode: flags.mode } : {}),
+        ...(flags.teamSize > 0 ? { teamSize: flags.teamSize } : {}),
+        ...(flags.scoreLimit > 0 ? { scoreLimit: flags.scoreLimit } : {}),
+        ...(flags.timeLimitS >= 0 ? { timeLimitS: flags.timeLimitS } : {}),
+        ...(flags.botLevel !== null ? { botDifficulty: flags.botLevel } : {}),
+        ...(flags.fillBots ? { fillBots: true } : {}),
+      },
+      lagCompensation: flags.lagCompensation,
+      joinCode: flags.joinCode,
       skipSeconds: flags.skipSeconds,
       bots: flags.bots,
       lan: flags.lan,
@@ -114,6 +128,7 @@ function boot(): void {
     const height = canvas.clientHeight;
     renderer.resize(width, height, window.devicePixelRatio);
     if (width > 0 && height > 0) game.setAspect(width / height);
+    game.setViewportSize(width, height);
   };
   applySize();
   new ResizeObserver(applySize).observe(canvas);
@@ -136,6 +151,8 @@ function boot(): void {
       game.frame(alpha, frameMs);
       perfHud?.end();
     },
+    // The "30 / 45 fps" setting: callbacks it turns down neither step nor draw.
+    shouldRender: (timeMs) => game.shouldRender(timeMs),
     // Hidden tab: no frames, but a client must keep telling the host it is still there.
     background: () => {
       game.background();
@@ -151,7 +168,7 @@ function boot(): void {
   });
 
   if (import.meta.env.DEV || flags.debug) {
-    const hook: DebugHook = { game, report: () => game.report() };
+    const hook: DebugHook = { game, renderer, report: () => game.report() };
     Reflect.set(window, '__dragonfall', hook);
   }
 
@@ -164,6 +181,7 @@ function boot(): void {
       app: game.app,
       getSimMs: () => game.getSimMs(),
       getNetText: () => game.getNetText(),
+      getFxText: () => game.getFxText(),
     },
     netsim,
   ).then(

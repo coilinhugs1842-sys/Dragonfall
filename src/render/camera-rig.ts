@@ -136,7 +136,7 @@ export const CAMERA_RIG_TUNING: CameraRigTuning = {
 /** Vertical FOV in degrees. The Settings menu offers MIN_BASE_FOV..MAX_BASE_FOV. */
 export const DEFAULT_BASE_FOV = 62;
 export const MIN_BASE_FOV = 45;
-export const MAX_BASE_FOV = 95;
+export const MAX_BASE_FOV = 100;
 /** Hard ceiling on base + speed + boost, whatever the tuning says. */
 export const MAX_CAMERA_FOV = 120;
 /** `updateProjectionMatrix` is skipped while the FOV moved less than this (degrees). */
@@ -293,6 +293,8 @@ export class ChaseCamera {
 
   readonly tuning: CameraRigTuning;
   reduceMotion: boolean;
+  /** 0..1 multiplier on the shake amplitude (the Settings menu's "camera shake"). */
+  shakeScale = 1;
   terrain: CameraTerrainRaycaster | null;
   /** See `ChaseCameraOptions.minY`. -Infinity (or NaN) = no floor. */
   minY: number;
@@ -480,8 +482,9 @@ export class ChaseCamera {
     let outX = this.springPosition.x;
     let outY = this.springPosition.y;
     let outZ = this.springPosition.z;
-    if (!this.reduceMotion && this.boost > 0.001 && tuning.shakeAmplitude > 0) {
-      const amplitude = tuning.shakeAmplitude * this.boost;
+    const shakeScale = this.shakeScale > 0 ? (this.shakeScale < 1 ? this.shakeScale : 1) : 0;
+    if (!this.reduceMotion && this.boost > 0.001 && tuning.shakeAmplitude * shakeScale > 0) {
+      const amplitude = tuning.shakeAmplitude * shakeScale * this.boost;
       const shakeX = amplitude * shakeWave(this.shakeTime, tuning.shakeFrequency, 0);
       const shakeY = amplitude * shakeWave(this.shakeTime, tuning.shakeFrequency * 1.17, 2.4);
       outX += right.x * shakeX + camUp.x * shakeY;
@@ -679,6 +682,8 @@ export interface CameraRig {
   /** Settings menu: vertical FOV in degrees at cruise speed. */
   setBaseFov(fovDeg: number): void;
   setReduceMotion(reduceMotion: boolean): void;
+  /** Settings menu: 0..1 multiplier on the shake amplitude (0 = none). */
+  setShakeScale(scale: number): void;
   /** Terrain for the pull-in; null (open sky) turns it off. */
   setTerrain(terrain: CameraTerrainRaycaster | null): void;
   /** Place the camera directly on the next update instead of easing (spawn, scene cut). */
@@ -729,6 +734,9 @@ export function createCameraRig(options: CameraRigOptions = {}): CameraRig {
     },
     setReduceMotion(reduceMotion: boolean): void {
       chase.reduceMotion = reduceMotion;
+    },
+    setShakeScale(scale: number): void {
+      chase.shakeScale = Number.isFinite(scale) ? scale : 1;
     },
     setTerrain(terrain: CameraTerrainRaycaster | null): void {
       chase.terrain = terrain;

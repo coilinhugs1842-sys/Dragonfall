@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { FrameCap } from '../../src/game/settings/frame-cap';
 import {
   DYNRES_SCALE_STEP,
   DYNRES_TARGET_FRAME_MS,
@@ -288,5 +289,83 @@ describe('computePixelRatio', () => {
 
   it('survives a zero-sized canvas', () => {
     expect(Number.isFinite(computePixelRatio(0, 1, 0.7))).toBe(true);
+  });
+});
+
+describe('under the frame cap of the settings', () => {
+  /**
+   * A 60 Hz display with all the GPU headroom there is: every callback on time. The real gate
+   * says which callbacks draw, and the scaler is fed the time since the last drawn frame, as
+   * `FrameDriver` does.
+   */
+  function run(
+    resolution: DynamicResolution,
+    cap: FrameCap,
+    seconds: number,
+    clock: { ms: number; last: number },
+  ): void {
+    const refresh = 1000 / 60;
+    for (let i = 0; i < seconds * 60; i++) {
+      clock.ms += refresh;
+      if (!cap.shouldRender(clock.ms)) continue;
+      resolution.update(clock.ms - clock.last);
+      clock.last = clock.ms;
+    }
+  }
+
+  for (const fps of [30, 45]) {
+    it(`a ${fps} fps cap switched on after uncapped play keeps the scale up`, () => {
+      const resolution = new DynamicResolution(0.6, 0.85);
+      const cap = new FrameCap();
+      const clock = { ms: 0, last: 0 };
+      run(resolution, cap, 10, clock);
+      expect(resolution.scale).toBe(0.85);
+      cap.setCap(fps);
+      resolution.setFrameCap(fps);
+      expect(resolution.frameBudgetMs).toBeCloseTo(1000 / fps, 9);
+      let lowest = 1;
+      for (let second = 0; second < 120; second++) {
+        run(resolution, cap, 1, clock);
+        lowest = Math.min(lowest, resolution.scale);
+      }
+      expect(lowest).toBe(0.85);
+
+      // Cap off again: back to a 60 fps budget, and still at the top.
+      cap.setCap(0);
+      resolution.setFrameCap(0);
+      expect(resolution.frameBudgetMs).toBeCloseTo(1000 / 60, 9);
+      run(resolution, cap, 20, clock);
+      expect(resolution.scale).toBe(0.85);
+    });
+
+    it(`a ${fps} fps cap from boot keeps the scale up`, () => {
+      const resolution = new DynamicResolution(0.6, 0.85);
+      const cap = new FrameCap();
+      cap.setCap(fps);
+      resolution.setFrameCap(fps);
+      const clock = { ms: 0, last: 0 };
+      let lowest = 1;
+      for (let second = 0; second < 60; second++) {
+        run(resolution, cap, 1, clock);
+        lowest = Math.min(lowest, resolution.scale);
+      }
+      expect(lowest).toBe(0.85);
+    });
+  }
+
+  it('still steps down under a cap when the GPU cannot hold the capped rate', () => {
+    const resolution = new DynamicResolution(0.6, 0.85);
+    resolution.setFrameCap(30);
+    // 20 fps against a 30 fps cap.
+    for (let i = 0; i < 600; i++) resolution.update(50);
+    expect(resolution.scale).toBe(0.6);
+  });
+
+  it('a capped page that drops a refresh now and then is juddering', () => {
+    const resolution = new DynamicResolution(0.6, 0.85);
+    resolution.setFrameCap(30);
+    // One frame in twenty takes three refreshes instead of two.
+    for (let i = 0; i < 1200; i++) resolution.update(i % 20 === 0 ? 50 : 1000 / 30);
+    expect(resolution.scale).toBeLessThan(0.85);
   });
 });

@@ -109,3 +109,36 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
     placeholder dragons are not the final look. Phase 4 targets the finish of a top stylized hero shooter
     (strong silhouettes, rich materials, rim light, readable VFX, cohesive grading) in our own style; the
     "original work only" rule still applies.
+
+## 2026-11-11: Phase 3
+
+24. **Snapshot owner block is packed on the wire.** An 18-byte mask (one bit per byte of the 140-byte image)
+    followed by the non-zero bytes. Lossless and stateless, so reconciliation is unchanged; a quiet 5v5 snapshot
+    is about 255 B (5 KB/s). Chosen over acked deltas, which would make snapshots depend on each other.
+25. **Standing zones are refreshed, not repeated.** A zone that does not follow its owner is sent in the
+    snapshots of its first 6 ticks, then in every 5th snapshot (`staticZoneDue`, same rule on both ends). The
+    client carries it in between; a zone missing when due has ended. Worst-case appearance delay on a lossy
+    link is about 250 ms.
+26. **Bandwidth contract: an average fight stays under 7 KB/s per client.** Measured 6.2-6.5 KB/s in a 5v5 bot
+    fight. A synthetic "all ten dragons spam everything" case reaches 11.8 KB/s (mostly meteor bombs) and is
+    accepted; tests guard quiet < 5.5, fight < 7, spam < 12.5 KB/s. Revisit in T-6.1 if real play gets near it.
+27. **Veil hides events as well as snapshots.** `hit`, `statusApplied` and non-veil `abilityCast` on a veiled
+    dragon go only to its own team and spectators. The hosting player's page is treated like a client (its
+    WorldView omits veiled enemies). Takedown, spawn, impact and the veil cast itself are public. Consequence:
+    no hit marker for damage landed on a veiled enemy.
+28. **Every ability that can hurt an enemy is an attack** (`ABILITY_TAG_ATTACK`, Afterburn included), so it ends
+    spawn protection and Veil.
+29. **Inside-terrain is a signed crossing count** (`TerrainBvh.solidDepth`), not the nearest face's normal,
+    because map solids overlap and stack. Used to eject a dragon whose phase dive ends inside rock.
+30. **Host-flown bots act only in the `playing` phase.** They fill empty seats from the lobby (Easy / Normal /
+    Hard) and run inside the host sim, not as fake network clients (`?bots=N` net-bots stay a load-test tool).
+31. **A frame cap chosen in Settings is the dynamic-resolution budget**, so capping at 30/45 fps does not push
+    the render scale to its minimum.
+32. **Events queued across a hidden tab or a frame gap over 0.5 s are dropped, except `matchPhase`.** Views take
+    state from the WorldView; this avoids a burst of effects and sounds on return.
+33. **Per-rider scores travel on `ctrl` as `MSG_SCOREBOARD`**, at most once a second when changed, at every
+    round end and result, and to late joiners.
+34. **Duel storm:** the wall never starts inside the spawn gates plus 60 m. On the greybox map (gates at about
+    800 m of a 1000 m radius) that clamps rounds 2+ to 861 m, so the per-round fractions barely show. The real
+    map (T-4.5) places Duel gates closer in so the fractions apply.
+35. **Placeholder sounds are synthesised in code** (no audio files yet); real audio lands in T-4.8.

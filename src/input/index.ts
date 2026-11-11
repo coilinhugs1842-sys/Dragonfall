@@ -39,6 +39,7 @@ export {
   MAX_SENSITIVITY,
   MIN_SENSITIVITY,
   centerReticle,
+  clearInputAim,
   clearInputState,
   createInputState,
   inputCodeDown,
@@ -48,6 +49,7 @@ export {
   isCodeBound,
   releaseAllInput,
   sampleInput,
+  setInputAim,
   setInputBindings,
 } from './input-state';
 export type { InputOptions, InputState } from './input-state';
