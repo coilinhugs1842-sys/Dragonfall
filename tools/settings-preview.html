@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dragonfall settings preview (dev only)</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0b1020;
+        font-family: system-ui, sans-serif;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      /* A mid-tone stand-in for the title sky. Not game art. */
+      #backdrop {
+        position: fixed;
+        inset: 0;
+        background: linear-gradient(180deg, #7f93b8 0%, #b9a9b4 34%, #f2c796 56%, #6f8aa0 100%);
+      }
+      #ui {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        user-select: none;
+      }
+      #ui .df-interactive {
+        pointer-events: auto;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      #log {
+        position: fixed;
+        left: 4px;
+        bottom: 4px;
+        max-width: 46%;
+        margin: 0;
+        color: #fff;
+        font: 11px/1.3 monospace;
+        background: rgb(0 0 0 / 55%);
+        padding: 2px 6px;
+        white-space: pre-wrap;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="backdrop"></div>
+    <div id="ui"></div>
+    <pre id="log" hidden></pre>
+    <script type="module" src="./settings-preview.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,445 @@
+/*
+ * Settings panel (src/ui/settings). Prefix `dfs-`; colours, type and buttons come from ui.css
+ * (`dfu-`), so the panel reads as one more of the menus: parchment on ink, thin serif heading,
+ * hairline rules.
+ *
+ * Cost rules as in ui.css: no backdrop-filter, no blur, no shadows; motion is opacity only and
+ * sits behind `prefers-reduced-motion: no-preference`.
+ */
+
+.dfs-root {
+  /* Follows the interface-size setting (`--df-ui-scale` on <html>, set by src/game). */
+  font-size: calc(clamp(13.5px, 0.45vw + 0.5vh + 5px, 24px) * var(--df-ui-scale, 1));
+}
+
+.dfs-scrim {
+  /* Definite tracks: the panel's `100%` then means the scrim, not its own content height. */
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  padding: 1.2em;
+}
+
+.dfs-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(50em, 100%);
+  height: min(42em, 100%);
+  background: var(--dfu-panel-solid);
+}
+
+/* --- Head and tabs ----------------------------------------------------------------------------- */
+
+.dfs-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.5em;
+  padding: 1.1em 1.6em 0;
+  border-bottom: 1px solid var(--dfu-line);
+}
+
+.dfs-head .dfu-heading {
+  margin: 0;
+  padding-bottom: 0.45em;
+}
+
+.dfs-tabs {
+  display: flex;
+  gap: 0.2em;
+}
+
+.dfs-tab {
+  position: relative;
+  min-height: 2.9em;
+  padding: 0 1em;
+  border: 0;
+  background: transparent;
+  color: var(--dfu-muted);
+  font-size: 0.8em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dfs-tab:hover {
+  color: var(--dfu-text);
+}
+
+/* The selected tab is brighter AND underlined, so it never rests on colour alone. */
+.dfs-tab[aria-selected='true'] {
+  color: var(--dfu-text);
+  font-weight: 600;
+}
+
+.dfs-tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: 1em;
+  right: 1em;
+  bottom: -1px;
+  height: 2px;
+  background: var(--dfu-edge);
+}
+
+.dfs-tab:focus-visible {
+  outline-offset: -3px;
+}
+
+/* --- Body -------------------------------------------------------------------------------------- */
+
+.dfs-body {
+  min-height: 0;
+  padding: 0.4em 1.6em 1.2em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dfu-line-strong) transparent;
+}
+
+.dfs-group {
+  padding-top: 1.1em;
+}
+
+.dfs-group-title {
+  margin: 0 0 0.3em;
+  font-weight: 400;
+}
+
+.dfs-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 19em);
+  align-items: center;
+  gap: 0.3em 1.6em;
+  min-height: 3.1em;
+  padding: 0.45em 0;
+  border-top: 1px solid var(--dfu-line);
+}
+
+.dfs-group-title + .dfs-row,
+.dfs-note + .dfs-row {
+  border-top: 0;
+}
+
+.dfs-row-label {
+  display: block;
+  font-size: 0.95em;
+}
+
+.dfs-row-hint,
+.dfs-note {
+  margin: 0.1em 0 0;
+  line-height: 1.35;
+}
+
+.dfs-note {
+  max-width: 44em;
+  margin-bottom: 0.3em;
+}
+
+.dfs-problem {
+  margin: 0.2em 0 0;
+  color: var(--dfu-ember);
+  font-size: 0.82em;
+}
+
+.dfs-problem::before {
+  content: '! ';
+  font-weight: 700;
+}
+
+.dfs-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.7em;
+  min-width: 0;
+}
+
+.dfs-control-buttons {
+  flex-wrap: nowrap;
+  flex-wrap: wrap;
+}
+
+.dfs-select,
+.dfs-input {
+  min-height: 2.4em;
+  font-size: 0.9em;
+}
+
+.dfs-control-secret .dfs-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dfs-secret[data-masked='true'] {
+  -webkit-text-security: disc;
+}
+
+.dfs-reveal {
+  flex: none;
+  min-width: 4.6em;
+}
+
+.dfs-danger {
+  border-color: var(--dfu-ember);
+  color: var(--dfu-ember);
+}
+
+/* --- Slider ------------------------------------------------------------------------------------ */
+
+.dfs-range-value {
+  flex: none;
+  width: 4.2em;
+  color: var(--dfu-text);
+  font-size: 0.9em;
+  text-align: right;
+}
+
+.dfs-range {
+  flex: 1;
+  min-width: 0;
+  height: 1.8em;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.dfs-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--dfu-line-strong);
+}
+
+.dfs-range::-moz-range-track {
+  height: 2px;
+  background: var(--dfu-line-strong);
+}
+
+.dfs-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 0.55em;
+  height: 1.25em;
+  margin-top: calc(-0.625em + 1px);
+  border: 0;
+  border-radius: 1px;
+  background: var(--dfu-text);
+}
+
+.dfs-range::-moz-range-thumb {
+  width: 0.55em;
+  height: 1.25em;
+  border: 0;
+  border-radius: 1px;
+  background: var(--dfu-text);
+}
+
+.dfs-range:hover::-webkit-slider-thumb {
+  background: #fff;
+}
+
+.dfs-range:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.dfs-switch {
+  min-width: 6.4em;
+}
+
+/* --- Keys -------------------------------------------------------------------------------------- */
+
+.dfs-prompt {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+  min-height: 3em;
+  margin: 0.3em 0 0.5em;
+  padding: 0.5em 0.9em;
+  border: 1px solid var(--dfu-edge);
+  border-radius: 0.25em;
+  background: #232a3d;
+}
+
+.dfs-prompt[data-phase='conflict'] {
+  border-color: var(--dfu-ember);
+}
+
+.dfs-prompt-text {
+  margin: 0;
+  font-size: 0.92em;
+}
+
+.dfs-prompt-actions {
+  display: flex;
+  flex: none;
+  gap: 0.5em;
+}
+
+.dfs-key-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 4.4em;
+  align-items: center;
+  gap: 0.8em;
+  min-height: 2.75em;
+  border-top: 1px solid var(--dfu-line);
+}
+
+.dfs-key-row:first-child {
+  border-top: 0;
+}
+
+.dfs-key-name {
+  font-size: 0.95em;
+}
+
+/* An action with no key at all is marked with words, not just a tint. */
+.dfs-key-row[data-unbound='true'] .dfs-key-name::after {
+  content: '  ·  no key';
+  color: var(--dfu-ember);
+  font-size: 0.85em;
+}
+
+.dfs-key-slots {
+  display: flex;
+  gap: 0.5em;
+}
+
+.dfs-key {
+  width: 9.2em;
+  min-height: 2.1em;
+  padding: 0 0.6em;
+  border: 1px solid var(--dfu-line-strong);
+  border-radius: 0.25em;
+  background: rgb(9 11 20 / 55%);
+  color: var(--dfu-text);
+  font-size: 0.86em;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfs-key:hover {
+  border-color: var(--dfu-text);
+}
+
+.dfs-key[data-state='empty'] {
+  border-style: dashed;
+  border-color: var(--dfu-line);
+  color: var(--dfu-faint);
+}
+
+.dfs-key[data-state='listening'] {
+  border-color: var(--dfu-text);
+  background: var(--dfu-text);
+  color: var(--dfu-ink);
+  font-weight: 600;
+}
+
+.dfs-key[data-state='clash'] {
+  border-color: var(--dfu-ember);
+  border-style: double;
+  border-width: 3px;
+}
+
+.dfs-key-reset {
+  min-height: 2.1em;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dfu-muted);
+  font-size: 0.76em;
+  letter-spacing: 0.12em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.dfs-key-reset:hover:not(:disabled) {
+  color: var(--dfu-text);
+  text-decoration: underline;
+}
+
+.dfs-key-reset:disabled {
+  visibility: hidden;
+}
+
+.dfs-keys-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+  padding-top: 0.8em;
+  border-top: 1px solid var(--dfu-line);
+}
+
+.dfs-keys-foot .dfu-hint {
+  margin: 0;
+}
+
+/* --- Foot -------------------------------------------------------------------------------------- */
+
+.dfs-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5em;
+  padding: 0.8em 1.6em;
+  border-top: 1px solid var(--dfu-line);
+}
+
+.dfs-foot .dfu-hint {
+  margin: 0;
+}
+
+.dfs-foot .dfu-btn {
+  min-width: 9em;
+}
+
+@media (max-width: 900px) {
+  .dfs-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2em;
+  }
+
+  .dfs-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dfs-control {
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dfs-root:not([hidden]) .dfs-panel {
+    animation: dfs-in 140ms ease-out;
+  }
+
+  .dfs-key[data-state='listening'] {
+    animation: dfs-listen 900ms ease-in-out infinite alternate;
+  }
+}
+
+@keyframes dfs-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes dfs-listen {
+  to {
+    opacity: 0.62;
+  }
+}
+
+/* The game's own "Reduce motion" setting (set on <html> by applyPageSettings). */
+[data-df-motion='reduced'] .dfs-panel,
+[data-df-motion='reduced'] .dfs-key {
+  animation: none !important;
+}
