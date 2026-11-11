@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { TICK_DT_S, TICK_HZ, TICK_MS } from '../../src/shared';
-import { DEFAULT_MAX_STEPS_PER_ADVANCE, FixedStepLoop, createSim } from '../../src/sim';
+import {
+  DEFAULT_MAX_STEPS_PER_ADVANCE,
+  FixedStepLoop,
+  createSim,
+  createSimState,
+} from '../../src/sim';
 
 /** Small seeded PRNG so "jittery" frame times are the same on every run. */
 function mulberry32(seed: number): () => number {
@@ -251,7 +256,7 @@ describe('createSim skeleton', () => {
     sim.step(0, []);
     sim.step(1, []);
     sim.reset();
-    expect(sim.prev).toEqual({ tick: -1, timeS: 0 });
-    expect(sim.current).toEqual({ tick: -1, timeS: 0 });
+    expect(sim.prev).toEqual(createSimState());
+    expect(sim.current).toEqual(createSimState());
   });
 });

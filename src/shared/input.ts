@@ -14,16 +14,19 @@ export const BUTTON_PRIMARY = 1 << 5;
 export const BUTTON_SECONDARY = 1 << 6;
 export const BUTTON_UTILITY = 1 << 7;
 export const BUTTON_ULTIMATE = 1 << 8;
+/** Held roll keys (A/D): extra bank that tightens the turn. Digital, so bits and not an axis. */
+export const BUTTON_ROLL_LEFT = 1 << 9;
+export const BUTTON_ROLL_RIGHT = 1 << 10;
 /** Mask of every defined bit; the host uses it to drop unknown bits from client input. */
-export const BUTTON_MASK = (1 << 9) - 1;
+export const BUTTON_MASK = (1 << 11) - 1;
 
 export interface InputFrame {
   /** Sim tick this input applies to. */
   tick: number;
   /**
    * Steer vector, each axis in [-1, 1]: x = turn right, y = pitch up. `src/input` folds mouse
-   * reticle offset, WASD and gamepad sticks into it. The exact device mapping (and whether roll
-   * needs its own axis) is TBD in T-1.x; the host clamps both axes.
+   * reticle offset, WASD and gamepad sticks into it. Roll has no axis: the sim banks into the
+   * turn by itself and BUTTON_ROLL_LEFT/RIGHT add to it. The host clamps both axes.
    */
   steerX: number;
   steerY: number;

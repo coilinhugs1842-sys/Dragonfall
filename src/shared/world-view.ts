@@ -20,7 +20,7 @@ import { createQuat, createVec3 } from './math-types';
 
 // --- Dragon flags (a `u16` in the snapshot) ---------------------------------------------------------
 //
-// Bits 0-7 are taken; bits 8-15 are free for later statuses (DECISIONS 14 widened the field from
+// Bits 0-8 are taken; bits 9-15 are free for later statuses (DECISIONS 14 widened the field from
 // `u8` rather than dropping IN_STORM). Never renumber a shipped bit.
 
 export const DRAGON_FLAG_ALIVE = 1 << 0;
@@ -36,6 +36,8 @@ export const DRAGON_FLAG_VEILED = 1 << 5;
 export const DRAGON_FLAG_PHASING = 1 << 6;
 /** Inside the storm wall and taking damage from it. */
 export const DRAGON_FLAG_IN_STORM = 1 << 7;
+/** Below stall speed: the nose is dropping and steering is weak until speed recovers. */
+export const DRAGON_FLAG_STALLED = 1 << 8;
 
 // --- Dragon animation state (a `u8` in the snapshot) ---------------------------------------------
 
