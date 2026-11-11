@@ -24,8 +24,17 @@ export interface PerfHud {
 
 export interface PerfHudOptions {
   renderer: GameRenderer;
-  /** Host only: averaged sim + net cost per frame in ms. Sampled at the text rate, not per frame. */
+  /**
+   * Averaged cost of one frame's fixed steps in ms (on the host: inputs + sim + snapshot
+   * encode). Sampled at the text rate, not per frame.
+   */
   getSimMs?: () => number;
+  /**
+   * The network lines under the sim line, already formatted (`src/game` builds them: on the host
+   * the sim / snapshot split and KB/s up and down, on a client ping, interpolation delay,
+   * snapshot loss and prediction error). Called at the text rate; '' = no session.
+   */
+  getNetText?: () => string;
   /** Where to mount. Defaults to `#ui`, then `document.body`. */
   parent?: HTMLElement;
 }
@@ -41,7 +50,7 @@ const PAUSE_GAP_MS = 1000;
 
 const BYTES_PER_MB = 1024 * 1024;
 
-/** Em dash: "no value yet" (sim ms on a client, net until Phase 2). */
+/** Em dash: "no value yet" (no sim callback, no session). */
 const NO_VALUE = '—';
 
 /**
@@ -62,7 +71,7 @@ function formatCount(n: number): string {
 }
 
 export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
-  const { renderer, getSimMs } = opts;
+  const { renderer, getSimMs, getNetText } = opts;
   const webgl = renderer.webgl;
   const canvas = webgl.domElement;
   const info = webgl.info;
@@ -114,6 +123,7 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
     const heapText = heap < 0 ? 'n/a' : `${(heap / BYTES_PER_MB).toFixed(0)} MB`;
     // Three decimals: a 10-dragon tick is tens of microseconds.
     const simText = getSimMs ? `${getSimMs().toFixed(3)} ms` : NO_VALUE;
+    const netText = getNetText ? getNetText() : '';
     text.data =
       `fps ${summary.fps.toFixed(1)}  1% low ${summary.onePercentLowFps.toFixed(1)}\n` +
       `ms  avg ${summary.avgMs.toFixed(2)}  1% ${summary.onePercentLowMs.toFixed(2)}` +
@@ -122,7 +132,9 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
       `geo ${info.memory.geometries}  tex ${info.memory.textures}  heap ${heapText}\n` +
       `scale ${renderer.resolution.scale.toFixed(2)}  ${canvas.width}x${canvas.height}` +
       `  ${renderer.presetId}\n` +
-      `sim ${simText}  net ${NO_VALUE}`;
+      `sim ${simText}
+` +
+      `${netText === '' ? `net ${NO_VALUE}` : netText}`;
   }
 
   return {
