@@ -18,8 +18,20 @@
  * - Animation is our own baked-clip blend (dragon-animator.ts), not AnimationMixer: about
  *   3 clips x 24 quaternion lerps per dragon. Far dragons re-pose at 15-30 Hz, dragons outside
  *   the view (and outside shadow range) not at all.
- * - `update` allocates nothing. Rigs are pooled per class and only created the first time more
- *   dragons of a class are on screen than ever before (a spawn, never mid-fight churn).
+ * - `update` allocates nothing once the rigs exist. Rigs are pooled per class and built at
+ *   match load by `prewarm`, one per dragon that is going to fly. A class whose GLB arrives
+ *   later gets its rigs from the loader's continuation, between frames.
+ *
+ * NO COMPILE MID-MATCH
+ * - A pooled rig waits hidden but IN the scene. three's `compile` (the stage's warm-up) walks
+ *   the scene with `traverse`, not `traverseVisible` (WebGLRenderer.compile, read on 0.187),
+ *   so a hidden rig's material is compiled like a drawn one's and costs nothing until used.
+ * - `revision` goes up whenever a rig was built. The stage polls it once per frame and runs
+ *   its warm-up again; to give it that frame, the first rig of a class is not drawn in the
+ *   frame it was built or the next (the placeholder covers for it).
+ * - Fallback: a class nobody prewarmed still gets a rig the first time one of its dragons is
+ *   seen, and a class with more dragons than `prewarm` listed grows its pool inside `update`.
+ *   Both work, both are a hitch; list every dragon.
  *
  * It reads ONLY the WorldView and the camera. Per-dragon memory is keyed by player id.
  */
@@ -104,6 +116,19 @@ const SHADOW_ANIMATION_RANGE = 60;
 const TEAM_GLOW_HEX: readonly number[] = [0xffb15c, 0xa8f0ff];
 /** Smoothing of the measured angular velocity, per second. */
 const ANGULAR_SMOOTHING = 12;
+/**
+ * A dragon that comes back to a skinned model within this many seconds (it was drawn far over
+ * the skinned cap, or hidden for a moment) carries on from the animation state it left with:
+ * blend weights, wing-beat phase and springs. Starting over would snap it to a fresh pose.
+ */
+const ANIM_KEEP_S = 2;
+/**
+ * Frames between building a class's first rig and drawing it: the stage polls `revision` once
+ * per frame, before or after our `update`, so two frames guarantee its warm-up ran in between.
+ */
+const WARM_UP_FRAMES = 2;
+/** `readyFrame` of a class that has no rig yet. */
+const NO_RIG = -1;
 
 export interface DragonsOptions {
   /** Draw dragons whose ALIVE flag is clear (they play `death_fall`). Default false. */
@@ -148,6 +173,23 @@ export interface Dragons {
   readonly object: Group;
   readonly stats: DragonsStats;
   /**
+   * Goes up (never down) whenever this view put something new in front of the GPU: a rig and
+   * its material were built (`prewarm`, a class that loaded late, pool growth in `update`), or
+   * `setQuality` changed the materials so that they compile again. Poll it once per frame and
+   * run the shader warm-up when it moved.
+   */
+  readonly revision: number;
+  /**
+   * Builds the rigs a match is going to need now, at load time, so `update` never has to: one
+   * per entry of `classIds`. List a class once per dragon that flies it (ten Talons: ten
+   * entries). The rigs wait hidden in the pool, in the scene, where a warm-up compiles them.
+   *
+   * A class that is still loading gets its rigs the moment it arrives (from the loader, not
+   * from `update`), and one whose load failed earlier is tried again. Calling it again raises
+   * the pool to the new counts; it never shrinks. A no-op without an asset library.
+   */
+  prewarm(classIds: readonly DragonClassId[]): void;
+  /**
    * Per frame, after the WorldView is built and the camera is placed. `dtS` is the real frame
    * time. `camera` drives LOD and culling (null: everything near and in view).
    * `localPlayerId` defaults to `view.localDragonId`; it decides which veiled dragons are
@@ -189,6 +231,8 @@ interface Actor {
   readonly anim: DragonAnimState;
   rig: Rig | null;
   lastSeenFrame: number;
+  /** View time (seconds) it was last drawn skinned; -Infinity before the first time. */
+  skinnedAtS: number;
   /** The level chosen on frame `lodFrame` (hysteresis needs last frame's). */
   lod: number;
   lodFrame: number;
@@ -299,6 +343,8 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
   const skipIds = new Uint8Array(ID_SLOTS);
   const placeholder = createPlaceholderDragons(preset, { showDead, skipIds });
   object.add(placeholder.object);
+  // The library is shared by every dragon view of the page; they all run the same preset.
+  library?.setMaxTextureSize(preset.maxTextureSize);
 
   let quality = preset;
   let policy: DragonLodPolicy = dragonLodPolicy(preset);
@@ -317,8 +363,22 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
   /** Actors that hold a rig, for the release sweep. */
   const active: Actor[] = [];
   const freeRigs = new Map<DragonClassId, Rig[]>();
-  for (const classId of DRAGON_CLASS_IDS) freeRigs.set(classId, []);
+  /** Rigs `prewarm` asked for, and rigs that exist (pooled or in use), per class. */
+  const wantedRigs = new Map<DragonClassId, number>();
+  const builtRigs = new Map<DragonClassId, number>();
+  /** First frame a class's rigs may be drawn (see WARM_UP_FRAMES), or NO_RIG. */
+  const readyFrame = new Map<DragonClassId, number>();
+  for (const classId of DRAGON_CLASS_IDS) {
+    freeRigs.set(classId, []);
+    wantedRigs.set(classId, 0);
+    builtRigs.set(classId, 0);
+    readyFrame.set(classId, NO_RIG);
+  }
   const allRigs: Rig[] = [];
+  let revision = 0;
+  let disposed = false;
+  /** Removes our listener from the library while `prewarm` waits for a class to load. */
+  let stopWaiting: (() => void) | null = null;
 
   // Per-frame scratch, sized for the most dragons a view can hold.
   const candidateIndex = new Int16Array(ID_SLOTS);
@@ -358,6 +418,7 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
         anim: createDragonAnimState(),
         rig: null,
         lastSeenFrame: -2,
+        skinnedAtS: -Infinity,
         lod: -1,
         lodFrame: -2,
         hasPrev: false,
@@ -391,6 +452,63 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
     actor.lod = -1;
   }
 
+  /**
+   * A new rig, hidden, in the scene and in no pool yet. The first one of a class starts that
+   * class's wait for the stage's warm-up. Allocates: load time, or the fallbacks in `update`.
+   */
+  function buildRig(asset: DragonAsset): Rig {
+    const classId = asset.classId;
+    const rig = createRig(asset, quality);
+    rig.material.uniforms.uDebug.value.r = debugSlots ? 1 : 0;
+    for (const mesh of rig.meshes) mesh.castShadow = castShadows;
+    allRigs.push(rig);
+    object.add(rig.root);
+    stats.rigs = allRigs.length;
+    builtRigs.set(classId, (builtRigs.get(classId) ?? 0) + 1);
+    if (readyFrame.get(classId) === NO_RIG) readyFrame.set(classId, frame + WARM_UP_FRAMES);
+    revision++;
+    return rig;
+  }
+
+  /** Builds what `prewarm` asked for of every class that has loaded by now. */
+  function fillPools(): void {
+    if (disposed || library === null) return;
+    let waiting = false;
+    for (const classId of DRAGON_CLASS_IDS) {
+      const wanted = wantedRigs.get(classId) ?? 0;
+      let built = builtRigs.get(classId) ?? 0;
+      if (built >= wanted) continue;
+      const asset = library.get(classId);
+      if (asset === null) {
+        waiting = true;
+        continue;
+      }
+      const pool = freeRigs.get(classId);
+      for (; built < wanted; built++) pool?.push(buildRig(asset));
+    }
+    if (waiting) {
+      stopWaiting ??= library.subscribe(fillPools);
+    } else if (stopWaiting !== null) {
+      stopWaiting();
+      stopWaiting = null;
+    }
+  }
+
+  function prewarm(classIds: readonly DragonClassId[]): void {
+    if (disposed || library === null) return;
+    for (const classId of DRAGON_CLASS_IDS) {
+      let listed = 0;
+      for (const id of classIds) if (id === classId) listed++;
+      if (listed > (wantedRigs.get(classId) ?? 0)) wantedRigs.set(classId, listed);
+      if (listed > 0 && library.status(classId) === 'failed') {
+        // A match is about to need it: one more try. Its outcome reaches `fillPools` through
+        // the library's revision; a second failure leaves the placeholder, as before.
+        library.load(classId).catch(() => undefined);
+      }
+    }
+    fillPools();
+  }
+
   function acquireRig(actor: Actor, asset: DragonAsset): Rig {
     const current = actor.rig;
     if (current !== null) {
@@ -399,16 +517,9 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
     } else {
       active.push(actor);
     }
-    let rig = freeRigs.get(asset.classId)?.pop();
-    if (rig === undefined) {
-      // Pool growth: the first time this many dragons of the class are on screen.
-      rig = createRig(asset, quality);
-      rig.material.uniforms.uDebug.value.r = debugSlots ? 1 : 0;
-      for (const mesh of rig.meshes) mesh.castShadow = castShadows;
-      allRigs.push(rig);
-      object.add(rig.root);
-      stats.rigs = allRigs.length;
-    }
+    // An empty pool means more dragons of the class than `prewarm` listed: grow it here (the
+    // fallback; the program is compiled already, so it is an allocation, not a compile).
+    const rig = freeRigs.get(asset.classId)?.pop() ?? buildRig(asset);
     actor.rig = rig;
     actor.posed = false;
     return rig;
@@ -459,10 +570,21 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
       ) {
         continue;
       }
-      if (library === null || library.get(dragon.classId) === null) {
+      const asset = library === null ? null : library.get(dragon.classId);
+      if (asset === null) {
         // Loading, failed, or no library: the placeholder draws it.
         continue;
       }
+      const ready = readyFrame.get(dragon.classId) ?? NO_RIG;
+      if (ready === NO_RIG) {
+        // Fallback for a class nobody prewarmed: its first rig is built on first sight and
+        // waits in the pool for the warm-up like any other.
+        freeRigs.get(dragon.classId)?.push(buildRig(asset));
+        continue;
+      }
+      // The class's rigs are new to the GPU: the placeholder draws it until the stage has had
+      // its frame to compile them (WARM_UP_FRAMES).
+      if (frame < ready) continue;
       if (count >= ID_SLOTS) break;
       let distance = 0;
       if (haveCamera) {
@@ -509,10 +631,13 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
       const asset = library?.get(dragon.classId);
       if (asset === null || asset === undefined) continue;
       const actor = actorOf(id);
-      const fresh = actor.lastSeenFrame !== frame - 1 || actor.rig === null;
+      const continuing = actor.lastSeenFrame === frame - 1 && actor.rig !== null;
+      // Back within moments (it sat out a few frames over the skinned cap): see ANIM_KEEP_S.
+      const resumed = !continuing && timeS - actor.skinnedAtS <= ANIM_KEEP_S;
       const rig = acquireRig(actor, asset);
       skipIds[id] = 1;
       actor.lastSeenFrame = frame;
+      actor.skinnedAtS = timeS;
       actor.lod = level;
       actor.lodFrame = frame;
       skinned++;
@@ -535,18 +660,22 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
       meshes[2].visible = level === 2;
 
       // --- Animation inputs ---------------------------------------------------------------------
-      if (fresh) {
-        resetDragonAnimState(actor.anim, id);
+      if (!continuing) {
+        if (!resumed) {
+          resetDragonAnimState(actor.anim, id);
+          actor.pitchRate = 0;
+          actor.yawRate = 0;
+          actor.rollRate = 0;
+          actor.flash = 0;
+          actor.cast = 0;
+          actor.spawn = (flags & DRAGON_FLAG_SPAWN_PROTECTED) !== 0 ? 1 : 0;
+          actor.shield = (flags & DRAGON_FLAG_SHIELDED) !== 0 ? 1 : 0;
+          actor.dim = alive ? 0 : 1;
+        }
+        // The orientation and health remembered from before the gap are stale either way:
+        // read no turn rate and no hit out of the jump.
         actor.hasPrev = false;
-        actor.pitchRate = 0;
-        actor.yawRate = 0;
-        actor.rollRate = 0;
         actor.prevHealth = dragon.health;
-        actor.flash = 0;
-        actor.cast = 0;
-        actor.spawn = (flags & DRAGON_FLAG_SPAWN_PROTECTED) !== 0 ? 1 : 0;
-        actor.shield = (flags & DRAGON_FLAG_SHIELDED) !== 0 ? 1 : 0;
-        actor.dim = alive ? 0 : 1;
         actor.poseAge = 1;
       }
       if (actor.hasPrev) {
@@ -675,6 +804,8 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
   }
 
   function setQuality(next: QualityPreset): void {
+    // Another preset is another shader variant: every material compiles again on its next use.
+    if (next.id !== quality.id) revision++;
     quality = next;
     policy = dragonLodPolicy(next);
     castShadows = next.shadowCasters !== 'none';
@@ -683,6 +814,7 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
       for (const mesh of rig.meshes) mesh.castShadow = castShadows;
     }
     placeholder.setQuality(next);
+    library?.setMaxTextureSize(next.maxTextureSize);
   }
 
   function setDebug(debug: DragonsDebug | null): void {
@@ -709,6 +841,9 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
   }
 
   function dispose(): void {
+    disposed = true;
+    stopWaiting?.();
+    stopWaiting = null;
     for (const rig of allRigs) {
       rig.skeleton.dispose();
       rig.material.material.dispose();
@@ -723,5 +858,18 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
     // Geometry and textures belong to the asset library and outlive the match.
   }
 
-  return { object, stats, update, setQuality, setDebug, flapPhase, muzzleWorld, dispose };
+  return {
+    object,
+    stats,
+    get revision() {
+      return revision;
+    },
+    prewarm,
+    update,
+    setQuality,
+    setDebug,
+    flapPhase,
+    muzzleWorld,
+    dispose,
+  };
 }

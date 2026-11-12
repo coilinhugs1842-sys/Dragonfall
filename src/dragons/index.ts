@@ -40,6 +40,7 @@ export type {
 } from './dragon-assets';
 export {
   DRAGON_LOD_FAR,
+  LOD_CAP_HYSTERESIS,
   LOD_HYSTERESIS,
   LOD_REFERENCE_FOV_DEG,
   dragonLodPolicy,

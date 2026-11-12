@@ -53,6 +53,7 @@ import {
   sphereOutsidePlanes,
 } from './prop-lod';
 import type { PropLodSettings, TierFades } from './prop-lod';
+import { fitTextureToLimit } from './texture-mips';
 import { TINT_NEUTRAL_INDEX, createWorldMaterials, srgbHexToLinear } from './world-material';
 import type { WorldMaterials } from './world-material';
 
@@ -300,8 +301,21 @@ class ClusterBuilder {
 }
 
 /**
+ * Leaves out the levels of the bundle's textures that are larger than the preset's
+ * `maxTextureSize` (texture-mips.ts). At a field's creation that is before their first upload;
+ * at a preset change they are freed and go up again at the new size on their next use. The
+ * textures are shared by every field built from the bundle: the latest preset decides.
+ */
+function fitTextures(bundle: MapAssetBundle, preset: QualityPreset): void {
+  for (const loaded of bundle.textures.values()) {
+    fitTextureToLimit(loaded.texture, preset.maxTextureSize);
+  }
+}
+
+/**
  * Builds the meshes for `placements` from a loaded bundle. Throws when the bundle lacks a type
- * the map places (the caller keeps its stand-in). Load-time: allocates everything here.
+ * the map places (the caller keeps its stand-in), leaving nothing allocated. Load-time:
+ * allocates everything here.
  */
 export function createPropField(
   placements: readonly MapPlacement[],
@@ -316,6 +330,16 @@ export function createPropField(
   if (stone === undefined || masonry === undefined || moss === undefined || cliff === undefined || brush === undefined) {
     throw new Error('map assets: the "stone" texture is missing');
   }
+  // Checked before anything is allocated: a bundle that does not fit the map leaves nothing
+  // behind to free.
+  const sets = buildPlacementInstances(placements);
+  for (const set of sets) {
+    const asset = bundle.assets.get(set.type.id);
+    if (asset === undefined || asset.lods.length === 0) {
+      throw new Error(`map assets: no geometry for "${set.type.id}"`);
+    }
+  }
+  fitTextures(bundle, preset);
 
   const placementCount = placements.length;
   const farWidth = Math.max(1, placementCount);
@@ -341,133 +365,162 @@ export function createPropField(
   object.name = 'map-props';
   object.matrixAutoUpdate = false;
 
-  const sets = buildPlacementInstances(placements);
   const types: TypeEntry[] = [];
   const builders = new Map<number, ClusterBuilder>();
   const clusterIndexOf = new Map<number, number>();
   const disposableGeometries: BufferGeometry[] = [];
+  const instancedMeshes: InstancedMesh<BufferGeometry, ShaderMaterial>[] = [];
+  const farClusters: FarCluster[] = [];
   let lod0Triangles = 0;
   let farTriangles = 0;
   let meshCount = 0;
 
-  for (const set of sets) {
-    const type = set.type;
-    const asset = bundle.assets.get(type.id);
-    if (asset === undefined || asset.lods.length === 0) {
-      throw new Error(`map assets: no geometry for "${type.id}"`);
-    }
-    const isRock = type.kind === 'rock';
-    const isBackdrop = type.kind === 'backdrop';
-    const instancedLods = isBackdrop ? 0 : Math.min(asset.lods.length - 1, isRock ? 2 : 1);
-    const farLod: PropLodGeometry | undefined = asset.lods[asset.lods.length - 1];
-    if (farLod === undefined) throw new Error(`map assets: no far LOD for "${type.id}"`);
-    const isCloth = type.hasTint && type.id.startsWith('banner');
-    const height = type.boundsMax.y - type.boundsMin.y;
-    const clothMaterial = isCloth
-      ? materials.createCloth(type.boundsMax.y - height * 0.06, height * 0.85, height * CLOTH_SWING)
-      : null;
+  /** Frees everything this field put (or may have put) on the GPU. */
+  function release(): void {
+    // three frees an InstancedMesh's instance buffers and vertex array objects only when the
+    // MESH is disposed; disposing its geometry and material is not enough.
+    for (const mesh of instancedMeshes) mesh.dispose();
+    instancedMeshes.length = 0;
+    // The shared vertex attributes belong to the cached bundle; three re-uploads them on the
+    // next use. Only the wrappers, the far meshes, the materials and the state texture go.
+    for (const geometry of disposableGeometries) geometry.dispose();
+    disposableGeometries.length = 0;
+    materials.dispose();
+    farState.dispose();
+    object.clear();
+    types.length = 0;
+    farClusters.length = 0;
+  }
 
-    const buckets: Bucket[] = [];
-    for (let level = 0; level < instancedLods; level++) {
-      const lod = asset.lods[level];
-      if (lod === undefined) continue;
-      const matrices = new InstancedBufferAttribute(new Float32Array(set.count * 16), 16);
-      matrices.setUsage(DynamicDrawUsage);
-      const inst = new InstancedBufferAttribute(new Float32Array(set.count * 4), 4);
-      inst.setUsage(DynamicDrawUsage);
-      const meshes: InstancedMesh<BufferGeometry, ShaderMaterial>[] = [];
-      const slots: [BufferGeometry | null, ShaderMaterial][] = [
-        [lod.stone, isRock ? materials.rock : materials.prop],
-        [lod.tint, clothMaterial ?? materials.tint],
-      ];
-      for (const [source, material] of slots) {
-        if (source === null) continue;
-        const geometry = instancedGeometry(source, inst);
-        disposableGeometries.push(geometry);
-        const mesh = new InstancedMesh(geometry, material, set.count);
-        mesh.instanceMatrix = matrices;
-        mesh.name = `${type.id}-lod${level}-${material.name}`;
-        mesh.matrixAutoUpdate = false;
-        // Culled per instance in `update`; the mesh itself spans the map.
-        mesh.frustumCulled = false;
-        mesh.count = 0;
-        mesh.visible = false;
-        object.add(mesh);
-        meshes.push(mesh);
-        meshCount++;
+  try {
+    for (const set of sets) {
+      const type = set.type;
+      const asset = bundle.assets.get(type.id);
+      if (asset === undefined || asset.lods.length === 0) {
+        throw new Error(`map assets: no geometry for "${type.id}"`);
       }
-      buckets.push({
-        meshes,
-        matrices,
-        inst,
-        triangles: lod.triangles,
-        count: 0,
-        hash: 0,
-        lastCount: -1,
-        lastHash: 0,
+      const isRock = type.kind === 'rock';
+      const isBackdrop = type.kind === 'backdrop';
+      const instancedLods = isBackdrop ? 0 : Math.min(asset.lods.length - 1, isRock ? 2 : 1);
+      const farLod: PropLodGeometry | undefined = asset.lods[asset.lods.length - 1];
+      if (farLod === undefined) throw new Error(`map assets: no far LOD for "${type.id}"`);
+      const isCloth = type.hasTint && type.id.startsWith('banner');
+      const height = type.boundsMax.y - type.boundsMin.y;
+      const clothMaterial = isCloth
+        ? materials.createCloth(
+            type.boundsMax.y - height * 0.06,
+            height * 0.85,
+            height * CLOTH_SWING,
+          )
+        : null;
+
+      const buckets: Bucket[] = [];
+      for (let level = 0; level < instancedLods; level++) {
+        const lod = asset.lods[level];
+        if (lod === undefined) continue;
+        const matrices = new InstancedBufferAttribute(new Float32Array(set.count * 16), 16);
+        matrices.setUsage(DynamicDrawUsage);
+        const inst = new InstancedBufferAttribute(new Float32Array(set.count * 4), 4);
+        inst.setUsage(DynamicDrawUsage);
+        const meshes: InstancedMesh<BufferGeometry, ShaderMaterial>[] = [];
+        const slots: [BufferGeometry | null, ShaderMaterial][] = [
+          [lod.stone, isRock ? materials.rock : materials.prop],
+          [lod.tint, clothMaterial ?? materials.tint],
+        ];
+        for (const [source, material] of slots) {
+          if (source === null) continue;
+          const geometry = instancedGeometry(source, inst);
+          disposableGeometries.push(geometry);
+          const mesh = new InstancedMesh(geometry, material, set.count);
+          mesh.instanceMatrix = matrices;
+          mesh.name = `${type.id}-lod${level}-${material.name}`;
+          mesh.matrixAutoUpdate = false;
+          // Culled per instance in `update`; the mesh itself spans the map.
+          mesh.frustumCulled = false;
+          mesh.count = 0;
+          mesh.visible = false;
+          object.add(mesh);
+          meshes.push(mesh);
+          instancedMeshes.push(mesh);
+          meshCount++;
+        }
+        buckets.push({
+          meshes,
+          matrices,
+          inst,
+          triangles: lod.triangles,
+          count: 0,
+          hash: 0,
+          lastCount: -1,
+          lastHash: 0,
+        });
+      }
+
+      // Far tier: the last LOD of every instance into its cluster's builder.
+      const clusters = new Uint16Array(set.count);
+      for (let i = 0; i < set.count; i++) {
+        const key = farClusterKey(
+          set.spheres[i * 4] ?? 0,
+          set.spheres[i * 4 + 2] ?? 0,
+          FAR_CLUSTER_SIZE,
+        );
+        let clusterIndex = clusterIndexOf.get(key);
+        let builder = builders.get(key);
+        if (clusterIndex === undefined || builder === undefined) {
+          clusterIndex = clusterIndexOf.size;
+          clusterIndexOf.set(key, clusterIndex);
+          builder = new ClusterBuilder();
+          builders.set(key, builder);
+        }
+        clusters[i] = clusterIndex;
+        const placementIndex = set.placementIndices[i] ?? 0;
+        const scale = set.scales[i] ?? 1;
+        const fogScale = isBackdrop ? BACKDROP_FOG_SCALE : 1;
+        if (farLod.stone !== null) {
+          builder.add(farLod.stone, set.matrices, i * 16, scale, placementIndex, fogScale, null);
+        }
+        if (farLod.tint !== null) {
+          const team = set.teams[i] ?? PLACEMENT_TEAM_NEUTRAL;
+          const tint =
+            teamLinear[team === PLACEMENT_TEAM_NEUTRAL ? TINT_NEUTRAL_INDEX : team] ?? null;
+          builder.add(farLod.tint, set.matrices, i * 16, scale, placementIndex, fogScale, tint);
+        }
+      }
+
+      lod0Triangles += (asset.lods[0]?.triangles ?? 0) * set.count;
+      farTriangles += farLod.triangles * set.count;
+      types.push({
+        set,
+        buckets,
+        isRock,
+        cullable: type.kind === 'prop' && type.radius < CULLABLE_PROP_RADIUS,
+        glowMode: type.id.startsWith('brazier') ? 1 : 0,
+        clusters,
+        farTriangles: farLod.triangles,
       });
     }
 
-    // Far tier: the last LOD of every instance into its cluster's builder.
-    const clusters = new Uint16Array(set.count);
-    for (let i = 0; i < set.count; i++) {
-      const key = farClusterKey(
-        set.spheres[i * 4] ?? 0,
-        set.spheres[i * 4 + 2] ?? 0,
-        FAR_CLUSTER_SIZE,
-      );
-      let clusterIndex = clusterIndexOf.get(key);
-      let builder = builders.get(key);
-      if (clusterIndex === undefined || builder === undefined) {
-        clusterIndex = clusterIndexOf.size;
-        clusterIndexOf.set(key, clusterIndex);
-        builder = new ClusterBuilder();
-        builders.set(key, builder);
-      }
-      clusters[i] = clusterIndex;
-      const placementIndex = set.placementIndices[i] ?? 0;
-      const scale = set.scales[i] ?? 1;
-      const fogScale = isBackdrop ? BACKDROP_FOG_SCALE : 1;
-      if (farLod.stone !== null) {
-        builder.add(farLod.stone, set.matrices, i * 16, scale, placementIndex, fogScale, null);
-      }
-      if (farLod.tint !== null) {
-        const team = set.teams[i] ?? PLACEMENT_TEAM_NEUTRAL;
-        const tint = teamLinear[team === PLACEMENT_TEAM_NEUTRAL ? TINT_NEUTRAL_INDEX : team] ?? null;
-        builder.add(farLod.tint, set.matrices, i * 16, scale, placementIndex, fogScale, tint);
-      }
+    for (const [key, builder] of builders) {
+      const geometry = builder.build();
+      disposableGeometries.push(geometry);
+      const mesh = new Mesh(geometry, materials.far);
+      mesh.name = `map-far-${key}`;
+      mesh.matrixAutoUpdate = false;
+      mesh.visible = false;
+      object.add(mesh);
+      farClusters[clusterIndexOf.get(key) ?? 0] = {
+        mesh,
+        triangles: builder.indexCount / 3,
+        live: 0,
+      };
+      meshCount++;
     }
-
-    lod0Triangles += (asset.lods[0]?.triangles ?? 0) * set.count;
-    farTriangles += farLod.triangles * set.count;
-    types.push({
-      set,
-      buckets,
-      isRock,
-      cullable: type.kind === 'prop' && type.radius < CULLABLE_PROP_RADIUS,
-      glowMode: type.id.startsWith('brazier') ? 1 : 0,
-      clusters,
-      farTriangles: farLod.triangles,
-    });
+    builders.clear();
+  } catch (error) {
+    // A geometry the merge cannot read (an attribute missing, say): free what was built so far.
+    release();
+    throw error;
   }
-
-  const farClusters: FarCluster[] = [];
-  for (const [key, builder] of builders) {
-    const geometry = builder.build();
-    disposableGeometries.push(geometry);
-    const mesh = new Mesh(geometry, materials.far);
-    mesh.name = `map-far-${key}`;
-    mesh.matrixAutoUpdate = false;
-    mesh.visible = false;
-    object.add(mesh);
-    farClusters[clusterIndexOf.get(key) ?? 0] = {
-      mesh,
-      triangles: builder.indexCount / 3,
-      live: 0,
-    };
-    meshCount++;
-  }
-  builders.clear();
 
   const stats: MutableStats = {
     meshCount,
@@ -652,21 +705,12 @@ export function createPropField(
     castShadows = next.shadowCasters === 'all';
     materials.setQuality(next);
     applyShadowFlags();
-  }
-
-  function dispose(): void {
-    // The shared vertex attributes belong to the cached bundle; three re-uploads them on the
-    // next use. Only the wrappers, the far meshes, the materials and the state texture go.
-    for (const geometry of disposableGeometries) geometry.dispose();
-    disposableGeometries.length = 0;
-    materials.dispose();
-    farState.dispose();
-    object.clear();
-    types.length = 0;
-    farClusters.length = 0;
+    // A preset with another texture limit: the textures are freed and uploaded again at the
+    // new size on their next use (a few milliseconds, at a settings change).
+    fitTextures(bundle, next);
   }
 
   applyShadowFlags();
 
-  return { object, stats, update, setQuality, dispose };
+  return { object, stats, update, setQuality, dispose: release };
 }

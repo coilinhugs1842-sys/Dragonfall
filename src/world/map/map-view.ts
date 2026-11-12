@@ -53,6 +53,12 @@ import type { MapShadeOptions } from './map-colors';
 const FOG_HIDDEN = 0.995;
 /** Slack on the culling spheres for float32 rounding of the vertex data, metres. */
 const BOUNDS_MARGIN = 0.01;
+/**
+ * `update` calls between building the real assets mid-match and drawing them. Whoever owns the
+ * shader warm-up polls `revision` once per frame, before or after our `update`; two calls
+ * guarantee that it ran in between, so the swap itself compiles nothing.
+ */
+const SWAP_AFTER_UPDATES = 2;
 
 export interface MapViewOptions {
   /**
@@ -125,7 +131,21 @@ export interface MapView {
   readonly object: Group;
   readonly stats: MapViewStats;
   readonly loadState: MapLoadState;
-  /** Settles (never rejects) once the view shows what it will keep showing. */
+  /**
+   * Goes up (never down) whenever the view put something new in front of the GPU: the real
+   * assets were built after a load that finished mid-match, or `setQuality` changed the preset
+   * (other shader variants). Poll it once per frame and run the shader warm-up when it moved.
+   *
+   * Assets that arrive late are built hidden, in the scene (three's `compile` walks hidden
+   * objects too), and replace the stand-in on the second `update` after the bump. Assets that
+   * were already there when the view was created are shown at once and do not bump it: the
+   * warm-up that follows building the scene covers them.
+   */
+  readonly revision: number;
+  /**
+   * Settles (never rejects) once the view has what it will keep showing. After a late load
+   * that is two `update` calls before the stand-in actually leaves the screen (see `revision`).
+   */
   readonly ready: Promise<MapLoadState>;
   /**
    * Per frame, before rendering: LOD buckets, culling, the material clock. `camera` adds
@@ -268,6 +288,10 @@ export function createMapView(
   let preset = initialPreset;
   let disposed = false;
   let field: PropField | null = null;
+  /** Real assets built after a late load, hidden until `pendingUpdates` runs out. */
+  let pending: PropField | null = null;
+  let pendingUpdates = 0;
+  let revision = 0;
   let loadState: MapLoadState = placed ? 'fallback' : 'static';
 
   const stats: MutableStats = {
@@ -281,8 +305,26 @@ export function createMapView(
     loadMs: -1,
   };
 
-  /** Swaps the stand-in for the real assets. False when the bundle does not fit the map. */
-  function showAssets(bundle: MapAssetBundle, loadMs: number): boolean {
+  /** The stand-in leaves, the real assets are drawn from this frame on. */
+  function reveal(built: PropField): void {
+    disposeChunks();
+    pending = null;
+    field = built;
+    built.object.visible = true;
+    stats.props = built.stats;
+    stats.chunkCount = built.stats.meshCount;
+    stats.chunksInRange = 0;
+    stats.triangleCount = built.stats.lod0Triangles;
+    stats.vertexCount = 0;
+    stats.maxChunkTriangles = 0;
+  }
+
+  /**
+   * Builds the real assets. `late` (the load finished while the stand-in was on screen): they
+   * stay hidden until the warm-up has seen them, see `revision`. Otherwise they are shown now.
+   * False when the bundle does not fit the map.
+   */
+  function showAssets(bundle: MapAssetBundle, loadMs: number, late: boolean): boolean {
     let built: PropField;
     try {
       built = createPropField(map.placements ?? [], bundle, preset);
@@ -290,22 +332,23 @@ export function createMapView(
       console.warn('[map] the loaded assets do not match the map; keeping the hull stand-in.', error);
       return false;
     }
-    disposeChunks();
-    field = built;
     object.add(built.object);
-    stats.props = built.stats;
-    stats.chunkCount = built.stats.meshCount;
-    stats.chunksInRange = 0;
-    stats.triangleCount = built.stats.lod0Triangles;
-    stats.vertexCount = 0;
-    stats.maxChunkTriangles = 0;
     stats.loadMs = loadMs;
     loadState = 'ready';
+    if (late) {
+      built.object.visible = false;
+      pending = built;
+      pendingUpdates = SWAP_AFTER_UPDATES;
+      revision++;
+    } else {
+      reveal(built);
+    }
     return true;
   }
 
   function applyQuality(): void {
     field?.setQuality(preset);
+    pending?.setQuality(preset);
     const castShadow = preset.shadowCasters === 'all';
     // The stand-in of a real map takes shadows through `useWorldLight`, not three's lookup.
     const receiveShadow = !placed && preset.shadowMapSize > 0;
@@ -318,7 +361,7 @@ export function createMapView(
   }
 
   let ready: Promise<MapLoadState>;
-  if (readyBundle !== null && showAssets(readyBundle, 0)) {
+  if (readyBundle !== null && showAssets(readyBundle, 0, false)) {
     ready = Promise.resolve<MapLoadState>('ready');
   } else {
     buildChunks();
@@ -332,7 +375,7 @@ export function createMapView(
       ready = loadMapAssets(map, renderer).then(
         (bundle): MapLoadState => {
           if (disposed) return loadState;
-          if (showAssets(bundle, bundle.loadMs)) applyQuality();
+          if (showAssets(bundle, bundle.loadMs, true)) applyQuality();
           else loadState = 'fallback';
           return loadState;
         },
@@ -363,11 +406,14 @@ export function createMapView(
   }
 
   function setQuality(next: QualityPreset): void {
+    // Another preset is another shader variant of the world material: it compiles again.
+    if (next.id !== preset.id) revision++;
     preset = next;
     applyQuality();
   }
 
   function update(cameraPosition: Vec3, camera: Camera | null = null, timeS = 0): void {
+    if (pending !== null && --pendingUpdates <= 0) reveal(pending);
     if (field !== null) {
       field.update(cameraPosition, camera, timeS);
       stats.chunksInRange = field.stats.meshesDrawn;
@@ -403,6 +449,8 @@ export function createMapView(
     disposeChunks();
     field?.dispose();
     field = null;
+    pending?.dispose();
+    pending = null;
     markers?.dispose();
     collision?.dispose();
     object.clear();
@@ -415,6 +463,9 @@ export function createMapView(
     stats,
     get loadState() {
       return loadState;
+    },
+    get revision() {
+      return revision;
     },
     ready,
     update,

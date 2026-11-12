@@ -235,28 +235,118 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
+/** Where a bundle's files come from. The real one decodes GLB and KTX2; tests hand in fakes. */
+export interface MapAssetSource {
+  loadAsset(set: MapPropSet): Promise<PropAsset>;
+  /** The shared texture list, asked for only when the map does not carry `textures` itself. */
+  loadTextureList(): Promise<readonly MapTexture[]>;
+  loadTexture(info: MapTexture): Promise<LoadedMapTexture>;
+}
+
+function disposeAsset(asset: PropAsset): void {
+  for (const lod of asset.lods) {
+    lod.stone?.dispose();
+    lod.tint?.dispose();
+  }
+}
+
+/** What a group of load jobs came to: everything that did load, and the first failure if any. */
+interface Settled<T> {
+  readonly loaded: T[];
+  readonly failed: boolean;
+  readonly error: unknown;
+}
+
+/**
+ * Waits for every job, whatever the others do. `Promise.all` would give up at the first
+ * failure and drop the results of the jobs still running, with nobody left to dispose them.
+ */
+async function settle<T>(jobs: readonly Promise<T>[]): Promise<Settled<T>> {
+  const results = await Promise.allSettled(jobs);
+  const loaded: T[] = [];
+  let failed = false;
+  let error: unknown;
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      loaded.push(result.value);
+    } else if (!failed) {
+      failed = true;
+      error = result.reason;
+    }
+  }
+  return { loaded, failed, error };
+}
+
+/**
+ * Loads every asset and texture of `map` from `source` into a bundle. All or nothing: when any
+ * file fails, the geometries and textures that did load are disposed and the first failure is
+ * rethrown. Every job has a handler from the moment it starts, so no failure order (a GLB
+ * failing while the texture list is still on its way, say) leaves an unhandled rejection.
+ */
+export async function collectMapAssets(
+  map: MapManifest,
+  source: MapAssetSource,
+): Promise<MapAssetBundle> {
+  const started = performance.now();
+  // Both groups start now and run side by side; `settle` is the handler of the first.
+  const assetsDone = settle(map.props.map((set) => source.loadAsset(set)));
+  let textureGroup: Settled<LoadedMapTexture>;
+  try {
+    const list = map.textures ?? (await source.loadTextureList());
+    textureGroup = await settle(list.map((info) => source.loadTexture(info)));
+  } catch (error) {
+    // The list itself failed: no texture job ever started.
+    textureGroup = { loaded: [], failed: true, error };
+  }
+  const assetGroup = await assetsDone;
+  if (assetGroup.failed || textureGroup.failed) {
+    for (const asset of assetGroup.loaded) disposeAsset(asset);
+    for (const entry of textureGroup.loaded) entry.texture.dispose();
+    throw assetGroup.failed ? assetGroup.error : textureGroup.error;
+  }
+  const assets = new Map<string, PropAsset>();
+  let bytes = 0;
+  for (const asset of assetGroup.loaded) {
+    assets.set(asset.id, asset);
+    for (const lod of asset.lods) bytes += geometryBytes(lod.stone) + geometryBytes(lod.tint);
+  }
+  const textures = new Map<string, LoadedMapTexture>();
+  for (const entry of textureGroup.loaded) textures.set(entry.info.id, entry);
+  return {
+    mapId: map.id,
+    assets,
+    textures,
+    loadMs: performance.now() - started,
+    geometryBytes: bytes,
+  };
+}
+
 async function loadBundle(
   map: MapManifest,
   renderer: WebGLRenderer,
   options: MapAssetLoadOptions,
 ): Promise<MapAssetBundle> {
-  const started = performance.now();
   const base = options.baseUrl ?? `${defaultBase()}assets/`;
   const ktx2 = new KTX2Loader()
     .setTranscoderPath(options.transcoderUrl ?? `${defaultBase()}vendor/basis/`)
     .detectSupport(renderer);
   const gltf = new GLTFLoader().setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder);
-  try {
-    const sets: readonly MapPropSet[] = map.props;
-    const assetJobs = sets.map(async (set): Promise<PropAsset> => {
+  const source: MapAssetSource = {
+    async loadAsset(set) {
       const file = await gltf.loadAsync(base + set.glb);
-      const lods = extractLods(file.scene);
-      disposeScene(file.scene);
+      let lods: PropLodGeometry[];
+      try {
+        lods = extractLods(file.scene);
+      } finally {
+        disposeScene(file.scene);
+      }
       if (lods.length === 0) throw new Error(`map asset "${set.id}" has no LOD0 node (${set.glb})`);
       return { id: set.id, lods };
-    });
-    const textureList0 = map.textures ?? (await fetchTextureList(base));
-    const textureJobs = textureList0.map(async (info): Promise<LoadedMapTexture> => {
+    },
+    loadTextureList: () => fetchTextureList(base),
+    async loadTexture(info) {
+      // Every level of the file is kept here; `createPropField` leaves out the ones above the
+      // preset's `maxTextureSize` before the first upload (texture-mips.ts).
       const texture = await ktx2.loadAsync(base + info.url);
       texture.wrapS = RepeatWrapping;
       texture.wrapT = RepeatWrapping;
@@ -266,26 +356,10 @@ async function loadBundle(
       texture.name = `map-${info.id}`;
       texture.needsUpdate = true;
       return { info, texture };
-    });
-    const [assetList, textureList] = await Promise.all([
-      Promise.all(assetJobs),
-      Promise.all(textureJobs),
-    ]);
-    const assets = new Map<string, PropAsset>();
-    let bytes = 0;
-    for (const asset of assetList) {
-      assets.set(asset.id, asset);
-      for (const lod of asset.lods) bytes += geometryBytes(lod.stone) + geometryBytes(lod.tint);
-    }
-    const textures = new Map<string, LoadedMapTexture>();
-    for (const entry of textureList) textures.set(entry.info.id, entry);
-    return {
-      mapId: map.id,
-      assets,
-      textures,
-      loadMs: performance.now() - started,
-      geometryBytes: bytes,
-    };
+    },
+  };
+  try {
+    return await collectMapAssets(map, source);
   } finally {
     // The transcoder workers are only needed while loading.
     ktx2.dispose();
@@ -331,12 +405,7 @@ export function releaseMapAssets(mapId: string): void {
   cache.delete(mapId);
   void entry.promise.then(
     (bundle) => {
-      for (const asset of bundle.assets.values()) {
-        for (const lod of asset.lods) {
-          lod.stone?.dispose();
-          lod.tint?.dispose();
-        }
-      }
+      for (const asset of bundle.assets.values()) disposeAsset(asset);
       for (const loaded of bundle.textures.values()) loaded.texture.dispose();
     },
     () => undefined,

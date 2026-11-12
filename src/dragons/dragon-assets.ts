@@ -40,6 +40,8 @@ import type { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { DRAGON_ANIM_CLIPS, DRAGON_ANIM_ROAR, DRAGON_CLASS_IDS } from '../shared';
 import type { AssetManifest, DragonClassId, DragonManifest, Vec3 } from '../shared';
+// The file, not the `world/props` barrel: the barrel would pull the map loaders into this chunk.
+import { fitTextureToLimit } from '../world/props/texture-mips';
 import type { DragonAnimBones, DragonAnimRig } from './dragon-animator';
 import type { BakedClip } from './pose-math';
 
@@ -561,6 +563,18 @@ export interface DragonAssetLibrary {
   loadAll(): Promise<void>;
   /** Bumped whenever a class finishes loading, so a view can notice without polling each one. */
   readonly revision: number;
+  /**
+   * Calls `listener` every time `revision` goes up, from the load's own continuation (between
+   * frames, never inside one). Returns the function that removes it again.
+   */
+  subscribe(listener: () => void): () => void;
+  /**
+   * The preset's `maxTextureSize`: larger levels of the dragon textures are left out of the
+   * upload (src/world/props/texture-mips.ts). Classes that load later come up at this size;
+   * the ones already loaded are freed and uploaded again, so call it at load time or on a
+   * preset change, not per frame. 0 (the start value) = no limit.
+   */
+  setMaxTextureSize(size: number): void;
   dispose(): void;
 }
 
@@ -602,6 +616,25 @@ export function createDragonAssetLibrary(options: DragonAssetLibraryOptions): Dr
   let loaders: Promise<{ gltf: GLTFLoader; ktx2: KTX2Loader; ownsKtx2: boolean }> | null = null;
   let rootManifest: Promise<AssetManifest> | null = null;
   let pending = 0;
+  let maxTextureSize = 0;
+  const listeners = new Set<() => void>();
+
+  function bump(): void {
+    revision++;
+    for (const listener of listeners) listener();
+  }
+
+  /**
+   * Upload now, at load time, instead of on the first frame the dragon is seen, and without
+   * the levels the preset has no room for. A texture that is already up at the right size is
+   * left alone.
+   */
+  function uploadTextures(asset: DragonAsset): void {
+    fitTextureToLimit(asset.baseMap, maxTextureSize);
+    fitTextureToLimit(asset.emissiveMap, maxTextureSize);
+    webgl.initTexture(asset.baseMap);
+    webgl.initTexture(asset.emissiveMap);
+  }
 
   function entryOf(classId: DragonClassId): Entry {
     let entry = entries.get(classId);
@@ -635,14 +668,28 @@ export function createDragonAssetLibrary(options: DragonAssetLibraryOptions): Dr
     if (pending > 0 || loaders === null) return;
     const done = loaders;
     loaders = null;
-    void done.then(({ ktx2, ownsKtx2 }) => {
-      if (ownsKtx2) ktx2.dispose();
-    });
+    void done.then(
+      ({ ktx2, ownsKtx2 }) => {
+        if (ownsKtx2) ktx2.dispose();
+      },
+      // The loader chunk itself failed to arrive: nothing to free, and the load that wanted
+      // it has already reported the error.
+      () => undefined,
+    );
   }
 
   async function loadClass(classId: DragonClassId): Promise<DragonAsset> {
-    rootManifest ??= fetchJson(`${assetsUrl}manifest.json`) as Promise<AssetManifest>;
-    const rootFile = await rootManifest;
+    const manifestJob = (rootManifest ??= fetchJson(
+      `${assetsUrl}manifest.json`,
+    ) as Promise<AssetManifest>);
+    let rootFile: AssetManifest;
+    try {
+      rootFile = await manifestJob;
+    } catch (error) {
+      // A failed fetch is not kept: the next load asks for the manifest again.
+      if (rootManifest === manifestJob) rootManifest = null;
+      throw error;
+    }
     const manifestUrl = rootFile.dragons?.[classId];
     if (typeof manifestUrl !== 'string') {
       throw new Error(`assets manifest has no dragon "${classId}"`);
@@ -651,9 +698,7 @@ export function createDragonAssetLibrary(options: DragonAssetLibraryOptions): Dr
     const { gltf } = await getLoaders();
     const file = await gltf.loadAsync(assetsUrl + manifest.glb);
     const asset = buildDragonAsset(manifest, file.scene, file.animations);
-    // Upload now, at load time, instead of on the first frame the dragon is seen.
-    webgl.initTexture(asset.baseMap);
-    webgl.initTexture(asset.emissiveMap);
+    if (!disposed) uploadTextures(asset);
     return asset;
   }
 
@@ -668,19 +713,23 @@ export function createDragonAssetLibrary(options: DragonAssetLibraryOptions): Dr
         pending--;
         if (disposed) {
           asset.dispose();
+          releaseLoaders();
           throw new Error('dragon asset library is disposed');
         }
         entry.asset = asset;
         entry.status = 'ready';
-        revision++;
         releaseLoaders();
+        bump();
         return asset;
       },
       (error: unknown) => {
         pending--;
         entry.status = 'failed';
-        revision++;
+        // Not kept: a later `load` (the next match) tries again instead of getting this
+        // failure back for the rest of the page's life.
+        entry.promise = null;
         releaseLoaders();
+        bump();
         throw error;
       },
     );
@@ -707,9 +756,23 @@ export function createDragonAssetLibrary(options: DragonAssetLibraryOptions): Dr
     get revision() {
       return revision;
     },
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    setMaxTextureSize(size: number): void {
+      if (disposed || size === maxTextureSize) return;
+      maxTextureSize = size;
+      for (const entry of entries.values()) {
+        if (entry.asset !== null) uploadTextures(entry.asset);
+      }
+    },
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      listeners.clear();
       for (const entry of entries.values()) {
         entry.asset?.dispose();
         entry.asset = null;

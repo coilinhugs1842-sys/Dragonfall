@@ -5,4 +5,5 @@
 export * from './prop-field';
 export * from './prop-loader';
 export * from './prop-lod';
+export * from './texture-mips';
 export * from './world-material';

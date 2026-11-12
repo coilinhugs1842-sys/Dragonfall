@@ -115,13 +115,22 @@ export function createWorldLighting(options: WorldLightingOptions): WorldLightin
   /** Squared distances of the blob slots filled this frame. */
   const blobDistance = new Float32Array(MAX_SHADOW_BLOBS);
 
+  /** Frees the sun's shadow render target; three allocates a new one when it next casts. */
+  function freeShadowMap(): void {
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+    u.uWlShadowMap.value = null;
+  }
+
   function applyPlan(): void {
     setWorldLightShadowMode(plan.mode);
     const params = u.uWlShadowParams.value;
     if (plan.mode !== 'map') {
       sun.castShadow = false;
       params.z = 0;
-      u.uWlShadowMap.value = null;
+      // Nothing samples the map any more: on a switch down to Low a 1024 or 2048 depth target
+      // would otherwise stay allocated for the rest of the session.
+      freeShadowMap();
       return;
     }
     const shadow = sun.shadow;
@@ -237,7 +246,7 @@ export function createWorldLighting(options: WorldLightingOptions): WorldLightin
       object.clear();
       sun.castShadow = false;
       u.uWlShadowParams.value.z = 0;
-      u.uWlShadowMap.value = null;
+      freeShadowMap();
       for (const blob of u.uWlBlobs.value) blob.set(0, 0, 0, 0);
     },
   };

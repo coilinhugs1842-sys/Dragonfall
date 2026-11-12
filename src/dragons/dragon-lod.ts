@@ -19,6 +19,14 @@ export type DragonLodLevel = 0 | 1 | 2 | 3;
 
 /** A boundary moves by this fraction against the direction of travel, so LODs do not flicker. */
 export const LOD_HYSTERESIS = 0.08;
+/**
+ * The caps (`maxLod0`, `maxSkinned`) rank dragons by distance, and a dragon that already holds
+ * a place is ranked as if it were this fraction nearer. A challenger therefore takes a place
+ * only when it is clearly nearer (about 10 %), not every time two distances cross: on Low in a
+ * 5v5 two dragons circling each other at the cut would otherwise swap between the skinned
+ * model and the far one, with a pose pop each time.
+ */
+export const LOD_CAP_HYSTERESIS = 0.1;
 /** The vertical FOV (degrees) the preset distances are tuned for. */
 export const LOD_REFERENCE_FOV_DEG = 60;
 
@@ -71,6 +79,12 @@ export function lodForDistance(
   return DRAGON_LOD_FAR;
 }
 
+/** What a dragon held last frame (see `LOD_CAP_HYSTERESIS`). */
+const HELD_SKINNED = 1;
+const HELD_LOD0 = 2;
+/** Per-dragon HELD_* bits of the call in progress. Grown (never per frame in practice) on demand. */
+let heldScratch = new Uint8Array(256);
+
 /**
  * Chooses the level of `count` dragons in place.
  *
@@ -85,34 +99,55 @@ export function selectDragonLods(
   localIndex: number,
   policy: DragonLodPolicy,
 ): void {
+  if (heldScratch.length < count) heldScratch = new Uint8Array(count);
+  const held = heldScratch;
+  const keep = 1 - LOD_CAP_HYSTERESIS;
   let lod0 = 0;
   let skinned = 0;
   for (let i = 0; i < count; i++) {
+    const previous = levels[i] as number;
+    held[i] =
+      previous === 0
+        ? HELD_SKINNED | HELD_LOD0
+        : previous > 0 && previous < DRAGON_LOD_FAR
+          ? HELD_SKINNED
+          : 0;
     const level =
-      i === localIndex
-        ? 0
-        : lodForDistance(distances[i] as number, levels[i] as number, policy.distances);
+      i === localIndex ? 0 : lodForDistance(distances[i] as number, previous, policy.distances);
     levels[i] = level;
     if (level === 0) lod0++;
     if (level !== DRAGON_LOD_FAR) skinned++;
   }
-  // Too many at LOD0: the farthest (never the local one) step down to LOD1.
+  // Too many at LOD0: the farthest (never the local one) step down to LOD1. A dragon that was
+  // at LOD0 last frame counts as a little nearer, so it is not pushed out by a near tie.
   while (lod0 > policy.maxLod0) {
     let worst = -1;
+    let worstRank = 0;
     for (let i = 0; i < count; i++) {
       if (i === localIndex || levels[i] !== 0) continue;
-      if (worst < 0 || (distances[i] as number) > (distances[worst] as number)) worst = i;
+      const rank =
+        (distances[i] as number) * (((held[i] as number) & HELD_LOD0) !== 0 ? keep : 1);
+      if (worst < 0 || rank > worstRank) {
+        worst = i;
+        worstRank = rank;
+      }
     }
     if (worst < 0) break;
     levels[worst] = 1;
     lod0--;
   }
-  // Too many skinned: the farthest go far.
+  // Too many skinned: the farthest go far, with the same preference for those already skinned.
   while (skinned > policy.maxSkinned) {
     let worst = -1;
+    let worstRank = 0;
     for (let i = 0; i < count; i++) {
       if (i === localIndex || levels[i] === DRAGON_LOD_FAR) continue;
-      if (worst < 0 || (distances[i] as number) > (distances[worst] as number)) worst = i;
+      const rank =
+        (distances[i] as number) * (((held[i] as number) & HELD_SKINNED) !== 0 ? keep : 1);
+      if (worst < 0 || rank > worstRank) {
+        worst = i;
+        worstRank = rank;
+      }
     }
     if (worst < 0) break;
     levels[worst] = DRAGON_LOD_FAR;
