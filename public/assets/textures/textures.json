@@ -71,6 +71,54 @@
       ],
       "use": "greyscale brush-stroke detail, mean 0.5",
       "bytes": 974544
+    },
+    {
+      "id": "basalt",
+      "url": "textures/basalt.ktx2",
+      "size": 1024,
+      "colorSpace": "srgb",
+      "tileMetres": 64,
+      "meanLinear": [
+        0.0666,
+        0.0609,
+        0.0975
+      ],
+      "use": "Emberfall Caldera: rock detail / triplanar albedo (stone slot)",
+      "bytes": 194069,
+      "map": "emberfall-caldera",
+      "role": "stone"
+    },
+    {
+      "id": "columnar",
+      "url": "textures/columnar.ktx2",
+      "size": 1024,
+      "colorSpace": "srgb",
+      "tileMetres": 64,
+      "meanLinear": [
+        0.0633,
+        0.055,
+        0.0846
+      ],
+      "use": "Emberfall Caldera: rock sides (columnar joints), V along world up (cliff slot)",
+      "bytes": 183970,
+      "map": "emberfall-caldera",
+      "role": "cliff"
+    },
+    {
+      "id": "ash",
+      "url": "textures/ash.ktx2",
+      "size": 1024,
+      "colorSpace": "srgb",
+      "tileMetres": 24,
+      "meanLinear": [
+        0.244,
+        0.2175,
+        0.2218
+      ],
+      "use": "Emberfall Caldera: where _MASKS.g is set (ash, in the moss slot)",
+      "bytes": 220457,
+      "map": "emberfall-caldera",
+      "role": "moss"
     }
   ]
 }

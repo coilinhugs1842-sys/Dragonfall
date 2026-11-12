@@ -1,6 +1,6 @@
 """Tileable painterly textures for Shattered Spires (T-4.5), authored by script (DECISIONS 36).
 
-  python tools/textures/make_textures.py [name ...]
+  python tools/textures/make_textures.py [name ...] [--set spires|caldera]
 
 Writes 1024 x 1024 seamless PNGs to art-source/textures-raw/ plus means.json (the linear-space
 mean colour of each, so a shader can use `texture / mean` as a detail modulation on top of the
@@ -432,12 +432,196 @@ def make_brush(seed=53):
     return Image.fromarray(np.stack([g, g, g], axis=-1))
 
 
+# --- Emberfall Caldera (T-6.4): three more tiles, same brush language, dusk-basalt palette -----------
+#
+# Additive: nothing above this line changed, every tile has its own seeds, so the five Shattered
+# Spires tiles come out byte-identical. Build only these with
+#   python tools/textures/make_textures.py --set caldera
+
+BASALT_SHADOW = rgb(0x16141E)
+BASALT_DEEP = rgb(0x24222E)
+BASALT = rgb(0x3A3848)
+BASALT_MID = rgb(0x4C4A5E)
+BASALT_LIGHT = rgb(0x6C6A82)
+BASALT_WARM = rgb(0x6A5560)
+BASALT_VIOLET = rgb(0x40304E)
+DUSK_LIT = rgb(0xB08A90)
+ASH_DARK = rgb(0x403C46)
+ASH_DEEP = rgb(0x5C585E)
+ASH = rgb(0x8A8588)
+ASH_LIGHT = rgb(0xB8B0AC)
+ASH_PALE = rgb(0xD8C4BC)
+
+
+def make_basalt(seed=61):
+    """Dark vesicular basalt: blocky strokes, pale ash dabs, gas-bubble pits, fine cracks."""
+    big = tile_noise(256, 2.6, seed)
+    mid = tile_noise(256, 1.8, seed + 1)
+    flow = tile_noise(128, 3.0, seed + 2)
+    stops = [(0.0, lerp(BASALT_DEEP, BASALT, 0.55)), (0.3, BASALT), (0.58, BASALT_MID), (0.84, lerp(BASALT_MID, BASALT_LIGHT, 0.55)), (1.0, BASALT_LIGHT)]
+
+    def color_at(x, y):
+        t = sample(big, x, y) * 0.45 + sample(mid, x, y) * 0.55
+        c = ramp(stops, t)
+        v = sample(mid, x + 300, y + 700)
+        if v > 0.72:
+            c = lerp(c, BASALT_VIOLET, (v - 0.72) * 1.5)
+        elif v < 0.2:
+            c = lerp(c, BASALT_WARM, (0.2 - v) * 1.8)
+        return c
+
+    def angle_at(x, y):
+        # blockier than the slate: strokes snap toward two directions
+        a = (sample(flow, x, y) - 0.5) * 2.0
+        return (0.25 if a > 0 else -1.2) + a * 0.5
+
+    canvas = Canvas(BASALT, seed)
+    paint_layers(canvas, color_at, angle_at, [
+        (900, (130, 230), (60, 100), 255, 0.05),
+        (1300, (70, 140), (34, 56), 225, 0.08),
+        (900, (40, 80), (18, 30), 180, 0.12),
+    ])
+    rng = canvas.rng
+    for _ in range(320):
+        x, y = rng.uniform(0, W), rng.uniform(0, W)
+        t = sample(big, x, y)
+        if t > 0.52:
+            canvas.stroke(x, y, rng.uniform(28, 60) * SS, rng.uniform(8, 15) * SS, angle_at(x, y), lerp(BASALT_LIGHT, ASH_PALE, rng.uniform(0.2, 0.7)), 115, bristle=False)
+        else:
+            canvas.stroke(x, y, rng.uniform(28, 60) * SS, rng.uniform(8, 15) * SS, angle_at(x, y), lerp(BASALT_DEEP, BASALT_VIOLET, rng.uniform(0.0, 0.6)), 100, bristle=False)
+    # vesicles: small dark pits with a lit lower-right lip (light from the upper left)
+    for _ in range(1500):
+        x, y = rng.uniform(0, W), rng.uniform(0, W)
+        if sample(mid, x + 90, y + 40) < 0.45:
+            continue
+        s = rng.uniform(3.0, 8.0) * SS
+        a = rng.uniform(0, 6.28)
+        canvas.stroke(x + s * 0.35, y + s * 0.35, s * 1.5, s * 1.1, a, lerp(BASALT_LIGHT, ASH_LIGHT, rng.uniform(0.1, 0.6)), 130, taper=0.9, bristle=False)
+        canvas.stroke(x, y, s * 1.5, s * 1.1, a, lerp(BASALT_SHADOW, BASALT_DEEP, rng.uniform(0, 0.7)), 225, taper=0.9, bristle=False)
+    cracks(canvas, 14, BASALT_SHADOW, lerp(BASALT_LIGHT, ASH_PALE, 0.4), length=(120, 360), width=2.6, wobble=0.75)
+    return painted_light(canvas.finish(), 0.2, seed + 5)
+
+
+def make_columnar(seed=73):
+    """Columnar basalt for steep faces: upright columns of unequal width (U), broken by short
+    cooling joints across them; V runs along world up."""
+    wob = tile_noise(256, 2.8, seed)
+    mid = tile_noise(256, 1.7, seed + 1)
+    rng0 = random.Random(seed)
+    cols = []
+    x = 0.0
+    while x < 1.0:
+        w = rng0.uniform(0.045, 0.11)
+        cols.append((x, min(x + w, 1.0), rng0.uniform(0.0, 1.0)))
+        x += w
+    stops = [(0.0, BASALT_DEEP), (0.32, BASALT), (0.58, BASALT_MID), (0.8, lerp(BASALT_MID, BASALT_WARM, 0.45)), (1.0, lerp(BASALT_LIGHT, DUSK_LIT, 0.15))]
+
+    def col_at(x, y):
+        u = (x / W + (sample(wob, x, y) - 0.5) * 0.035) % 1.0
+        for x0, x1, tone in cols:
+            if x0 <= u < x1:
+                return tone, (u - x0) / (x1 - x0)
+        return cols[-1][2], 0.5
+
+    def color_at(x, y):
+        tone, inside = col_at(x, y)
+        t = tone * 0.72 + sample(mid, x, y) * 0.28
+        # every column is a faceted prism: lit on its left flank, shaded on its right
+        return ramp(stops, t) * (1.14 - 0.3 * inside)
+
+    def angle_at(x, y):
+        return math.pi / 2 + (sample(wob, x, y + 100) - 0.5) * 0.3
+
+    canvas = Canvas(BASALT, seed)
+    paint_layers(canvas, color_at, angle_at, [
+        (1100, (160, 300), (30, 54), 255, 0.05),
+        (1700, (90, 170), (16, 28), 220, 0.08),
+        (1400, (40, 90), (8, 14), 170, 0.12),
+    ])
+    rng = canvas.rng
+    # joints between columns: a dark seam with a pale lip on its lit (right-hand) side
+    for x0, _, _ in cols:
+        y = 0.0
+        pts = []
+        while y <= W + 40 * SS:
+            xx = (x0 - (sample(wob, (x0 * W) % W, y % W) - 0.5) * 0.035) * W
+            pts.append((xx + rng.uniform(-2, 2) * SS, y))
+            y += 40 * SS
+        i = 0
+        while i < len(pts) - 1:
+            run = rng.randint(3, 8)
+            seg = pts[i:i + run + 1]
+            if len(seg) >= 2 and rng.random() < 0.9:
+                w = rng.uniform(3.0, 5.5) * SS
+                canvas.line([(px + w, py) for px, py in seg], lerp(BASALT_LIGHT, ASH_PALE, rng.uniform(0.2, 0.6)), w * 0.9, 140)
+                canvas.line(seg, BASALT_SHADOW, w, 235)
+            i += run
+    # cooling joints: short level breaks, each inside one column
+    for x0, x1, _ in cols:
+        for _ in range(rng.randint(3, 7)):
+            y = rng.uniform(0, W)
+            xa = (x0 + 0.006) * W
+            xb = (x1 - 0.006) * W
+            w = rng.uniform(2.0, 3.6) * SS
+            dy = rng.uniform(-6, 6) * SS
+            canvas.line([(xa, y + w), (xb, y + dy + w)], lerp(BASALT_LIGHT, ASH_PALE, 0.45), w * 0.9, 130)
+            canvas.line([(xa, y), (xb, y + dy)], BASALT_SHADOW, w, 215)
+    return painted_light(canvas.finish(), 0.14, seed + 5)
+
+
+def make_ash(seed=89):
+    """Settled volcanic ash: soft grey drifts, wind ripples, a scatter of dark cinders."""
+    big = tile_noise(256, 2.6, seed)
+    mid = tile_noise(256, 1.6, seed + 1)
+    flow = tile_noise(128, 3.2, seed + 2)
+    stops = [(0.0, ASH_DARK), (0.28, ASH_DEEP), (0.6, ASH), (0.86, ASH_LIGHT), (1.0, ASH_PALE)]
+
+    def color_at(x, y):
+        return ramp(stops, sample(big, x, y) * 0.7 + sample(mid, x, y) * 0.3)
+
+    def angle_at(x, y):
+        return 0.35 + (sample(flow, x, y) - 0.5) * 1.6
+
+    canvas = Canvas(ASH_DEEP, seed)
+    paint_layers(canvas, color_at, angle_at, [
+        (900, (150, 260), (60, 96), 255, 0.04),
+        (1500, (90, 160), (30, 50), 215, 0.07),
+    ])
+    rng = canvas.rng
+    # wind ripples: long thin pairs, pale crest over a darker trough
+    for _ in range(620):
+        x, y = rng.uniform(0, W), rng.uniform(0, W)
+        a = angle_at(x, y) + rng.uniform(-0.1, 0.1)
+        length = rng.uniform(110, 240) * SS
+        w = rng.uniform(7.0, 14.0) * SS
+        ox, oy = -math.sin(a) * w * 0.9, math.cos(a) * w * 0.9
+        canvas.stroke(x + ox, y + oy, length, w, a, lerp(ASH_DEEP, ASH, rng.uniform(0.0, 0.6)), 100, taper=0.7, bristle=False)
+        canvas.stroke(x, y, length, w, a, lerp(ASH_LIGHT, ASH_PALE, rng.uniform(0.0, 0.7)), 115, taper=0.7, bristle=False)
+    # cinders
+    for _ in range(380):
+        x, y = rng.uniform(0, W), rng.uniform(0, W)
+        s = rng.uniform(3.5, 9.0) * SS
+        a = rng.uniform(0, 6.28)
+        canvas.stroke(x - s * 0.3, y - s * 0.3, s * 1.3, s, a, lerp(ASH_LIGHT, ASH_PALE, rng.uniform(0.3, 1.0)), 150, taper=0.85, bristle=False)
+        canvas.stroke(x, y, s * 1.3, s, a, lerp(BASALT_SHADOW, BASALT, rng.uniform(0.0, 0.8)), 230, taper=0.85, bristle=False)
+    return painted_light(canvas.finish(0.5), 0.15, seed + 5)
+
+
 TILES = {
     "stone": make_stone,
     "cliff": make_cliff,
     "moss": make_moss,
     "masonry": make_masonry,
     "brush": make_brush,
+    "basalt": make_basalt,
+    "columnar": make_columnar,
+    "ash": make_ash,
+}
+
+# `--set <name>` builds one map's tiles; with no arguments every tile is built.
+SETS = {
+    "spires": ["stone", "cliff", "moss", "masonry", "brush"],
+    "caldera": ["basalt", "columnar", "ash"],
 }
 
 
@@ -458,7 +642,15 @@ def seam_error(img):
 
 
 def main():
-    names = sys.argv[1:] or list(TILES)
+    names = []
+    argv = sys.argv[1:]
+    while argv:
+        arg = argv.pop(0)
+        if arg == "--set":
+            names.extend(SETS[argv.pop(0)])
+        else:
+            names.append(arg)
+    names = names or list(TILES)
     os.makedirs(OUT, exist_ok=True)
     means_path = os.path.join(OUT, "means.json")
     means = {}
