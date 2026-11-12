@@ -8,7 +8,7 @@
  *
  *     director.beforeStep(tick, sim);       // timed transitions, forfeits
  *     if (director.finished) -> back to the lobby
- *     if (director.simRuns) {               // not during a countdown: dragons are held
+ *     if (director.simRuns) {               // not during intro / countdown: dragons are held
  *       sim.step(tick, inputs);
  *       director.afterStep(tick, sim);      // stats, score, storm, who won
  *     }
@@ -16,15 +16,25 @@
  * and, when they happen: `addRider` / `removeRider` / `setRiderConnected`, and `onEvent` for
  * every GameEvent of the sim.
  *
- * TIMELINE (the cinematic intro and podium of T-5.1 will hang off the same phases):
+ * TIMELINE (T-5.1: the cinematic intro and the podium are views of these phases, nothing more):
  *
+ *     intro (round 1 only, `introTicks` of `begin`; the host may cut it short with `skipIntro`)
+ *       |
+ *       v
  *     countdown (controls locked, sim paused) -> playing -> roundEnd (MODE_TUNING.roundEndS)
  *        ^                                                     |
  *        +---- next round: everyone back at the gates <--------+--> results (resultsS) -> lobby
  *
- * A phase's first tick is its `phaseStartTick`. `roundEnd` always follows `playing`, also on
- * the last round (it is the beat on the final takedown); `results` then names the match winner.
+ * A phase's first tick is its `phaseStartTick`. `intro` holds the sim exactly like a countdown
+ * (dragons at the gates, nothing moves, nobody can be hurt): it only exists so every browser can
+ * play the same fly-in for the same ticks. `roundEnd` always follows `playing`, also on the
+ * last round (it is the beat on the final takedown); `results` then names the match winner.
  * Only a forfeit that ends the match skips straight to `results`.
+ *
+ * CEASEFIRE. `sim.rules.ceasefire` is on in every phase but `playing`: no ability damage and no
+ * hostile effect gets through the sim's damage gate. While the dragons are held that is a
+ * second lock on a sim that is not stepped anyway; in `roundEnd` and `results` the sim still
+ * runs, so dragons keep flying under the camera, and nobody is taken down on the podium.
  *
  * SKIRMISH. One round with respawns. Score = takedowns of an enemy while the round is live.
  * First team to the score limit wins; when the time limit runs out the higher score wins; level
@@ -81,7 +91,7 @@ import type { MatchArena, StormRadii } from './storm-schedule';
 export interface MatchDirectorListener {
   /**
    * A phase began; `tick` is its first tick. `winner` is the round's winner on `roundEnd`, the
-   * match's on `results`, otherwise null. Not called for the first countdown (`begin`).
+   * match's on `results`, otherwise null. Not called for the first phase (`begin`).
    */
   onPhase(phase: MatchPhase, tick: number, round: number, winner: MatchWinner | null): void;
   /** Everyone was put back at the gates for `round` (lag-compensation history is void). */
@@ -190,6 +200,7 @@ export class MatchDirector {
   private readonly riders: Rider[] = [];
   private readonly riderIndex = new Int8Array(ID_SLOTS).fill(-1);
   private countdownTicks = 0;
+  private introTicks = 0;
   /** Last tick of a timed phase + 1; -1 = the phase has no timer. */
   private phaseEndTick = -1;
   /** Ticks of play in the current round. */
@@ -218,7 +229,10 @@ export class MatchDirector {
     return this.modeConfig;
   }
 
-  /** Should the sim step this tick? False while dragons are held (countdown) and outside a match. */
+  /**
+   * Should the sim step this tick? False while dragons are held (intro, countdown) and outside a
+   * match.
+   */
   get simRuns(): boolean {
     const phase = this.phase;
     return phase === 'playing' || phase === 'roundEnd' || phase === 'results';
@@ -229,17 +243,29 @@ export class MatchDirector {
     return this.liveTicks;
   }
 
-  /** First tick of `playing` while a countdown runs (where the sim resumes); else -1. */
+  /**
+   * First tick of `playing` while the dragons are held (where the sim resumes): the end of the
+   * countdown, or during `intro` the end of the countdown that follows it. Else -1.
+   */
   get liveTick(): number {
-    return this.phase === 'countdown' ? this.phaseEndTick : -1;
+    if (this.phase === 'countdown') return this.phaseEndTick;
+    if (this.phase === 'intro') return this.phaseEndTick + this.countdownTicks;
+    return -1;
+  }
+
+  /** Ticks of the intro this match began with (0 = it had none). */
+  get introLength(): number {
+    return this.introTicks;
   }
 
   // --- Setup ---------------------------------------------------------------------------------------
 
   /**
-   * Starts a match: the first countdown begins on `tick` and play on `tick + countdownTicks`.
-   * Sets the sim's rules (friendly fire, respawns, the storm). Add the riders after this. The
-   * same `countdownTicks` are used before every later round.
+   * Starts a match on `tick`. With `introTicks` > 0 it opens with `intro` for that long, then
+   * the first countdown; with 0 (the default: a solo sandbox, "no cinematics") the countdown
+   * begins on `tick`. Play starts `countdownTicks` after the countdown began. Sets the sim's
+   * rules (friendly fire, respawns, the storm). Add the riders after this. The same
+   * `countdownTicks` are used before every later round; the intro is for round 1 only.
    */
   begin(
     sim: Sim,
@@ -247,15 +273,22 @@ export class MatchDirector {
     arena: Readonly<MatchArena> | null,
     tick: number,
     countdownTicks: number,
+    introTicks = 0,
   ): void {
     this.modeConfig = config;
     this.arena.stormRadius = (arena ?? NO_ARENA).stormRadius;
     this.arena.gateRadius = (arena ?? NO_ARENA).gateRadius;
     this.countdownTicks = countdownTicks > 0 ? Math.floor(countdownTicks) : 0;
+    this.introTicks = introTicks > 0 ? Math.floor(introTicks) : 0;
 
-    this.phase = 'countdown';
+    if (this.introTicks > 0) {
+      this.phase = 'intro';
+      this.phaseEndTick = tick + this.introTicks;
+    } else {
+      this.phase = 'countdown';
+      this.phaseEndTick = tick + this.countdownTicks;
+    }
     this.phaseStartTick = tick;
-    this.phaseEndTick = tick + this.countdownTicks;
     this.round = 1;
     this.winner = null;
     this.matchWinner = null;
@@ -278,6 +311,8 @@ export class MatchDirector {
     }
 
     sim.rules.friendlyFire = config.friendlyFire;
+    // Until the first tick of `playing`.
+    sim.rules.ceasefire = true;
     sim.respawnPolicy.enabled = config.respawns;
     this.stormRadius = -1;
     this.applyStorm(sim, true);
@@ -331,12 +366,25 @@ export class MatchDirector {
     if (rider !== null) rider.regenSourceId = event.sourceId;
   }
 
+  /**
+   * Cuts the intro short: the countdown starts on `tick` (the next tick the host will step).
+   * False, and nothing happens, in any other phase. Who may ask is the host session's business.
+   */
+  skipIntro(tick: number): boolean {
+    if (this.finished || this.phase !== 'intro') return false;
+    this.beginCountdown(tick);
+    return true;
+  }
+
   // --- The tick ------------------------------------------------------------------------------------
 
   /** Timed transitions and forfeits. Call first on every host tick of a match. */
   beforeStep(tick: number, sim: Sim): void {
     if (this.finished || this.phase === 'lobby') return;
     if (!this.modeConfig.sandbox && this.phase !== 'results') this.checkForfeit(tick);
+
+    // An intro that ends on a zero-length countdown goes on to `playing` in the same tick.
+    if (this.phase === 'intro' && tick >= this.phaseEndTick) this.beginCountdown(tick);
 
     switch (this.phase) {
       case 'countdown':
@@ -363,6 +411,8 @@ export class MatchDirector {
       default:
         break;
     }
+    // Read by the step that follows: only a round in play can hurt anyone.
+    sim.rules.ceasefire = this.phase !== 'playing';
   }
 
   /** Stats, score, the storm and the win conditions. Call after every `sim.step` of a match. */
@@ -548,6 +598,10 @@ export class MatchDirector {
     this.applyStorm(sim, true);
     this.writeTimeRemaining();
     this.listener?.onRoundReset?.(this.round, tick);
+    this.beginCountdown(tick);
+  }
+
+  private beginCountdown(tick: number): void {
     this.phaseEndTick = tick + this.countdownTicks;
     this.enter('countdown', tick, null);
   }

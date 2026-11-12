@@ -25,6 +25,7 @@ import {
   handleHello,
   joinLobby,
   kickPlayer,
+  launchMatch,
   leaveLobby,
   lockTeams,
   movePlayer,
@@ -971,5 +972,115 @@ describe('start and match flow', () => {
     expect(back.state.settings).toBe(ready.state.settings);
     // A cancelled start goes straight back.
     expect(must(returnToLobby(starting)).state.phase).toBe('lobby');
+  });
+});
+
+describe('lobby launch (T-5.1)', () => {
+  /** Host + `count` players, everyone ready, Start pressed: the room is `starting`. */
+  function launching(count: number): HostLobby {
+    return must(startMatch(readyAll(withPlayers(newLobby(), count)), HOST));
+  }
+
+  it('ends in inMatch with the roster to load', () => {
+    const ready = readyAll(withPlayers(newLobby(), 3));
+    expect(reasonOf(launchMatch(ready))).toBe('wrongPhase');
+    const starting = must(startMatch(ready, HOST));
+    const result = launchMatch(starting);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.changed).toBe(true);
+    expect(result.lobby.state.phase).toBe('inMatch');
+    expect(result.effects).toEqual([
+      { type: 'matchLaunch', roster: buildMatchRoster(starting.state) },
+    ]);
+    // Teams, classes and ready flags are untouched by the launch.
+    expect(result.lobby.state.players).toBe(starting.state.players);
+    expect(reasonOf(launchMatch(result.lobby))).toBe('wrongPhase');
+  });
+
+  it('refuses every team, class, ready and settings change while it runs', () => {
+    const lobby = launching(5);
+    const attempts: LobbyResult[] = [
+      startMatch(lobby, HOST),
+      startMatch(lobby, HOST, { force: true }),
+      setTeamSize(lobby, HOST, 2),
+      setMode(lobby, HOST, 'duel'),
+      setScoreLimit(lobby, HOST, 5),
+      setFriendlyFire(lobby, HOST, true),
+      lockTeams(lobby, HOST, true),
+      movePlayer(lobby, HOST, 1, 'spectator'),
+      movePlayer(lobby, HOST, 1, TEAM_EMBER),
+      autoBalance(lobby, HOST),
+      shuffleTeams(lobby, HOST, 1),
+      switchSide(lobby, 1, 'spectator'),
+      switchSide(lobby, 2, TEAM_FROST),
+      pickClass(lobby, 1, 'wraith'),
+      setReady(lobby, 1, false),
+      setReady(lobby, 2, true),
+    ];
+    expect(attempts.map(reasonOf)).toEqual(attempts.map(() => 'wrongPhase'));
+  });
+
+  it('seats whoever joins during it as a spectator, never as a rider', () => {
+    const lobby = launching(1); // E: 0, F: 1: both teams have room
+    const late = admitted(joinLobby(lobby, { name: 'Late', token: 'late' }));
+    expect(sideOf(late.lobby, late.playerId)).toBe('spectator');
+    const result = launchMatch(late.lobby);
+    if (!result.ok) throw new Error(result.reason);
+    const effect = result.effects[0];
+    if (effect?.type !== 'matchLaunch') throw new Error('no roster');
+    expect(effect.roster.riders.map((r) => r.playerId)).toEqual([0, 1]);
+    expect(effect.roster.spectators).toEqual([late.playerId]);
+  });
+
+  it('builds the roster from who is still there when it ends', () => {
+    let lobby = launching(5); // E: 0 2 4, F: 1 3 5
+    lobby = must(leaveLobby(lobby, 2));
+    lobby = must(kickPlayer(lobby, HOST, 3));
+    lobby = must(disconnectPlayer(lobby, 5, 100));
+    expect(lobby.state.phase).toBe('starting');
+    const result = launchMatch(lobby);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.lobby.state.phase).toBe('inMatch');
+    const effect = result.effects[0];
+    if (effect?.type !== 'matchLaunch') throw new Error('no roster');
+    // Gone riders are not in the match; the dropped one keeps its seat (the host flies it).
+    expect(effect.roster.riders.map((r) => [r.playerId, r.team])).toEqual([
+      [0, TEAM_EMBER],
+      [4, TEAM_EMBER],
+      [1, TEAM_FROST],
+      [5, TEAM_FROST],
+    ]);
+    expect(findLobbyPlayer(result.lobby.state, 5)?.connected).toBe(false);
+    expect(effect.roster.solo).toBe(false);
+  });
+
+  it('goes back to the lobby when a team is left with nobody', () => {
+    const lobby = must(leaveLobby(launching(1), 1));
+    const result = launchMatch(lobby);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.effects).toHaveLength(0);
+    expect(result.lobby.state.phase).toBe('lobby');
+    expect(result.lobby.state.players.some((p) => p.ready)).toBe(false);
+    // The room is usable again: the host alone may start a sandbox.
+    expect(canStart(result.lobby.state)).toEqual({ ok: true, solo: true });
+  });
+
+  it('launches a solo start as a sandbox, unless somebody joined meanwhile', () => {
+    const starting = must(startMatch(newLobby(), HOST));
+    const solo = launchMatch(starting, true);
+    if (!solo.ok) throw new Error(solo.reason);
+    expect(solo.lobby.state.phase).toBe('inMatch');
+    const effect = solo.effects[0];
+    expect(effect?.type === 'matchLaunch' && effect.roster.solo).toBe(true);
+    // Without the solo flag one rider alone is a team short.
+    expect(must(launchMatch(starting)).state.phase).toBe('lobby');
+
+    // Somebody else is in the room now: no sandbox, they pick sides in the lobby instead.
+    const joined = admitted(joinLobby(starting, { name: 'Late', token: 'late' })).lobby;
+    const cancelled = launchMatch(joined, true);
+    if (!cancelled.ok) throw new Error(cancelled.reason);
+    expect(cancelled.effects).toHaveLength(0);
+    expect(cancelled.lobby.state.phase).toBe('lobby');
+    expect(cancelled.lobby.state.players).toHaveLength(2);
   });
 });

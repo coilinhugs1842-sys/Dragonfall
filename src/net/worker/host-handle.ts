@@ -164,6 +164,11 @@ export interface HostHandle {
   readonly current: Readonly<HostViewState> | null;
   /** Why Start is unavailable, or null when the host may start. */
   readonly startBlocker: StartBlocker | null;
+  /**
+   * The host may skip the intro that is running (`requestSkipIntro()` would work): true only
+   * during `intro`, from the room's second match on. For the HUD's Skip prompt.
+   */
+  readonly canSkipIntro: boolean;
   /** Round trip per player in ms, indexed by PlayerId; -1 = unknown. Mutated in place. */
   readonly playerPings: readonly number[];
   /** Links that completed the handshake (real players and bots). */
@@ -181,8 +186,18 @@ export interface HostHandle {
   close(): void;
   /** A lobby or host-panel intent of the host's own UI. */
   applyIntent(intent: UiIntent): void;
-  /** Ends the running match and takes everyone back to the lobby. */
+  /**
+   * Ends the running match and takes everyone back to the lobby; during the lobby launch
+   * (`lobby.phase === 'starting'`) it calls the start off instead.
+   */
   endMatch(): void;
+  /**
+   * Asks to cut the intro short for everyone: the countdown starts on the next host tick.
+   * Refused unless `canSkipIntro`; `force` (dev flags, tests) skips any running intro. Returns
+   * whether the request was accepted as far as this page knows: exact on the main-thread host,
+   * and on a worker host the page's mirrored state decides (the worker checks again).
+   */
+  requestSkipIntro(force?: boolean): boolean;
   /** Once per rendered frame. `nowMs` is the page's monotonic clock. */
   update(nowMs: number): void;
   /** Once per fixed 30 Hz step of the page's loop. Does nothing when a worker owns the ticks. */
@@ -380,6 +395,10 @@ export class DirectHost implements HostHandle {
     return session.state === 'open' ? session.startBlocker() : null;
   }
 
+  get canSkipIntro(): boolean {
+    return this.core.session.canSkipIntro;
+  }
+
   get playerPings(): readonly number[] {
     return this.core.session.playerPings;
   }
@@ -418,6 +437,10 @@ export class DirectHost implements HostHandle {
 
   endMatch(): void {
     this.core.session.endMatch();
+  }
+
+  requestSkipIntro(force = false): boolean {
+    return this.core.session.requestSkipIntro(force);
   }
 
   update(nowMs: number): void {

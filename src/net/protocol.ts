@@ -764,6 +764,12 @@ export function createMatchStartMessage(): MatchStartMessage {
 }
 
 export interface MatchPhaseMessage {
+  /**
+   * The header's 16-bit tick. For the phases in which the dragons are held (`intro`,
+   * `countdown`) it is the low 16 bits of the host tick at which play begins, so a client knows
+   * when its controls go live without knowing the lengths of the intro and the countdown (and
+   * when the host skipped the intro). For every other phase it is just the tick it was sent on.
+   */
   tick: number;
   /** Full host tick at which the phase began. */
   phaseStartTick: number;

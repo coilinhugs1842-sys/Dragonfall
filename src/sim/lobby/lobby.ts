@@ -133,8 +133,13 @@ export type LobbyEffect =
     }
   /** The host left: tell every client and tear the room down. */
   | { readonly type: 'lobbyClosed' }
-  /** Start was accepted: load the match with this roster. */
-  | { readonly type: 'matchStart'; readonly roster: MatchRoster };
+  /**
+   * Start was accepted and the room is `starting`: the launch has begun. `roster` is the teams as
+   * they stand now; the match itself is loaded from the `matchLaunch` roster.
+   */
+  | { readonly type: 'matchStart'; readonly roster: MatchRoster }
+  /** The launch is over and the room is `inMatch`: load the match with this roster. */
+  | { readonly type: 'matchLaunch'; readonly roster: MatchRoster };
 
 export type LobbyResult =
   | {
@@ -1123,6 +1128,10 @@ export function setBotDifficulty(
 /**
  * Host presses Start. Checked by `canStart`; on success the room enters `starting` and the
  * `matchStart` effect carries the roster. `force` skips only the ready check.
+ *
+ * `starting` is the lobby launch (the dragons take off, MATCH_TUNING.lobbyLaunchS on the host's
+ * clock): teams, classes, ready flags and settings are frozen, newcomers spectate, and the host
+ * ends it with `launchMatch`.
  */
 export function startMatch(
   lobby: HostLobby,
@@ -1138,7 +1147,33 @@ export function startMatch(
   return done(lobby, next, [{ type: 'matchStart', roster }]);
 }
 
-/** The launch sequence is over: `starting` → `inMatch`. Called by the host's own flow, not a player. */
+/**
+ * The lobby launch is over: the room goes `starting` → `inMatch` and the `matchLaunch` effect
+ * carries the roster to load. The roster is built from the room as it is NOW, not as it was when
+ * Start was pressed, because riders can still go during the launch: one who left, was kicked or
+ * was a removed bot is simply not in it, and one whose connection dropped keeps its seat (the
+ * host flies it until it is back or its seat expires, as in any match).
+ *
+ * If that leaves a team with nobody (and Start was not a solo sandbox: `solo`), there is no
+ * match to play: the room goes back to `lobby` with every ready flag cleared and no effect.
+ * Called by the host's own flow, not a player.
+ */
+export function launchMatch(lobby: HostLobby, solo = false): LobbyResult {
+  if (lobby.state.phase !== 'starting') return refuse(lobby, 'wrongPhase');
+  const roster = buildMatchRoster(lobby.state);
+  let ember = 0;
+  let frost = 0;
+  for (const rider of roster.riders) {
+    if (rider.team === TEAM_EMBER) ember += 1;
+    else frost += 1;
+  }
+  const playable = solo ? roster.solo : ember > 0 && frost > 0;
+  if (!playable) return returnToLobby(lobby);
+  const next: HostLobby = { ...lobby, state: { ...lobby.state, phase: 'inMatch' } };
+  return done(lobby, next, [{ type: 'matchLaunch', roster }]);
+}
+
+/** `starting` → `inMatch` and nothing else. Called by the host's own flow, not a player. */
 export function enterMatch(lobby: HostLobby): LobbyResult {
   if (lobby.state.phase !== 'starting') return refuse(lobby, 'wrongPhase');
   return done(lobby, { ...lobby, state: { ...lobby.state, phase: 'inMatch' } });

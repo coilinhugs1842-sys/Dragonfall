@@ -188,6 +188,9 @@ export class HostWorkerServer {
       case 'endMatch':
         core.session.endMatch();
         break;
+      case 'skipIntro':
+        core.session.requestSkipIntro(message.force);
+        break;
       case 'transportOpen':
         this.port?.emitOpen(message.roomCode);
         break;
@@ -322,9 +325,12 @@ export class HostWorkerServer {
         ...(config.mapSeed !== undefined ? { mapSeed: config.mapSeed } : {}),
         ...(env.createMatchWorld !== undefined ? { createMatchWorld: env.createMatchWorld } : {}),
         ...(config.measure ? { profileClock: (): number => env.now() } : {}),
+        cinematics: config.cinematics,
         session: {
           ...(config.roomCode !== undefined ? { roomCode: config.roomCode } : {}),
           ...(config.countdownTicks !== undefined ? { countdownTicks: config.countdownTicks } : {}),
+          ...(config.introTicks !== undefined ? { introTicks: config.introTicks } : {}),
+          ...(config.launchTicks !== undefined ? { launchTicks: config.launchTicks } : {}),
         },
       });
     } catch (error) {
@@ -555,7 +561,8 @@ export class HostWorkerServer {
       last.lobby === lobby &&
       last.inMatch === session.inMatch &&
       last.matchPhase === session.matchPhase &&
-      last.startBlocker === blocker
+      last.startBlocker === blocker &&
+      last.canSkipIntro === session.canSkipIntro
     ) {
       return;
     }
@@ -569,6 +576,7 @@ export class HostWorkerServer {
       inMatch: session.inMatch,
       matchPhase: session.matchPhase,
       startBlocker: blocker,
+      canSkipIntro: session.canSkipIntro,
     };
     this.meta = meta;
     this.env.post({ t: 'meta', meta }, []);

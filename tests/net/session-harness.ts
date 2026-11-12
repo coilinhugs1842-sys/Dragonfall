@@ -181,6 +181,8 @@ export class Rig {
       random: this.random,
       recycledBuffers: true,
       countdownTicks: 45,
+      // Start leads straight to the countdown; the timeline tests turn the cinematics on.
+      cinematics: false,
       ...(fixedCode !== null ? { roomCode: fixedCode } : {}),
       ...options.host,
     });

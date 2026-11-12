@@ -185,6 +185,7 @@ describe('host worker vs direct host', () => {
       createMatchWorld: () => greybox(),
       now: () => replayNow,
       recycledBuffers: true,
+      cinematics: false,
       session: { roomCode: WORKER_ROOM, countdownTicks: 30 },
     });
     direct.open();

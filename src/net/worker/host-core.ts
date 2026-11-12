@@ -91,6 +91,12 @@ export interface HostCoreOptions {
   /** False: no lag compensation (`?lagcomp=0`). */
   readonly lagCompensation?: boolean;
   readonly autoSettings?: HostAutoSettings | null;
+  /**
+   * False: no cinematics (`HostSessionOptions.cinematics`): Start loads the match at once and
+   * the match has no `intro` phase. For benches and headless tests. Default true; a `solo` room
+   * never has them.
+   */
+  readonly cinematics?: boolean;
   /** Extra session options (tests: `roomCode`, `random`, `countdownTicks`). */
   readonly session?: Partial<HostSessionOptions>;
 }
@@ -146,8 +152,9 @@ export class HostCore {
       transport,
       hostName: options.hostName,
       recycledBuffers: hub !== null || options.recycledBuffers === true,
-      // A solo flight has nobody to wait for at the gate.
-      ...(options.kind === 'solo' ? { countdownTicks: 0 } : {}),
+      // A solo flight has nobody to wait for at the gate, and no launch or intro to sit through.
+      ...(options.kind === 'solo' ? { countdownTicks: 0, cinematics: false } : {}),
+      ...(options.cinematics === false ? { cinematics: false } : {}),
       ...(options.createMatchWorld !== undefined
         ? { createMatchWorld: options.createMatchWorld }
         : {}),

@@ -17,6 +17,7 @@
  *   PONG         f64 clientTimeMs, f64 hostTimeMs, u32 hostTick
  *   MATCH_START  u32 startTick, u32 seed
  *   MATCH_PHASE  u32 phaseStartTick, u8 phase, u8 round, u8 winner
+ *                (header tick = low 16 bits of the tick play begins while `intro` / `countdown`)
  *   KICK         (nothing)
  *   HOST_LEFT    (nothing)
  */

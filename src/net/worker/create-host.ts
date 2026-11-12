@@ -76,10 +76,13 @@ function workerConfig(options: CreateHostOptions): HostWorkerConfig {
     lagCompensation: options.lagCompensation !== false,
     wantEvents: options.events !== undefined && options.events !== null,
     autoSettings: options.autoSettings ?? null,
+    cinematics: options.cinematics !== false && session?.cinematics !== false,
     ...(options.botSeed !== undefined ? { botSeed: options.botSeed } : {}),
     ...(options.mapSeed !== undefined ? { mapSeed: options.mapSeed } : {}),
     ...(session?.roomCode !== undefined ? { roomCode: session.roomCode } : {}),
     ...(session?.countdownTicks !== undefined ? { countdownTicks: session.countdownTicks } : {}),
+    ...(session?.introTicks !== undefined ? { introTicks: session.introTicks } : {}),
+    ...(session?.launchTicks !== undefined ? { launchTicks: session.launchTicks } : {}),
   };
 }
 
@@ -215,6 +218,10 @@ class SwitchingHost implements HostHandle {
     return this.inner.startBlocker;
   }
 
+  get canSkipIntro(): boolean {
+    return this.inner.canSkipIntro;
+  }
+
   get playerPings(): readonly number[] {
     return this.inner.playerPings;
   }
@@ -259,6 +266,10 @@ class SwitchingHost implements HostHandle {
 
   endMatch(): void {
     this.inner.endMatch();
+  }
+
+  requestSkipIntro(force = false): boolean {
+    return this.inner.requestSkipIntro(force);
   }
 
   update(nowMs: number): void {

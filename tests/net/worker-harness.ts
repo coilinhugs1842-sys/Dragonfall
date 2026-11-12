@@ -245,6 +245,8 @@ export class WorkerRoom {
         this.onState?.(tick, current);
       },
       session: { roomCode: WORKER_ROOM, countdownTicks: 30 },
+      // Start leads straight to the countdown; the timeline tests turn the cinematics on.
+      cinematics: false,
       ...options.host,
     });
     this.worker = made;

@@ -21,6 +21,7 @@ export {
   isLobbySide,
   joinLobby,
   kickPlayer,
+  launchMatch,
   leaveLobby,
   lockTeams,
   movePlayer,

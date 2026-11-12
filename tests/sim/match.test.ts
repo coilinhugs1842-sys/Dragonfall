@@ -107,6 +107,8 @@ interface RigOptions {
   matchTuning?: Partial<MatchTuning>;
   arena?: MatchArena | null;
   countdown?: number;
+  /** Ticks of `intro` before the first countdown (0 = none, as with no cinematics). */
+  intro?: number;
 }
 
 function makeMatch(options: RigOptions = {}): MatchRig {
@@ -130,7 +132,14 @@ function makeMatch(options: RigOptions = {}): MatchRig {
   const sim = createSim({ matchTuning, events: { emit: (event) => director.onEvent(event) } });
   const settings: HostSettings = { ...DEFAULT_HOST_SETTINGS, ...options.settings };
   const config = createModeConfig(settings, options.solo === true, matchTuning, modeTuning);
-  director.begin(sim, config, options.arena ?? null, 1, options.countdown ?? COUNTDOWN);
+  director.begin(
+    sim,
+    config,
+    options.arena ?? null,
+    1,
+    options.countdown ?? COUNTDOWN,
+    options.intro ?? 0,
+  );
 
   const inputs: InputFrame[] = [];
   const ember: number[] = [];
@@ -377,6 +386,195 @@ describe('phase timeline', () => {
   });
 });
 
+// --- Intro (T-5.1) ---------------------------------------------------------------------------------
+
+const INTRO = 6 * TICK_HZ;
+
+describe('intro phase', () => {
+  it('runs intro -> countdown -> playing -> roundEnd -> results -> lobby, tick for tick', () => {
+    const match = skirmish(1, 0, { intro: INTRO });
+    const { director } = match;
+    expect(director.phase).toBe('intro');
+    expect(director.phaseStartTick).toBe(1);
+    expect(director.introLength).toBe(INTRO);
+    expect(director.liveTick).toBe(1 + INTRO + COUNTDOWN);
+    expect(director.simRuns).toBe(false);
+    const startZ = match.dragon(0).position.z;
+
+    // Ticks 1..180 are the intro.
+    match.step(INTRO);
+    expect(director.phase).toBe('intro');
+    expect(match.phases).toHaveLength(0);
+    match.step();
+    expect(director.phase).toBe('countdown');
+    expect(director.phaseStartTick).toBe(1 + INTRO);
+    expect(director.liveTick).toBe(1 + INTRO + COUNTDOWN);
+    expect(director.simRuns).toBe(false);
+
+    // The countdown is ticks 181..270: held all the way from tick 1.
+    match.step(COUNTDOWN - 1);
+    expect(director.phase).toBe('countdown');
+    expect(match.simSteps).toBe(0);
+    expect(match.dragon(0).position.z).toBe(startZ);
+    match.step();
+    expect(director.phase).toBe('playing');
+    expect(director.phaseStartTick).toBe(1 + INTRO + COUNTDOWN);
+    expect(match.tick).toBe(1 + INTRO + COUNTDOWN);
+    expect(match.simSteps).toBe(1);
+    expect(match.dragon(0).position.z).toBeGreaterThan(startZ);
+
+    match.step(10);
+    match.kill(10, 0);
+    match.step();
+    const decided = match.tick;
+    match.runTo('results');
+    expect(director.phaseStartTick).toBe(decided + 1 + ROUND_END);
+    // `results` lasts exactly resultsS, then the match is over.
+    match.step(RESULTS - 1);
+    expect(director.phase).toBe('results');
+    expect(director.finished).toBe(false);
+    match.step();
+    expect(director.finished).toBe(true);
+    expect(director.phase).toBe('lobby');
+    expect(match.tick).toBe(decided + 1 + ROUND_END + RESULTS);
+
+    expect(match.phases.map((entry) => [entry.phase, entry.tick, entry.round])).toEqual([
+      ['countdown', 1 + INTRO, 1],
+      ['playing', 1 + INTRO + COUNTDOWN, 1],
+      ['roundEnd', decided + 1, 1],
+      ['results', decided + 1 + ROUND_END, 1],
+    ]);
+  });
+
+  it('holds everything during the intro: nothing moves and nothing can be hurt', () => {
+    const match = skirmish(3, 0, { intro: INTRO, ember: 2, frost: 2 });
+    const before = [0, 1, 10, 11].map((id) => ({ ...match.dragon(id).position }));
+    match.step(INTRO);
+    expect(match.director.phase).toBe('intro');
+    expect(match.simSteps).toBe(0);
+    expect(match.sim.rules.ceasefire).toBe(true);
+    // Not even a hit pushed straight into the damage pipeline gets through.
+    expect(match.sim.applyDamage(10, 1e6, 0, 'primary', DAMAGE_IGNORE_IMMUNITY)).toBe(0);
+    [0, 1, 10, 11].forEach((id, index) => {
+      const dragon = match.dragon(id);
+      expect(dragon.position).toEqual(before[index]);
+      expect(dragon.health).toBe(dragon.maxHealth);
+      expect(match.alive(id)).toBe(true);
+    });
+    // The countdown that follows is held the same way; the first tick of play lifts both.
+    match.runTo('countdown');
+    expect(match.sim.rules.ceasefire).toBe(true);
+    match.runTo('playing');
+    expect(match.sim.rules.ceasefire).toBe(false);
+    match.kill(10, 0);
+    match.step();
+    expect(match.director.scores).toEqual([1, 0]);
+  });
+
+  it('skipIntro starts the countdown on the given tick, and only during the intro', () => {
+    const match = skirmish(1, 0, { intro: INTRO });
+    const { director } = match;
+    match.step(10);
+    // Asked between ticks 10 and 11, the way the host session asks.
+    expect(director.skipIntro(match.tick + 1)).toBe(true);
+    expect(director.phase).toBe('countdown');
+    expect(director.phaseStartTick).toBe(11);
+    expect(director.liveTick).toBe(11 + COUNTDOWN);
+    expect(match.phases).toEqual([{ phase: 'countdown', tick: 11, round: 1, winner: null }]);
+    // Once is enough.
+    expect(director.skipIntro(match.tick + 1)).toBe(false);
+
+    match.step(COUNTDOWN);
+    expect(director.phase).toBe('countdown');
+    expect(match.simSteps).toBe(0);
+    match.step();
+    expect(director.phase).toBe('playing');
+    expect(director.phaseStartTick).toBe(11 + COUNTDOWN);
+    expect(director.skipIntro(match.tick + 1)).toBe(false);
+    expect(director.phase).toBe('playing');
+    expect(match.phases.map((entry) => entry.phase)).toEqual(['countdown', 'playing']);
+  });
+
+  it('cannot be skipped when the match has no intro, or after it is over', () => {
+    const match = skirmish(1);
+    expect(match.director.phase).toBe('countdown');
+    expect(match.director.introLength).toBe(0);
+    expect(match.director.skipIntro(1)).toBe(false);
+    match.runTo('playing');
+    match.kill(10, 0);
+    match.runTo('results');
+    expect(match.director.skipIntro(match.tick + 1)).toBe(false);
+    match.step(RESULTS + 1);
+    expect(match.director.finished).toBe(true);
+    expect(match.director.skipIntro(match.tick + 1)).toBe(false);
+    expect(match.director.phase).toBe('lobby');
+  });
+
+  it('an intro followed by a zero countdown starts play on the tick the intro ends', () => {
+    const match = skirmish(1, 0, { intro: 5, countdown: 0 });
+    match.step(5);
+    expect(match.director.phase).toBe('intro');
+    match.step();
+    expect(match.director.phase).toBe('playing');
+    expect(match.simSteps).toBe(1);
+    expect(match.phases.map((entry) => [entry.phase, entry.tick])).toEqual([
+      ['countdown', 6],
+      ['playing', 6],
+    ]);
+  });
+
+  it('is for round 1 only: a later Duel round goes straight to its countdown', () => {
+    const match = duel({ intro: INTRO });
+    expect(match.director.phase).toBe('intro');
+    match.runTo('playing');
+    expect(match.tick).toBe(1 + INTRO + COUNTDOWN);
+    match.kill(10, 0);
+    match.step();
+    const decided = match.tick;
+    match.runTo('countdown');
+    expect(match.director.round).toBe(2);
+    expect(match.director.phaseStartTick).toBe(decided + 1 + ROUND_END);
+    expect(match.director.liveTick).toBe(decided + 1 + ROUND_END + COUNTDOWN);
+    match.runTo('playing');
+    expect(match.director.phaseStartTick).toBe(decided + 1 + ROUND_END + COUNTDOWN);
+    expect(match.phases.map((entry) => entry.phase)).toEqual([
+      'countdown',
+      'playing',
+      'roundEnd',
+      'countdown',
+      'playing',
+    ]);
+  });
+
+  it('a team that leaves during the intro ends the match there', () => {
+    const match = skirmish(3, 0, { intro: INTRO });
+    match.step(20);
+    match.director.removeRider(10);
+    match.step();
+    expect(match.director.phase).toBe('results');
+    expect(match.director.matchWinner).toBe(TEAM_EMBER);
+    expect(match.director.endReason).toBe('forfeit');
+    expect(match.director.liveTick).toBe(-1);
+  });
+
+  it('is deterministic: two directors given the same calls agree on every tick', () => {
+    const run = (): string[] => {
+      const match = duel({ intro: 40 });
+      const log: string[] = [];
+      for (let i = 0; i < 400; i++) {
+        if (i === 25) match.director.skipIntro(match.tick + 1);
+        if (match.director.phase === 'playing' && match.director.roundTicks === 12) {
+          match.kill(10, 0);
+        }
+        match.step();
+        log.push(`${match.tick}:${match.director.phase}:${match.director.phaseStartTick}`);
+      }
+      return log;
+    };
+    expect(run()).toEqual(run());
+  });
+});
+
 // --- Skirmish --------------------------------------------------------------------------------------
 
 describe('Skirmish', () => {
@@ -418,9 +616,11 @@ describe('Skirmish', () => {
 
     match.runTo('results');
     expect(match.director.matchWinner).toBe(TEAM_EMBER);
-    // Whatever happens after the deciding takedown does not count.
-    match.kill(0, 11);
+    // Nothing after the deciding takedown counts: once the round is over nobody can be hurt.
+    expect(match.sim.rules.ceasefire).toBe(true);
+    expect(match.sim.applyDamage(0, 1e6, 11, 'primary', DAMAGE_IGNORE_IMMUNITY)).toBe(0);
     match.step(3);
+    expect(match.alive(0)).toBe(true);
     expect(match.director.scores).toEqual([3, 1]);
     expect(match.director.statsOf(11)?.takedowns).toBe(1);
   });

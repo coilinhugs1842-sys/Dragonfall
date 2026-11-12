@@ -32,6 +32,7 @@ import {
   PING_HZ,
   PROTOCOL_VERSION,
   RECONNECT_GRACE_MS,
+  TICK_DT_S,
   TICK_HZ,
   TICK_MS,
   createInputFrame,
@@ -69,6 +70,7 @@ import {
 import { decodeGameEvents } from '../codec/events';
 import { copySnapshotOwner, decodeSnapshot, encodeInput } from '../codec/fast';
 import { Reader, Writer } from '../codec/io';
+import { expandTick } from '../codec/quantize';
 import { InputTiming, initialInputLeadTicks } from '../prediction/input-timing';
 import { ClientPredictor } from '../prediction/predictor';
 import type { ReconcileResult } from '../prediction/predictor';
@@ -278,8 +280,11 @@ interface MutableViewOptions {
   respawnDelayS: number;
 }
 
-/** A countdown longer than this (10 min) is not believed; the shared default is used instead. */
-const COUNTDOWN_MAX_TICKS = 600 * TICK_HZ;
+/**
+ * The dragons are never held (intro + countdown) longer than this (10 min): a MATCH_PHASE that
+ * says otherwise is not believed. Well inside half a wrap of the 16-bit tick it travels as.
+ */
+const HELD_MAX_TICKS = 600 * TICK_HZ;
 
 export class ClientSession {
   readonly stats = new NetRate();
@@ -393,8 +398,8 @@ export class ClientSession {
   private matchWinnerNow: MatchWinner | null = null;
   private matchSeedNow = 0;
   private matchStartTickNow = -1;
-  /** Length of the host's countdowns in ticks, learned from the first one; -1 = not yet. */
-  private countdownTicks = -1;
+  /** First host tick of the current phase, from the reliable MATCH_PHASE. */
+  private phaseStartTickNow = 0;
   private world: MatchWorld | null = null;
   private worldSeed = -1;
   private rider = false;
@@ -520,6 +525,11 @@ export class ClientSession {
   /** First tick of play of the current round (a later round's countdown moves it). */
   get matchStartTick(): number {
     return this.matchStartTickNow;
+  }
+
+  /** First host tick of the current match phase (0 outside a match). */
+  get phaseStartTick(): number {
+    return this.matchActive ? this.phaseStartTickNow : 0;
   }
 
   /** 1-based round, from the last MATCH_PHASE (1 outside a match). */
@@ -860,6 +870,15 @@ export class ClientSession {
       this.roster,
       options,
     );
+    // The phase shown is the reliable MATCH_PHASE's, which can be a few ticks ahead of (or, on a
+    // slow ctrl channel, behind) the snapshots being played back. Its time is therefore counted
+    // from that phase's own first tick on the playback clock, not read from the snapshot: the
+    // two always belong together (a countdown never shows the intro's 6 s), and the value is
+    // the one the host had on that tick.
+    if (this.matchActive && this.sample.valid) {
+      const elapsed = this.sample.playTick - this.phaseStartTickNow + 1;
+      view.clock.phaseTimeS = elapsed > 0 ? elapsed * TICK_DT_S : 0;
+    }
     const bolts = this.bolts;
     if (bolts.count > 0) {
       bolts.update(
@@ -1130,10 +1149,12 @@ export class ClientSession {
 
     this.matchSeedNow = message.seed;
     this.matchStartTickNow = message.startTick;
+    // Until the MATCH_PHASE that follows on the same channel says which (`intro`, or any phase
+    // for a late joiner). Either way the dragons are held until `startTick`.
     this.matchPhaseNow = 'countdown';
+    this.phaseStartTickNow = message.startTick;
     this.matchRoundNow = 1;
     this.matchWinnerNow = null;
-    this.countdownTicks = -1;
     this.scores.count = 0;
     this.localCasts = 0;
     this.matchActive = true;
@@ -1179,26 +1200,30 @@ export class ClientSession {
     }
     if (!this.matchActive) return;
     this.matchPhaseNow = message.phase;
+    this.phaseStartTickNow = message.phaseStartTick;
     this.matchRoundNow = message.round;
     this.matchWinnerNow = message.winner;
-    if (message.phase === 'countdown') {
+    if (message.phase === 'intro' || message.phase === 'countdown') {
       // The host holds every dragon at its gate and does not step the sim until the countdown
-      // is over (every round has one). Prediction must stand still for the same ticks. The
-      // message does not say how long that is: the first countdown of a match tells
-      // (MATCH_START carries its end), and every later one has the same length.
-      if (this.countdownTicks < 0) {
-        const length = this.matchStartTickNow - message.phaseStartTick;
-        this.countdownTicks =
-          length >= 0 && length <= COUNTDOWN_MAX_TICKS
-            ? length
-            : Math.round(MATCH_TUNING.countdownS * TICK_HZ);
+      // is over (every round has one; the first is preceded by the intro). Prediction must
+      // stand still for the same ticks. The header's tick says when play begins (its low 16
+      // bits), so a skipped intro or a retuned countdown needs no guessing here.
+      const liveTick = expandTick(message.tick, message.phaseStartTick);
+      const held = liveTick - message.phaseStartTick;
+      if (held >= 0 && held <= HELD_MAX_TICKS) {
+        this.matchStartTickNow = liveTick;
+      } else if (message.phase === 'countdown') {
+        // Not believable: the shipped countdown. (`intro` keeps what MATCH_START said.)
+        this.matchStartTickNow =
+          message.phaseStartTick + Math.round(MATCH_TUNING.countdownS * TICK_HZ);
       }
-      this.matchStartTickNow = message.phaseStartTick + this.countdownTicks;
       this.predictor.setSimStartTick(this.matchStartTickNow);
       // A new round: last round's bolts are gone on the host too.
-      this.bolts.reset();
-    } else if (message.phase === 'playing') {
-      // The authoritative end of the countdown.
+      if (message.phase === 'countdown') this.bolts.reset();
+    } else if (message.phase === 'playing' || message.phaseStartTick < this.matchStartTickNow) {
+      // `playing`: the authoritative end of the countdown. The other case is a match that was
+      // decided while the dragons were still held (a team left): the host's sim runs from this
+      // phase on, so prediction must too.
       this.matchStartTickNow = message.phaseStartTick;
       this.predictor.setSimStartTick(message.phaseStartTick);
     }
@@ -1214,7 +1239,7 @@ export class ClientSession {
     this.matchPhaseNow = 'lobby';
     this.matchRoundNow = 1;
     this.matchWinnerNow = null;
-    this.countdownTicks = -1;
+    this.phaseStartTickNow = 0;
     this.lastSnapshotTick = -1;
     this.accumulatorMs = 0;
     this.lossPercent = 0;

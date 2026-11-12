@@ -260,12 +260,13 @@ describe('lobby operations', () => {
     expect(rig.host.startBlocker()).toBeNull();
     expect(rig.host.applyIntent({ type: 'host.start' })).toBe(true);
     rig.run(100);
+    // No cinematics in this rig: the launch is over at once and the room is in the match.
     expect(rig.host.inMatch).toBe(true);
-    expect(rig.host.lobby.phase).toBe('starting');
+    expect(rig.host.lobby.phase).toBe('inMatch');
     for (const client of rig.clients) {
       expect(client.session.inMatch).toBe(true);
       expect(client.session.matchPhase).toBe('countdown');
-      expect(client.session.lobby?.phase).toBe('starting');
+      expect(client.session.lobby?.phase).toBe('inMatch');
     }
     rig.runUntil(() => rig.host.matchPhase === 'playing');
     rig.run(100);
@@ -338,7 +339,7 @@ describe('match start', () => {
     rig.hub.pump();
     const id = a.session.localPlayerId;
     expect(a.session.inMatch).toBe(true);
-    expect(a.session.lobby?.phase).toBe('starting');
+    expect(a.session.lobby?.phase).toBe('inMatch');
     expect(a.session.roster.classOf(id)).toBe('tempest');
     expect(rig.host.sim?.getDragon(id)?.classId).toBe('tempest');
 

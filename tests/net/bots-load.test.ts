@@ -57,6 +57,7 @@ function createBotRoom(
     profileClock: () => performance.now(),
     recycledBuffers: true,
     countdownTicks: 45,
+    cinematics: false,
   });
   const bots = new NetBots({
     count,

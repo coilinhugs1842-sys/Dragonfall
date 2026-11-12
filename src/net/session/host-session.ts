@@ -22,10 +22,18 @@
  * `applyIntent` and its input is the argument of `tick`. The game layer renders `sim.prev` /
  * `sim.current` directly, with zero network delay.
  *
- * MATCH (Phase 2: everyone flies together). `host.start` -> roster -> `MatchWorld` -> dragons
- * spawned at their gate slots and held there for `countdownTicks` -> `playing`. MATCH_START
- * carries the first simulated tick, so clients know in advance when control is handed over and
- * their input timing has settled by then.
+ * MATCH (Phase 2: everyone flies together). `host.start` -> the lobby launch (the room is
+ * `starting` for `launchTicks`) -> roster -> `MatchWorld` -> dragons spawned at their gate slots
+ * and held there through `intro` and the countdown -> `playing`. MATCH_START carries the first
+ * simulated tick, so clients know in advance when control is handed over and their input timing
+ * has settled by then.
+ *
+ * THE TIMELINE (T-5.1) is the host's alone, in host ticks, so every browser shows the same
+ * moment: `starting` (MATCH_TUNING.lobbyLaunchS) -> `intro` (matchIntroS, round 1 only) ->
+ * `countdown` (countdownS) -> `playing` -> `roundEnd` -> next round or `results`
+ * (MODE_TUNING.resultsS) -> back to the lobby with the teams kept. The host may cut the intro
+ * short (`requestSkipIntro`, see `canSkipIntro`). With `cinematics: false` (and in a solo
+ * sandbox session) there is no launch delay and no intro: Start leads straight to the countdown.
  *
  * COMBAT (T-3.1 / T-3.2) is inside the sim: abilities, the damage pipeline, takedowns, assists
  * and respawns at the gate slot. The session only wires it: the sim's GameEvents go out through
@@ -35,13 +43,13 @@
  * `rules`, `setStormRadius`, `current.scores` / `current.teamTakedowns`, and the `takedown`
  * events. Lag compensation plugs into `sim.setTargetPositions`.
  *
- * MODES (T-3.4) are the `MatchDirector`'s (`sim/match`): the phase timeline (countdown ->
- * playing -> roundEnd -> next round or results -> lobby), Skirmish and Duel, the score, the
+ * MODES (T-3.4) are the `MatchDirector`'s (`sim/match`): the phase timeline (intro -> countdown
+ * -> playing -> roundEnd -> next round or results -> lobby), Skirmish and Duel, the score, the
  * per-rider stats (`matchStats`) and the storm schedule. The session drives it once per tick
  * around `sim.step`, tells it who is connected, and turns its phase changes into MATCH_PHASE
- * messages, `matchPhase` events and the snapshot clock. The sim does not step during a
- * countdown (dragons are held at their gates, controls locked) and steps with live controls in
- * every other phase.
+ * messages, `matchPhase` events and the snapshot clock. The sim does not step during `intro`
+ * or a countdown (dragons are held at their gates, controls locked) and steps with live
+ * controls in every other phase.
  *
  * LAG COMPENSATION (T-3.3) is the `LagCompensator`'s (`sim/lagcomp`): the session records
  * `sim.current` after every step and feeds it each client's latency (the tick of its newest
@@ -53,6 +61,7 @@ import {
   ABILITY_TABLE,
   DRAGON_FLAG_ALIVE,
   MATCH_TUNING,
+  MAX_PLAYERS,
   MODE_TUNING,
   NO_PLAYER,
   PROTOCOL_VERSION,
@@ -84,7 +93,7 @@ import type {
   TeamId,
   UiIntent,
 } from '../../shared';
-import { createSim } from '../../sim';
+import { createSim, secondsToTicks } from '../../sim';
 import type { Sim } from '../../sim';
 import { LagCompensator } from '../../sim/lagcomp';
 import {
@@ -93,10 +102,10 @@ import {
   createIntentRateLimiter,
   createLobby,
   disconnectPlayer,
-  enterMatch,
   expireReconnects,
   findLobbyPlayer,
   handleHello,
+  launchMatch,
   nextReconnectDeadline,
   resetIntentRateLimiter,
   returnToLobby,
@@ -199,7 +208,10 @@ export const HOST_STALE_LINK_MS = 1500;
 export const HOST_CLOSE_GRACE_MS = 250;
 /** Room codes tried before `open` gives up on `idTaken`. */
 export const HOST_ROOM_CODE_ATTEMPTS = 6;
-/** Dragons are held at their gates this long after Start (3 s). */
+/**
+ * The countdown as shipped (3 s). Without the `countdownTicks` option the session reads
+ * MATCH_TUNING.countdownS when a match starts instead, so the dev GUI can tune it.
+ */
 export const DEFAULT_COUNTDOWN_TICKS = 3 * TICK_HZ;
 /** A dead dragon is back at its gate after MATCH_TUNING.respawnDelayS (5 s) unless told otherwise. */
 export const DEFAULT_RESPAWN_TICKS = Math.round(MATCH_TUNING.respawnDelayS * TICK_HZ);
@@ -235,7 +247,7 @@ export interface HostMatchInfo {
   readonly roster: MatchRoster;
   readonly world: MatchWorld;
   readonly seed: number;
-  /** First host tick the sim steps (the countdown ends). */
+  /** First host tick the sim steps (the intro and the first countdown are over). */
   readonly startTick: number;
 }
 
@@ -285,7 +297,18 @@ export interface HostSessionOptions {
   readonly profileClock?: () => number;
   /** The transport recycles delivered buffers (loopback / netsim): cache their DataViews. */
   readonly recycledBuffers?: boolean;
+  /**
+   * False: no cinematics. Start loads the match at once (no lobby launch delay) and the match
+   * has no `intro` phase: it opens on the countdown. For benches, headless runs and tests.
+   * Default true.
+   */
+  readonly cinematics?: boolean;
+  /** Default: MATCH_TUNING.countdownS, read when a match starts. */
   readonly countdownTicks?: number;
+  /** Length of `intro` (tests shorten it). Default: MATCH_TUNING.matchIntroS, read at Start. */
+  readonly introTicks?: number;
+  /** Length of the lobby launch (tests). Default: MATCH_TUNING.lobbyLaunchS, read at Start. */
+  readonly launchTicks?: number;
   readonly respawnTicks?: number;
   /** The mode table the match rules read (tests shorten it). Default: MODE_TUNING, live. */
   readonly modeTuning?: ModeTuning;
@@ -369,7 +392,10 @@ interface HostMatch {
   roster: MatchRoster;
   world: MatchWorld;
   seed: number;
+  /** First tick of play of the current round: where the held dragons are let go. */
   startTick: number;
+  /** The countdown of this match, fixed when it began (the tuning may change under it). */
+  countdownTicks: number;
   phase: MatchPhase;
   phaseStartTick: number;
   riders: MatchRider[];
@@ -426,7 +452,11 @@ export class HostSession {
   private readonly random: RandomSource | undefined;
   private readonly profileClock: (() => number) | null;
   private readonly clockNow: (() => number) | null;
-  private readonly countdownTicks: number;
+  private readonly cinematics: boolean;
+  /** The options as given; -1 = read the tuning table when a match starts. */
+  private readonly fixedCountdownTicks: number;
+  private readonly fixedIntroTicks: number;
+  private readonly fixedLaunchTicks: number;
   private readonly localBot: boolean;
   private scoresDirty = false;
   private readonly simMatchTuning: MatchTuning;
@@ -474,8 +504,22 @@ export class HostSession {
 
   private simInstance: Sim | null = null;
   private match: HostMatch | null = null;
+  /**
+   * The lobby launch: the host tick at whose end the match is loaded, or -1 when no launch is
+   * running. The room is `starting` from Start until then.
+   */
+  private launchAtTick = -1;
+  /** The launch was started as a solo sandbox (one rider alone in the room). */
+  private launchSolo = false;
+  /** Matches this room has begun, this one included: the intro may be skipped from the second on. */
+  private matchesStarted = 0;
   private readonly simInputs: (Readonly<InputFrame> | undefined)[] = [];
-  private readonly holdFrame = createInputFrame();
+  /**
+   * One frame per rider of the match (index = its place in `match.riders`) for the dragons the
+   * host steers on the holding circle. Each needs its own: the sim reads them all after the
+   * loop that fills them.
+   */
+  private readonly holdFrames: InputFrame[] = [];
   private readonly holdCourse: PilotCourse = {
     centerX: 0,
     centerZ: 0,
@@ -533,10 +577,10 @@ export class HostSession {
     this.random = options.random;
     this.profileClock = options.profileClock ?? null;
     this.clockNow = options.now ?? null;
-    this.countdownTicks = Math.max(
-      0,
-      Math.floor(options.countdownTicks ?? DEFAULT_COUNTDOWN_TICKS),
-    );
+    this.cinematics = options.cinematics !== false;
+    this.fixedCountdownTicks = fixedTicks(options.countdownTicks);
+    this.fixedIntroTicks = fixedTicks(options.introTicks);
+    this.fixedLaunchTicks = fixedTicks(options.launchTicks);
     // Without the option the sim reads the shared table live (the dev GUI can tune it).
     this.simMatchTuning =
       options.respawnTicks === undefined
@@ -568,6 +612,7 @@ export class HostSession {
       this.peerByPlayer.push(undefined);
       this.simInputs.push(undefined);
     }
+    for (let i = 0; i < MAX_PLAYERS; i++) this.holdFrames.push(createInputFrame());
     this.playerPings[this.hostLobby.state.hostId] = 0;
 
     this.spawnEvent = {
@@ -640,6 +685,21 @@ export class HostSession {
   /** First tick of play of the current round (the countdown's end); a later round moves it. */
   get matchStartTick(): number {
     return this.match?.startTick ?? -1;
+  }
+
+  /**
+   * May the host skip the intro right now without `force`? True only during `intro`, and only
+   * when this room has already started a match before this one (everyone has seen the fly-in
+   * once). Cheap enough to read every frame.
+   */
+  get canSkipIntro(): boolean {
+    const match = this.match;
+    return match !== null && match.phase === 'intro' && this.matchesStarted > 1;
+  }
+
+  /** The lobby launch is running: Start was accepted and the match has not been loaded yet. */
+  get launching(): boolean {
+    return this.launchAtTick >= 0;
   }
 
   /** The rules of the running match (validated lobby settings), or null outside one. */
@@ -743,6 +803,7 @@ export class HostSession {
     this.peerByLink.clear();
     this.peerByPlayer.fill(undefined);
     this.match = null;
+    this.launchAtTick = -1;
     this.setState('closed');
   }
 
@@ -760,6 +821,9 @@ export class HostSession {
    */
   applyIntent(intent: UiIntent): boolean {
     if (this.sessionState === 'closed') return false;
+    // Host-only by construction: the intent has no wire form, so it can only come from this
+    // page. A client's Skip button does nothing.
+    if (intent.type === 'match.skipIntro') return this.requestSkipIntro();
     // The bot controls are host-only and never cross the wire: they come from this page alone.
     if (!isNetIntent(intent) && !isLobbyBotIntent(intent)) return false;
     const result = applyLobbyIntent(this.hostLobby, this.hostLobby.state.hostId, intent, {
@@ -785,10 +849,31 @@ export class HostSession {
     return true;
   }
 
-  /** Ends the running match and takes everyone back to the lobby. False when no match runs. */
+  /**
+   * The host cuts the intro short: the countdown starts on the next tick and every client is
+   * told through the ordinary MATCH_PHASE. Without `force` only when `canSkipIntro` (the room
+   * has played before); `force` (dev flags, tests) skips whenever an intro is running. False
+   * when nothing was skipped.
+   */
+  requestSkipIntro(force = false): boolean {
+    const match = this.match;
+    if (this.sessionState === 'closed' || match === null || match.phase !== 'intro') return false;
+    if (!force && !this.canSkipIntro) return false;
+    return this.director.skipIntro(this.tickNow + 1);
+  }
+
+  /**
+   * Ends the running match and takes everyone back to the lobby; during the lobby launch it
+   * calls the start off instead. False when neither is running.
+   */
   endMatch(): boolean {
     const match = this.match;
-    if (match === null) return false;
+    if (match === null) {
+      if (this.launchAtTick < 0) return false;
+      this.launchAtTick = -1;
+      this.handleResult(returnToLobby(this.hostLobby));
+      return true;
+    }
     this.setMatchPhase(match, 'lobby', this.tickNow + 1);
     this.flushEvents();
     this.match = null;
@@ -861,12 +946,38 @@ export class HostSession {
 
     const match = this.match;
     if (match !== null) this.stepMatch(match, tick, localInput, localAway);
+    // The lobby launch is over at the end of its last tick: the match's first tick is the next.
+    else if (this.launchAtTick >= 0 && tick >= this.launchAtTick) this.finishLaunch();
 
     this.flushEvents();
     if (this.lobbyDirty) this.broadcastLobby();
   }
 
   // --- Match -------------------------------------------------------------------------------------
+
+  /**
+   * Start was accepted (the room is `starting`): the launch runs for `launchTicks` host ticks,
+   * then the match is loaded. With no cinematics that is now.
+   */
+  private beginLaunch(roster: MatchRoster): void {
+    const ticks = !this.cinematics
+      ? 0
+      : this.fixedLaunchTicks >= 0
+        ? this.fixedLaunchTicks
+        : secondsToTicks(MATCH_TUNING.lobbyLaunchS);
+    this.launchSolo = roster.solo;
+    this.launchAtTick = this.tickNow + ticks;
+    if (ticks === 0) this.finishLaunch();
+  }
+
+  /**
+   * The launch is over: the lobby decides with the riders that are still there (`launchMatch`)
+   * whether a match begins (`matchLaunch` -> `beginMatch`) or the room is back in `lobby`.
+   */
+  private finishLaunch(): void {
+    this.launchAtTick = -1;
+    this.handleResult(launchMatch(this.hostLobby, this.launchSolo));
+  }
 
   private beginMatch(roster: MatchRoster): void {
     const seed = this.mapSeed >>> 0;
@@ -884,23 +995,38 @@ export class HostSession {
       sim.setCollisionWorld(world.collisionWorld);
     }
     const firstTick = this.tickNow + 1;
+    // The lengths of this match's timeline are fixed here, from the live tuning tables.
+    const countdownTicks =
+      this.fixedCountdownTicks >= 0
+        ? this.fixedCountdownTicks
+        : secondsToTicks(MATCH_TUNING.countdownS);
+    const introTicks = !this.cinematics
+      ? 0
+      : this.fixedIntroTicks >= 0
+        ? this.fixedIntroTicks
+        : secondsToTicks(MATCH_TUNING.matchIntroS);
+    this.matchesStarted++;
     this.lagComp.resetAll();
     sim.setTargetPositions(this.lagComp);
     // Friendly fire, respawns and the storm are the mode's: the director sets them on the sim.
-    this.director.begin(
+    const director = this.director;
+    director.begin(
       sim,
       createModeConfig(roster.settings, roster.solo, this.simMatchTuning),
       this.arenaOf(world),
       firstTick,
-      this.countdownTicks,
+      countdownTicks,
+      introTicks,
     );
 
     const match: HostMatch = {
       roster,
       world,
       seed,
-      startTick: firstTick + this.countdownTicks,
-      phase: 'countdown',
+      startTick: director.liveTick,
+      countdownTicks,
+      // `intro`, or `countdown` when the match has no intro.
+      phase: director.phase,
       phaseStartTick: firstTick,
       riders: [],
     };
@@ -1037,10 +1163,12 @@ export class HostSession {
       this.endMatch();
       return;
     }
-    // Controls are live whenever the sim runs; during a countdown the dragons are held.
+    // Controls are live whenever the sim runs; during the intro and a countdown the dragons
+    // are held.
     const playing = director.simRuns;
-    // Host-flown bots fight only while the round is live: they rest through `roundEnd` and
-    // `results` (BotContext.playing), like the net-bots do.
+    // Host-flown bots fight only while the round is live. Through `roundEnd` and `results`
+    // their brains rest (BotContext.playing) and the host flies them on the holding circle, so
+    // they drift gently under the podium camera instead of straight into the storm wall.
     const botsFight = director.phase === 'playing';
 
     // --- Inputs: exactly one per rider per tick ------------------------------------------------
@@ -1051,9 +1179,9 @@ export class HostSession {
       let input: Readonly<InputFrame> | undefined;
       const hostBots = this.hostBots;
       if (id === hostId) {
-        if (hostBots.has(id))
-          input = playing ? hostBots.sample(sim.current, id, tick, botsFight) : undefined;
-        else input = localAway && playing ? this.holdingInput(sim, id, tick) : localInput;
+        if (hostBots.has(id)) {
+          input = playing ? this.botInput(sim, id, tick, botsFight, i) : undefined;
+        } else input = localAway && playing ? this.holdingInput(sim, id, tick, i) : localInput;
       } else {
         const peer = this.peerByPlayer[id];
         if (peer !== undefined) {
@@ -1062,8 +1190,8 @@ export class HostSession {
           input = peer.inputs.take(tick);
         } else if (playing) {
           input = hostBots.has(id)
-            ? hostBots.sample(sim.current, id, tick, botsFight)
-            : this.holdingInput(sim, id, tick);
+            ? this.botInput(sim, id, tick, botsFight, i)
+            : this.holdingInput(sim, id, tick, i);
         }
       }
       this.simInputs[id] = playing ? input : undefined;
@@ -1113,13 +1241,39 @@ export class HostSession {
     }
   }
 
-  /** A held seat's dragon circles the arena instead of flying straight into the storm. */
-  private holdingInput(sim: Sim, id: PlayerId, tick: number): Readonly<InputFrame> | undefined {
+  /**
+   * A host-flown bot's input: its brain's while the round is live; once it is over the brain
+   * still gets its tick (it rests and forgets its target) but the dragon circles.
+   */
+  private botInput(
+    sim: Sim,
+    id: PlayerId,
+    tick: number,
+    fights: boolean,
+    riderIndex: number,
+  ): Readonly<InputFrame> | undefined {
+    const input = this.hostBots.sample(sim.current, id, tick, fights);
+    return fights ? input : this.holdingInput(sim, id, tick, riderIndex);
+  }
+
+  /**
+   * A held seat's dragon circles the arena instead of flying straight into the storm.
+   * `riderIndex` picks the frame to write (one per rider of the match).
+   */
+  private holdingInput(
+    sim: Sim,
+    id: PlayerId,
+    tick: number,
+    riderIndex: number,
+  ): Readonly<InputFrame> | undefined {
     const dragon = sim.getDragon(id);
     if (dragon === undefined || (dragon.flags & DRAGON_FLAG_ALIVE) === 0) return undefined;
-    const frame = this.holdFrame;
+    const frame = this.holdFrames[riderIndex];
+    if (frame === undefined) return undefined;
     frame.tick = tick;
     frame.buttons = 0;
+    frame.aimYaw = 0;
+    frame.aimPitch = 0;
     return steerToCourse(dragon, this.holdCourse, frame);
   }
 
@@ -1157,16 +1311,16 @@ export class HostSession {
     match.phase = phase;
     match.phaseStartTick = tick;
     if (phase === 'countdown') {
-      // A new round: this is where the sim resumes (what MATCH_START tells a client that
-      // reconnects during the countdown).
-      match.startTick = tick + this.countdownTicks;
-    } else if (phase === 'playing') {
+      // The first countdown (after the intro, or a skipped one) or a new round: this is where
+      // the sim resumes (what MATCH_START tells a client that reconnects during the countdown).
+      match.startTick = tick + match.countdownTicks;
+    } else if (phase === 'playing' || match.startTick > tick) {
+      // `playing`, or a match decided while the dragons were still held (a team left during the
+      // intro or a countdown): the sim runs from here on.
       match.startTick = tick;
-      // The lobby goes from `starting` to `inMatch` on the first round; refused afterwards.
-      this.handleResult(enterMatch(this.hostLobby));
     }
     const message = this.matchPhaseOut;
-    message.tick = tick & 0xffff;
+    message.tick = this.phaseHeaderTick(match, tick);
     message.phaseStartTick = tick;
     message.phase = phase;
     message.round = this.director.round;
@@ -1176,6 +1330,17 @@ export class HostSession {
     if (phase === 'roundEnd' || phase === 'results') this.broadcastScores();
     this.emitPhaseEvent(match);
     this.listener.onMatchPhase?.(phase);
+  }
+
+  /**
+   * The 16-bit tick in a MATCH_PHASE header. While the dragons are held (`intro`, `countdown`)
+   * it is the low bits of the tick play begins, so a client knows when its controls go live
+   * whatever the lengths of the intro and the countdown are and whether the intro was skipped.
+   * (The message's layout is unchanged: the header tick had no reader.) Otherwise `tick`.
+   */
+  private phaseHeaderTick(match: HostMatch, tick: number): number {
+    const held = match.phase === 'intro' || match.phase === 'countdown';
+    return (held ? match.startTick : tick) & 0xffff;
   }
 
   private emitPhaseEvent(match: HostMatch): void {
@@ -1196,7 +1361,7 @@ export class HostSession {
     start.seed = match.seed;
     this.sendRaw(peer, 'ctrl', this.ctrlWriter, encodeMatchStart(this.ctrlWriter, start));
     const phase = this.matchPhaseOut;
-    phase.tick = this.tickNow & 0xffff;
+    phase.tick = this.phaseHeaderTick(match, this.tickNow);
     phase.phaseStartTick = match.phaseStartTick;
     phase.phase = match.phase;
     phase.round = this.director.round;
@@ -1345,6 +1510,9 @@ export class HostSession {
           this.onPlayerRemoved(effect.playerId, effect.cause);
           break;
         case 'matchStart':
+          this.beginLaunch(effect.roster);
+          break;
+        case 'matchLaunch':
           this.beginMatch(effect.roster);
           break;
         case 'lobbyClosed':
@@ -1656,6 +1824,11 @@ export class HostSession {
     this.markLobbyDirty();
     this.listener.onPlayerJoined?.(playerId, admit.reconnected);
   }
+}
+
+/** A tick-count option: whole and not negative, or -1 when it was left out. */
+function fixedTicks(value: number | undefined): number {
+  return value === undefined ? -1 : Math.max(0, Math.floor(value));
 }
 
 export function createHostSession(options: HostSessionOptions): HostSession {

@@ -105,6 +105,13 @@ export const CURRENT_TARGET_POSITIONS: TargetPositionSource = {
 export interface SimRules {
   /** The lobby's friendly-fire setting. Off: teammates cannot hurt or debuff each other. */
   friendlyFire: boolean;
+  /**
+   * No round is in play (the mode sets it outside `playing`: intro, countdown, `roundEnd`,
+   * `results`): nothing gets through the damage gate, so no ability, zone or burn hurts or
+   * debuffs anyone while the sim keeps flying the dragons. Terrain and the storm are the
+   * collision world's and are not stopped by it.
+   */
+  ceasefire: boolean;
 }
 
 export interface SpawnPose {
@@ -190,7 +197,7 @@ export class CombatSystem {
   events: GameEventSink | null = null;
   targets: TargetPositionSource = CURRENT_TARGET_POSITIONS;
   collision: SimCollisionWorld;
-  readonly rules: SimRules = { friendlyFire: false };
+  readonly rules: SimRules = { friendlyFire: false, ceasefire: false };
   readonly respawnPolicy: RespawnPolicy = { enabled: true, place: null };
 
   private readonly tables: CombatTables;
@@ -341,13 +348,14 @@ export class CombatSystem {
   // --- The damage pipeline ----------------------------------------------------------------------
 
   /**
-   * Does an effect from `attacker` get through to `target`? False = nothing does (dead, its own
-   * caster, a teammate with friendly fire off, dodging, spawn-protected, phasing, or fully
-   * shielded from `this.origin`). True = `this.through` holds the multiplier (friendly-fire
-   * scale, a partial shield). Damage and hostile statuses share it.
+   * Does an effect from `attacker` get through to `target`? False = nothing does (a ceasefire,
+   * dead, its own caster, a teammate with friendly fire off, dodging, spawn-protected, phasing,
+   * or fully shielded from `this.origin`). True = `this.through` holds the multiplier
+   * (friendly-fire scale, a partial shield). Damage and hostile statuses share it.
    */
   private gate(target: DragonState, attacker: DragonState | null, flags: number): boolean {
     this.through = 0;
+    if (this.rules.ceasefire) return false;
     if ((target.flags & DRAGON_FLAG_ALIVE) === 0) return false;
     let scale = 1;
     if (attacker !== null) {

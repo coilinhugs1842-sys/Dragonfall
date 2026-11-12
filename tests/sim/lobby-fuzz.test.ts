@@ -23,6 +23,7 @@ import {
   createLobby,
   disconnectPlayer,
   enterMatch,
+  launchMatch,
   expireReconnects,
   handleHello,
   joinLobby,
@@ -200,9 +201,25 @@ function runFuzz(seed: number, steps: number): { joins: number; starts: number; 
       const result = expireReconnects(lobby, tick);
       if (result.ok) note(result.effects);
       lobby = result.lobby;
-    } else if (roll < 0.46) {
+    } else if (roll < 0.44) {
       label = 'enterMatch';
       lobby = enterMatch(lobby).lobby;
+    } else if (roll < 0.46) {
+      // The end of the lobby launch: a match with whoever is still there, or back to the lobby.
+      label = 'launchMatch';
+      const wasStarting = lobby.state.phase === 'starting';
+      const result = launchMatch(lobby, random() < 0.3);
+      expect(result.ok).toBe(wasStarting);
+      if (result.ok) {
+        const launched = result.effects.find((effect) => effect.type === 'matchLaunch');
+        expect(result.lobby.state.phase).toBe(launched !== undefined ? 'inMatch' : 'lobby');
+        if (launched !== undefined && launched.type === 'matchLaunch') {
+          const riders = launched.roster.riders;
+          expect(riders.length).toBeGreaterThan(0);
+          expect(new Set(riders.map((r) => r.playerId)).size).toBe(riders.length);
+        }
+      }
+      lobby = result.lobby;
     } else if (roll < 0.52) {
       label = 'returnToLobby';
       lobby = returnToLobby(lobby).lobby;

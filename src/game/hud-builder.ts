@@ -88,6 +88,11 @@ export interface HudFrameInput {
   pointerLocked: boolean;
   /** Whose dragon the camera is on (`Stage.watchedId`). */
   watchedId: PlayerId;
+  /**
+   * This player may skip the intro that is playing: the host's `HostHandle.canSkipIntro`,
+   * always false on a client (only the host can skip). Shown as the "skip" hint.
+   */
+  canSkipIntro: boolean;
 }
 
 export function createHudFrameInput(): HudFrameInput {
@@ -106,6 +111,7 @@ export function createHudFrameInput(): HudFrameInput {
     reticleY: 0,
     pointerLocked: false,
     watchedId: NO_PLAYER,
+    canSkipIntro: false,
   };
 }
 
@@ -302,6 +308,7 @@ export function createHudBuilder(view: WorldView): HudBuilder {
       hud.scores[0] = input.scoreEmber;
       hud.scores[1] = input.scoreFrost;
       hud.winner = input.winner;
+      hud.canSkipIntro = input.canSkipIntro && view.clock.phase === 'intro';
 
       const localId = view.localDragonId;
       const local = input.isRider ? findDragonView(view, localId) : undefined;

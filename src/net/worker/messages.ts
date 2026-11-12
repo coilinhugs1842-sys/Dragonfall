@@ -45,9 +45,13 @@ export interface HostWorkerConfig {
   readonly wantEvents: boolean;
   /** Host settings applied when the room opens (`?mode=`, `?score=`, ...). */
   readonly autoSettings: HostAutoSettings | null;
-  /** Tests: a fixed room code and countdown. */
+  /** False: no lobby launch delay and no `intro` phase (`HostSessionOptions.cinematics`). */
+  readonly cinematics: boolean;
+  /** Tests: a fixed room code and fixed lengths for the timeline. */
   readonly roomCode?: string;
   readonly countdownTicks?: number;
+  readonly introTicks?: number;
+  readonly launchTicks?: number;
 }
 
 /** The slow-changing state of the room, sent whenever any of it changed. */
@@ -61,6 +65,8 @@ export interface HostMeta {
   readonly inMatch: boolean;
   readonly matchPhase: MatchPhase;
   readonly startBlocker: StartBlocker | null;
+  /** `HostSession.canSkipIntro`: the host may skip the running intro. */
+  readonly canSkipIntro: boolean;
 }
 
 export type ToWorkerMessage =
@@ -68,6 +74,8 @@ export type ToWorkerMessage =
   | { readonly t: 'open' }
   | { readonly t: 'intent'; readonly intent: UiIntent }
   | { readonly t: 'endMatch' }
+  /** The host asks to skip the intro (`HostSession.requestSkipIntro`). */
+  | { readonly t: 'skipIntro'; readonly force: boolean }
   /** The real transport registered the room. */
   | { readonly t: 'transportOpen'; readonly roomCode: string }
   | { readonly t: 'transportError'; readonly error: TransportError }

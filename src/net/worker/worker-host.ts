@@ -172,6 +172,7 @@ export class WorkerHost implements HostHandle {
   private matchRunning = false;
   private phase: MatchPhase = 'lobby';
   private blocker: StartBlocker | null = null;
+  private skippable = false;
   private readonly info: HostTickInfo = createHostTickInfo();
   private readonly prevState: HostViewState = createHostViewState();
   private readonly currentState: HostViewState = createHostViewState();
@@ -335,6 +336,10 @@ export class WorkerHost implements HostHandle {
     return this.blocker;
   }
 
+  get canSkipIntro(): boolean {
+    return this.matchRunning && this.skippable && this.phase === 'intro';
+  }
+
   get clientCount(): number {
     return this.stats.clientCount;
   }
@@ -390,6 +395,14 @@ export class WorkerHost implements HostHandle {
   endMatch(): void {
     if (this.ended) return;
     this.postObject({ t: 'endMatch' });
+  }
+
+  requestSkipIntro(force = false): boolean {
+    // The mirror decides whether it is worth asking; the worker's session has the last word.
+    if (this.ended || !this.matchRunning || this.phase !== 'intro') return false;
+    if (!force && !this.skippable) return false;
+    this.postObject({ t: 'skipIntro', force });
+    return true;
   }
 
   update(nowMs: number): void {
@@ -510,6 +523,7 @@ export class WorkerHost implements HostHandle {
     this.localId = meta.localPlayerId;
     this.phase = meta.matchPhase;
     this.blocker = meta.startBlocker;
+    this.skippable = meta.canSkipIntro;
     if (!meta.inMatch) {
       // The next match must not start from the last picture of this one.
       this.hasState = false;
