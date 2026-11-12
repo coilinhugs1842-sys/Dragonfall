@@ -6,10 +6,112 @@
  * The GPU flags matter: without them headless falls back to SwiftShader and the game either
  * refuses to start or renders at a frame rate that says nothing.
  */
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+const PROFILE_PREFIX = 'dragonfall-cdp-';
+/** Written into each profile: the node process that owns it. */
+const OWNER_FILE = 'dragonfall-owner.pid';
+/** A profile with no readable owner is only swept once it is this old. */
+const ORPHAN_AGE_MS = 60 * 60 * 1000;
+
+function isRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM = it exists but is not ours to signal.
+    return error.code === 'EPERM';
+  }
+}
+
+/** Kills the browser and everything it started. `child.kill()` alone leaves Edge's GPU and
+ * renderer processes alive on Windows, and they keep the profile's files locked. */
+function killTree(child) {
+  if (child.pid === undefined) return;
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
+    child.kill('SIGKILL');
+  }
+}
+
+/** Deletes a profile folder, waiting out files the dying browser still holds. True when gone. */
+function removeProfile(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 150 });
+  } catch {
+    // Reported by the caller through the return value.
+  }
+  return !existsSync(dir);
+}
+
+/**
+ * Removes profiles left behind by captures that were killed before they could clean up. A
+ * profile is about 50 MB, and a leak of these once filled the system drive, so every launch
+ * sweeps. Only profiles whose owning node process is gone are touched: another capture running
+ * right now keeps its own.
+ */
+export function sweepStaleProfiles() {
+  let removed = 0;
+  let entries = [];
+  try {
+    entries = readdirSync(tmpdir());
+  } catch {
+    return removed;
+  }
+  for (const name of entries) {
+    if (!name.startsWith(PROFILE_PREFIX)) continue;
+    const dir = join(tmpdir(), name);
+    let stale = false;
+    try {
+      const owner = Number(readFileSync(join(dir, OWNER_FILE), 'utf8'));
+      stale = !(owner > 0) || !isRunning(owner);
+    } catch {
+      // No owner file: written by an older version of this tool, or still being created.
+      try {
+        stale = Date.now() - statSync(dir).mtimeMs > ORPHAN_AGE_MS;
+      } catch {
+        stale = false;
+      }
+    }
+    if (stale && removeProfile(dir)) removed++;
+  }
+  return removed;
+}
+
+/** Sessions still open in this process, so an exit or Ctrl+C cleans them up too. */
+const live = new Set();
+let exitHooked = false;
+
+function hookExit() {
+  if (exitHooked) return;
+  exitHooked = true;
+  const cleanup = () => {
+    for (const entry of live) {
+      killTree(entry.child);
+      removeProfile(entry.profile);
+    }
+    live.clear();
+  };
+  process.on('exit', cleanup);
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK', 'SIGHUP']) {
+    process.on(signal, () => {
+      cleanup();
+      process.exit(130);
+    });
+  }
+}
 
 const BROWSER_CANDIDATES = [
   process.env.DRAGONFALL_BROWSER,
@@ -32,16 +134,28 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Starts a headless browser with one blank page and returns a CDP session on that page.
- * `close()` kills the browser and deletes its throwaway profile.
+ * `close()` kills the browser and deletes its throwaway profile; so does this process exiting
+ * or being interrupted, and the next launch sweeps what a hard kill left behind.
  */
 export async function launch({ width = 1280, height = 720, extraArgs = [] } = {}) {
-  const profile = mkdtempSync(join(tmpdir(), 'dragonfall-cdp-'));
+  hookExit();
+  sweepStaleProfiles();
+  const profile = mkdtempSync(join(tmpdir(), PROFILE_PREFIX));
+  writeFileSync(join(profile, OWNER_FILE), String(process.pid));
   const child = spawn(
     findBrowser(),
     [
       '--headless=new',
       '--remote-debugging-port=0',
       `--user-data-dir=${profile}`,
+      // A throwaway profile needs no caches: these keep it to a few MB instead of about 50.
+      '--disk-cache-size=1',
+      '--media-cache-size=1',
+      '--disable-gpu-shader-disk-cache',
+      '--disable-component-update',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-extensions',
       `--window-size=${width},${height}`,
       '--use-angle=d3d11',
       '--ignore-gpu-blocklist',
@@ -59,6 +173,19 @@ export async function launch({ width = 1280, height = 720, extraArgs = [] } = {}
     ],
     { stdio: 'ignore' },
   );
+  const entry = { child, profile };
+  live.add(entry);
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  /** Kills the browser tree, waits for it to go, deletes the profile. Safe to call twice. */
+  async function destroy() {
+    if (!live.has(entry)) return;
+    killTree(child);
+    await Promise.race([exited, sleep(3000)]);
+    live.delete(entry);
+    if (!removeProfile(profile)) {
+      console.error(`capture: could not delete the browser profile ${profile}; delete it by hand.`);
+    }
+  }
 
   const portFile = join(profile, 'DevToolsActivePort');
   let port = 0;
@@ -74,7 +201,7 @@ export async function launch({ width = 1280, height = 720, extraArgs = [] } = {}
     }
   }
   if (port === 0) {
-    child.kill();
+    await destroy();
     throw new Error('The browser did not open a DevTools port within 15 s.');
   }
 
@@ -85,17 +212,22 @@ export async function launch({ width = 1280, height = 720, extraArgs = [] } = {}
     if (target === undefined) await sleep(100);
   }
   if (target === undefined) {
-    child.kill();
+    await destroy();
     throw new Error('The browser has no page target.');
   }
 
   const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', () => reject(new Error('CDP socket failed to open')), {
-      once: true,
+  try {
+    await new Promise((resolve, reject) => {
+      socket.addEventListener('open', resolve, { once: true });
+      socket.addEventListener('error', () => reject(new Error('CDP socket failed to open')), {
+        once: true,
+      });
     });
-  });
+  } catch (error) {
+    await destroy();
+    throw error;
+  }
 
   let nextId = 1;
   const pending = new Map();
@@ -156,13 +288,7 @@ export async function launch({ width = 1280, height = 720, extraArgs = [] } = {}
     } catch {
       // Already closed.
     }
-    child.kill();
-    await sleep(300);
-    try {
-      rmSync(profile, { recursive: true, force: true });
-    } catch {
-      // The profile is in the temp folder; a leftover is harmless.
-    }
+    await destroy();
   }
 
   await send('Page.enable');
