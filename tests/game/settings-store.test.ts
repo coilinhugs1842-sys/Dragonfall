@@ -21,6 +21,7 @@ import {
 import type { DebounceTimers, SettingsTargets } from '../../src/game/settings';
 import { SETTINGS_STORAGE_KEY, readStoredQuality } from '../../src/game/stored-quality';
 import { DEFAULT_BINDINGS, findBindingConflicts } from '../../src/input/bindings';
+import { DEFAULT_GAMEPAD_BINDINGS } from '../../src/input/gamepad-bindings';
 import { DEFAULT_GAME_SETTINGS, DEFAULT_SETTINGS, MAX_PLAYER_NAME_LENGTH } from '../../src/shared';
 import type { GameSettings } from '../../src/shared';
 
@@ -440,7 +441,11 @@ describe('applySettings', () => {
     };
     return { calls, targets };
   }
-  const base = { settings: DEFAULT_GAME_SETTINGS, bindings: DEFAULT_BINDINGS };
+  const base = {
+    settings: DEFAULT_GAME_SETTINGS,
+    bindings: DEFAULT_BINDINGS,
+    gamepadBindings: DEFAULT_GAMEPAD_BINDINGS,
+  };
 
   it('applies everything on the first call, quality before resolution', () => {
     const { calls, targets } = recorder();
@@ -463,11 +468,7 @@ describe('applySettings', () => {
     const { calls, targets } = recorder();
     const change = (patch: Partial<GameSettings>): string[] => {
       calls.length = 0;
-      applySettings(
-        targets,
-        { settings: { ...DEFAULT_GAME_SETTINGS, ...patch }, bindings: DEFAULT_BINDINGS },
-        base,
-      );
+      applySettings(targets, { ...base, settings: { ...DEFAULT_GAME_SETTINGS, ...patch } }, base);
       return [...calls];
     };
     expect(change({})).toEqual([]);

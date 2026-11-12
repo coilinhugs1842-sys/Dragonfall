@@ -46,3 +46,22 @@ export function createHazeUniforms(setup: SkySetup, cloudSeaY = -1e6): Record<st
     uWlFogParams: { value: fogParamsOf(setup, cloudSeaY, new Vector4()) },
   };
 }
+
+/**
+ * Rewrites the values of uniforms made by `createHazeUniforms` for another setup (a match on
+ * another map). `cloudSeaY` left out keeps the sea level they have. Load-time, no allocation.
+ */
+export function writeHazeUniforms(
+  uniforms: Record<string, IUniform>,
+  setup: SkySetup,
+  cloudSeaY?: number,
+): void {
+  const sunDir = uniforms['uWlSunDir']?.value as Vector3 | undefined;
+  const fogColor = uniforms['uWlFogColor']?.value as Color | undefined;
+  const glowColor = uniforms['uWlGlowColor']?.value as Color | undefined;
+  const params = uniforms['uWlFogParams']?.value as Vector4 | undefined;
+  if (sunDir !== undefined) sunDirectionOf(setup, sunDir);
+  if (fogColor !== undefined) fogSceneColor(setup, fogColor);
+  if (glowColor !== undefined) glowSceneColor(setup, glowColor);
+  if (params !== undefined) fogParamsOf(setup, cloudSeaY ?? params.y, params);
+}

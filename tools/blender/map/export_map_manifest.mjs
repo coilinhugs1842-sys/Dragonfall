@@ -42,7 +42,10 @@ try {
 
   const texturesPath = join(ASSETS, 'textures', 'textures.json');
   const textures = existsSync(texturesPath)
-    ? JSON.parse(readFileSync(texturesPath, 'utf8')).textures.map((t) => ({
+    ? JSON.parse(readFileSync(texturesPath, 'utf8'))
+        .textures // the shared list also holds other maps' tiles (`map`): not this map's
+        .filter((t) => t.map === undefined || t.map === 'shattered-spires')
+        .map((t) => ({
         id: t.id,
         url: t.url,
         tileMetres: t.tileMetres,

@@ -36,7 +36,26 @@ import {
   DRAGON_FLAG_SPAWN_PROTECTED,
   DRAGON_FLAG_VEILED,
 } from '../../shared/world-view';
-import { ABILITY_GLYPHS, STATUS_GLYPHS, takedownGlyph } from './glyphs';
+import {
+  DataAttr,
+  Glyph,
+  NumberCell,
+  Pulse,
+  SVG_NS,
+  StepStyle,
+  TextCell,
+  Visibility,
+  div,
+  span,
+} from './cells';
+import {
+  ABILITY_GLYPHS,
+  BRAZIER_SHAPE,
+  OBJECTIVE_GLYPHS,
+  SHARD_SHAPES,
+  STATUS_GLYPHS,
+  takedownGlyph,
+} from './glyphs';
 import type { StatusKey } from './glyphs';
 import {
   BANNER_COUNTDOWN,
@@ -85,7 +104,9 @@ import {
   quantize,
   quantizeVisible,
   roundPipCount,
+  scoreNoun,
   scoreProgressStep,
+  shardLine,
   shownCooldown,
   slotState,
   sortTeamRows,
@@ -94,6 +115,7 @@ import {
 } from './hud-model';
 import type { BannerId } from './hud-model';
 import { createIntroCard } from './intro-card';
+import { createRelayHud } from './relay-hud';
 
 export interface HudOptions {
   /**
@@ -117,7 +139,6 @@ export interface Hud {
 
 // --- Construction helpers and write-if-changed cells ---------------------------------------------
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
 const TEAM_SHAPES: Readonly<Record<'ember' | 'frost' | 'none', string>> = {
   ember: 'M8 1.8 14.6 13.6H1.4Z',
   frost: 'M8 1 14.4 8 8 15 1.6 8Z',
@@ -131,135 +152,6 @@ const MAX_RETICLE_RADIUS_PX = 400;
 const MAX_CHARGE_PIPS = 3;
 const TEAM_ROWS = 5;
 const MAX_SPECTATORS_LISTED = 12;
-
-function div(className: string, text?: string): HTMLDivElement {
-  const node = document.createElement('div');
-  node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function span(className: string, text?: string): HTMLSpanElement {
-  const node = document.createElement('span');
-  node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-/** Text node content, written only when the string differs. */
-class TextCell {
-  private last: string;
-  constructor(
-    readonly node: HTMLElement,
-    initial = '',
-  ) {
-    this.last = initial;
-    if (initial !== '') node.textContent = initial;
-  }
-  set(value: string): void {
-    if (value === this.last) return;
-    this.last = value;
-    this.node.textContent = value;
-  }
-}
-
-/** A whole number shown through the string table, written only when the number differs. */
-class NumberCell {
-  private last = Number.NaN;
-  constructor(readonly node: HTMLElement) {}
-  set(value: number): void {
-    if (value === this.last) return;
-    this.last = value;
-    this.node.textContent = intString(value);
-  }
-  /** Shows fixed text (a dash) instead of a number. */
-  setText(text: string, key: number): void {
-    if (key === this.last) return;
-    this.last = key;
-    this.node.textContent = text;
-  }
-}
-
-/** A CSS custom property (or plain property) fed from a string table by integer step. */
-class StepStyle {
-  private last = -1;
-  constructor(
-    private readonly node: HTMLElement | SVGElement,
-    private readonly property: string,
-    private readonly table: readonly string[],
-  ) {}
-  set(step: number): void {
-    if (step === this.last) return;
-    this.last = step;
-    this.node.style.setProperty(this.property, this.table[step] ?? this.table[0] ?? '0');
-  }
-}
-
-/** `hidden`, written only on a change. Starts hidden. */
-class Visibility {
-  private shown = false;
-  constructor(private readonly node: HTMLElement | SVGElement) {
-    node.setAttribute('hidden', '');
-  }
-  set(visible: boolean): void {
-    if (visible === this.shown) return;
-    this.shown = visible;
-    if (visible) this.node.removeAttribute('hidden');
-    else this.node.setAttribute('hidden', '');
-  }
-  get visible(): boolean {
-    return this.shown;
-  }
-}
-
-/** A `data-*` attribute, written only on a change. */
-class DataAttr {
-  private last = '';
-  constructor(
-    private readonly node: HTMLElement,
-    private readonly name: string,
-  ) {}
-  set(value: string): void {
-    if (value === this.last) return;
-    this.last = value;
-    this.node.dataset[this.name] = value;
-  }
-}
-
-/** A small stroked (or filled) icon whose path can be swapped. */
-class Glyph {
-  readonly svg: SVGSVGElement;
-  private readonly path: SVGPathElement;
-  private last = '';
-  constructor(className: string, d: string, filled = false) {
-    this.svg = document.createElementNS(SVG_NS, 'svg');
-    this.svg.setAttribute('viewBox', '0 0 16 16');
-    this.svg.setAttribute('aria-hidden', 'true');
-    this.svg.setAttribute('focusable', 'false');
-    this.svg.setAttribute('class', filled ? `${className} dfh-fill` : className);
-    this.path = document.createElementNS(SVG_NS, 'path');
-    this.svg.appendChild(this.path);
-    this.set(d);
-  }
-  set(d: string): void {
-    if (d === this.last) return;
-    this.last = d;
-    this.path.setAttribute('d', d);
-  }
-}
-
-/** Restarts a CSS animation without a layout read: alternates between two twin keyframe names. */
-class Pulse {
-  private flip = false;
-  constructor(
-    private readonly node: HTMLElement,
-    private readonly name: string,
-  ) {}
-  fire(kind: string): void {
-    this.flip = !this.flip;
-    this.node.dataset[this.name] = this.flip ? `${kind}-a` : `${kind}-b`;
-  }
-}
 
 const STATUS_BITS: Readonly<Record<StatusKey, number>> = {
   protected: DRAGON_FLAG_SPAWN_PROTECTED,
@@ -314,6 +206,7 @@ interface CompassPart {
   readonly shown: Visibility;
   readonly position: StepStyle;
   readonly team: DataAttr;
+  readonly kind: DataAttr;
   readonly icon: Glyph;
   readonly pinned: DataAttr;
   readonly down: DataAttr;
@@ -326,6 +219,7 @@ interface BoardRow {
   readonly down: DataAttr;
   readonly name: TextCell;
   readonly classLabel: TextCell;
+  readonly captures: NumberCell;
   readonly takedowns: NumberCell;
   readonly deaths: NumberCell;
   readonly assists: NumberCell;
@@ -485,13 +379,16 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       shown: new Visibility(marker),
       position: new StepStyle(marker, '--dfh-p', UNIT_STRINGS),
       team: new DataAttr(marker, 'team'),
+      kind: new DataAttr(marker, 'kind'),
       icon,
       pinned: new DataAttr(marker, 'pinned'),
       down: new DataAttr(marker, 'down'),
       distance: new NumberCell(distance),
     });
   }
-  top.append(header, compass);
+  // Ember Relay: the shard strip under the score, its call-outs under the compass.
+  const relay = createRelayHud();
+  top.append(header, relay.strip, compass, relay.callouts);
   el.appendChild(top);
 
   // --- Killfeed ---------------------------------------------------------------------------------------
@@ -659,6 +556,7 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
   // --- Scoreboard --------------------------------------------------------------------------------------
   const board = div('dfh-board');
   const boardShown = new Visibility(board);
+  const boardMode = new DataAttr(board, 'mode');
   const boardHead = div('dfh-board-head');
   const boardTitleNode = div('dfh-board-title');
   const boardTitle = new TextCell(boardTitleNode);
@@ -682,6 +580,7 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
     columns.append(
       span('dfh-cell-name', 'Rider'),
       span('dfh-cell-class', 'Dragon'),
+      span('dfh-cell-n dfh-cell-cap', 'Cap'),
       span('dfh-cell-n', 'Tkd'),
       span('dfh-cell-n', 'Dth'),
       span('dfh-cell-n', 'Ast'),
@@ -695,12 +594,14 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       const row = div('dfh-row');
       const name = span('dfh-cell-name');
       const classCell = span('dfh-cell-class');
+      // Shown in Ember Relay only (CSS, by the board's `data-mode`).
+      const captures = span('dfh-num dfh-cell-n dfh-cell-cap dfh-cell-key');
       const takedowns = span('dfh-num dfh-cell-n dfh-cell-key');
       const deaths = span('dfh-num dfh-cell-n');
       const assists = span('dfh-num dfh-cell-n');
       const damage = span('dfh-num dfh-cell-n dfh-cell-wide');
       const ping = span('dfh-num dfh-cell-n dfh-cell-ping');
-      row.append(name, classCell, takedowns, deaths, assists, damage, ping);
+      row.append(name, classCell, captures, takedowns, deaths, assists, damage, ping);
       block.appendChild(row);
       rows.push({
         shown: new Visibility(row),
@@ -708,6 +609,7 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
         down: new DataAttr(row, 'down'),
         name: new TextCell(name),
         classLabel: new TextCell(classCell),
+        captures: new NumberCell(captures),
         takedowns: new NumberCell(takedowns),
         deaths: new NumberCell(deaths),
         assists: new NumberCell(assists),
@@ -885,7 +787,15 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       part.down.set(marker.alive ? '0' : '1');
       const key = marker.kind === 'objective' ? 'none' : teamKey(marker.team);
       part.team.set(marker.kind === 'objective' ? 'objective' : key);
-      part.icon.set(TEAM_SHAPES[key]);
+      part.kind.set(marker.kind);
+      // A shard carries its owner's shape inside the crystal; the brazier is the local team's.
+      part.icon.set(
+        marker.kind === 'shard'
+          ? SHARD_SHAPES[key]
+          : marker.kind === 'brazier'
+            ? BRAZIER_SHAPE
+            : TEAM_SHAPES[key],
+      );
       if (text) part.distance.set(distanceShown(marker.distanceM));
     }
   }
@@ -909,10 +819,18 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
         row.killerIcon.set(teamIconPath(entry.killerTeam));
         row.killerName.set(entry.killerName);
       }
-      row.glyph.set(takedownGlyph(entry.source, hasKiller ? entry.killerClassId : null));
       row.victimTeam.set(teamKey(entry.victimTeam));
-      row.victimIcon.set(teamIconPath(entry.victimTeam));
-      row.victimName.set(entry.victimName);
+      const objective = entry.objective;
+      if (objective !== null && objective !== undefined) {
+        // An Ember Relay line: who did it, what happened, whose shard ("Frost shard taken").
+        row.glyph.set(OBJECTIVE_GLYPHS[objective]);
+        row.victimIcon.set(SHARD_SHAPES[teamKey(entry.victimTeam)]);
+        row.victimName.set(shardLine(objective, entry.victimTeam));
+      } else {
+        row.glyph.set(takedownGlyph(entry.source, hasKiller ? entry.killerClassId : null));
+        row.victimIcon.set(teamIconPath(entry.victimTeam));
+        row.victimName.set(entry.victimName);
+      }
       row.own.set(me !== NO_PLAYER && (entry.killerId === me || entry.victimId === me) ? '1' : '0');
     }
   }
@@ -1106,12 +1024,11 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       shownBoardMode = hud.mode;
       shownBoardLimit = hud.scoreLimit;
       boardTitle.set(MODES[hud.mode].name);
+      boardMode.set(hud.mode === 'emberRelay' ? 'relay' : 'plain');
       boardNote.set(
-        hud.mode === 'duel'
-          ? `First to ${hud.scoreLimit} rounds`
-          : hud.scoreLimit > 0
-            ? `First to ${hud.scoreLimit} takedowns`
-            : '',
+        hud.mode === 'duel' || hud.scoreLimit > 0
+          ? `First to ${hud.scoreLimit} ${scoreNoun(hud.mode)}`
+          : '',
       );
     }
     const rows = hud.scoreboard;
@@ -1132,6 +1049,7 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
         part.down.set(row.alive ? '0' : '1');
         part.name.set(row.name);
         part.classLabel.set(DRAGON_CLASSES[row.classId].name);
+        part.captures.set(row.captures ?? 0);
         part.takedowns.set(row.takedowns);
         part.deaths.set(row.deaths);
         part.assists.set(row.assists ?? 0);
@@ -1203,6 +1121,7 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       updateCentre(hud, local);
       updateHeader(hud, text);
       updateCompass(hud, text);
+      relay.update(hud, localTeam, text);
       updateFeed(hud);
       vitalsShown.set(local !== null);
       abilitiesShown.set(local !== null);

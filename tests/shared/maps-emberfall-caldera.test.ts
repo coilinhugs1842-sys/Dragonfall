@@ -1,6 +1,6 @@
 /**
  * Emberfall Caldera, the second map (T-6.4): the layout data, its half-turn balance, the heat
- * vents (data only), the cover rule, the collision mesh built from hulls x placements, the
+ * vents (where they are; what they do to a dragon is tests/sim/heat-vents.test.ts), the cover rule, the collision mesh built from hulls x placements, the
  * budgets, the baked manifest, and the same play guarantees as Shattered Spires (every spawn slot
  * launches clear, nobody ends a tick inside rock).
  *
@@ -47,7 +47,7 @@ import {
   rotatePlacementHalfTurn,
   spawnGatesForMode,
 } from '../../src/shared';
-import type { DragonClassId, InputFrame, SpawnGate, Vec3 } from '../../src/shared';
+import type { DragonClassId, InputFrame, MapSky, MapVent, SpawnGate, Vec3 } from '../../src/shared';
 import {
   CALDERA_ASH_SEA_Y,
   CALDERA_CEILING_Y,
@@ -72,9 +72,7 @@ import {
   EMBERFALL_CALDERA_DEFAULT_SEED,
   EMBERFALL_VENTS,
   createEmberfallCaldera,
-  registerEmberfallAssetTypes,
 } from '../../src/shared/maps/emberfall-caldera';
-import type { MapVent } from '../../src/shared/maps/emberfall-caldera';
 import { CALDERA_ASSET_TYPES, CALDERA_HULL_QUANTUM } from '../../src/shared/maps/generated/emberfall-caldera-hulls';
 import { SPIRES_ASSET_TYPES, SPIRES_HULL_QUANTUM } from '../../src/shared/maps/generated/shattered-spires-hulls';
 import { createSim } from '../../src/sim';
@@ -116,11 +114,12 @@ function count(type: string): number {
 }
 
 describe('emberfall caldera asset types', () => {
-  it('registers its types next to those of the first map, idempotently, without touching them', () => {
-    const before = [...mapAssetTypes().keys()];
-    registerEmberfallAssetTypes();
-    registerEmberfallAssetTypes();
-    expect([...mapAssetTypes().keys()]).toEqual(before);
+  it('has its types in the one registry, after those of the first map, without touching them', () => {
+    // src/shared/maps/placements.ts decodes both lists: first map first, then the caldera.
+    expect([...mapAssetTypes().keys()]).toEqual([
+      ...SPIRES_ASSET_TYPES.map((type) => type.id),
+      ...CALDERA_ASSET_TYPES.map((type) => type.id),
+    ]);
     expect(CALDERA_ASSET_TYPES).toHaveLength(19);
     expect(CALDERA_HULL_QUANTUM).toBe(SPIRES_HULL_QUANTUM);
     for (const source of CALDERA_ASSET_TYPES) {
@@ -297,11 +296,18 @@ describe('createEmberfallCaldera', () => {
     expect(sky.fogColor).toBe(0x7a4e5a);
     expect(sky.hemisphereSkyColor).toBe(0x6b5a8c);
     expect(sky.hemisphereGroundColor).toBe(0x4a2a20);
-    expect(sky.panorama).toBeUndefined();
+    expect((sky as MapSky).panorama).toBeUndefined();
     for (const [key, value] of Object.entries(sky)) {
-      if (key === 'sunDirection' || key === 'fogDensity') continue;
+      // every other field is a colour
+      if (!key.endsWith('Color')) continue;
       expect(Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 0xffffff, key).toBe(true);
     }
+    // the look that is not a colour: ash in the air, no sun shafts, lava that stays crimson
+    expect(sky.ashFall).toBe(true);
+    expect(sky.lightShafts).toBe(false);
+    expect(sky.stoneSaturation).toBe(1);
+    expect(sky.glowGain).toBeGreaterThanOrEqual(1);
+    expect(sky.glowGain).toBeLessThan(1.9);
     // Lava must not read as team Ember (#FF7A1A): much less green than red, some blue, and dim.
     for (const lava of [sky.seaGlowColor, sky.bounceColor]) {
       const r = (lava >> 16) & 255;
@@ -576,7 +582,7 @@ describe('createEmberfallCaldera', () => {
   });
 });
 
-describe('heat vents (data only)', () => {
+describe('heat vents (the map data)', () => {
   const half = (EMBERFALL_VENTS.length - 1) / 2;
 
   it('exports one main vent and four per team, twinned by the half turn', () => {

@@ -18,14 +18,20 @@ import { ABILITY_SLOTS, DEFAULT_DRAGON_CLASS } from '../../shared/classes';
 import type { AbilitySlot, DragonClassId } from '../../shared/classes';
 import type { PlayerId, TeamId } from '../../shared/constants';
 import { NO_PLAYER, TEAM_EMBER } from '../../shared/constants';
-import type { DamageSource } from '../../shared/events';
+import type { DamageSource, ObjectiveKind } from '../../shared/events';
 import type { MatchPhase, MatchWinner, ModeId } from '../../shared/match';
 import { CLASS_TUNING } from '../../shared/tuning';
 import { HUD_COMPASS_MARKERS, HUD_DAMAGE_ARCS, HUD_KILLFEED_ROWS } from '../../shared/ui';
 import type { HudCompassKind } from '../../shared/ui';
-import { DRAGON_FLAG_ALIVE } from '../../shared/world-view';
+import { DRAGON_FLAG_ALIVE, SHARD_HOME } from '../../shared/world-view';
 import type { DragonView, LocalCombatView, MatchClockView } from '../../shared/world-view';
-import { DAMAGE_ARC_LIFE_S, KILLFEED_LIFE_S, damageArcSlot } from './hud-model';
+import {
+  DAMAGE_ARC_LIFE_S,
+  KILLFEED_LIFE_S,
+  RELAY_NOTICE_LIFE_S,
+  damageArcSlot,
+  shardLine,
+} from './hud-model';
 
 export interface MutableKillfeedEntry {
   killerId: PlayerId;
@@ -37,6 +43,24 @@ export interface MutableKillfeedEntry {
   ageS: number;
   source: DamageSource;
   killerClassId: DragonClassId | null;
+  /** Not null: an Ember Relay line (see `KillfeedEntry.objective`). */
+  objective: ObjectiveKind | null;
+}
+
+export interface MutableHudShardState {
+  status: number;
+  carrierName: string;
+  returnInS: number;
+}
+
+/** Structurally assignable to HudRelayState. */
+export interface MutableHudRelayState {
+  shards: [ember: MutableHudShardState, frost: MutableHudShardState];
+  carrying: boolean;
+  brazierDistanceM: number;
+  noticeKind: ObjectiveKind | null;
+  noticeTeam: TeamId;
+  noticeAgeS: number;
 }
 
 export interface MutableScoreboardRow {
@@ -50,6 +74,7 @@ export interface MutableScoreboardRow {
   pingMs: number;
   alive: boolean;
   assists: number;
+  captures: number;
 }
 
 export interface MutableHudLocalState {
@@ -138,6 +163,10 @@ export interface MutableHudState {
   introCard: MutableIntroCardState | null;
   /** The one title-card object to reuse. */
   readonly introCardPool: MutableIntroCardState;
+  /** Point this at `relayPool` in an Ember Relay match, null otherwise. */
+  relay: MutableHudRelayState | null;
+  /** The one relay object to reuse. */
+  readonly relayPool: MutableHudRelayState;
 }
 
 function createKillfeedEntry(): MutableKillfeedEntry {
@@ -151,7 +180,35 @@ function createKillfeedEntry(): MutableKillfeedEntry {
     ageS: Infinity,
     source: 'primary',
     killerClassId: null,
+    objective: null,
   };
+}
+
+function createHudRelayState(): MutableHudRelayState {
+  return {
+    shards: [
+      { status: SHARD_HOME, carrierName: '', returnInS: 0 },
+      { status: SHARD_HOME, carrierName: '', returnInS: 0 },
+    ],
+    carrying: false,
+    brazierDistanceM: 0,
+    noticeKind: null,
+    noticeTeam: TEAM_EMBER,
+    noticeAgeS: Infinity,
+  };
+}
+
+function resetHudRelayState(relay: MutableHudRelayState): void {
+  for (const shard of relay.shards) {
+    shard.status = SHARD_HOME;
+    shard.carrierName = '';
+    shard.returnInS = 0;
+  }
+  relay.carrying = false;
+  relay.brazierDistanceM = 0;
+  relay.noticeKind = null;
+  relay.noticeTeam = TEAM_EMBER;
+  relay.noticeAgeS = Infinity;
 }
 
 function createScoreboardRow(): MutableScoreboardRow {
@@ -166,6 +223,7 @@ function createScoreboardRow(): MutableScoreboardRow {
     pingMs: -1,
     alive: true,
     assists: 0,
+    captures: 0,
   };
 }
 
@@ -238,6 +296,8 @@ export function createHudState(scoreboardRows = 10): MutableHudState {
     scoreboardOpen: false,
     introCard: null,
     introCardPool: { mapName: '', modeName: '', opacity: 0 },
+    relay: null,
+    relayPool: createHudRelayState(),
   };
 }
 
@@ -264,6 +324,8 @@ export function resetHudState(hud: MutableHudState): void {
   hud.scoreboardOpen = false;
   hud.introCard = null;
   hud.introCardPool.opacity = 0;
+  hud.relay = null;
+  resetHudRelayState(hud.relayPool);
 }
 
 /**
@@ -285,6 +347,8 @@ export function ageHudState(hud: MutableHudState, dtS: number): void {
     if (entry.ageS < KILLFEED_LIFE_S) live = i + 1;
   }
   hud.killfeedCount = live;
+  const relay = hud.relayPool;
+  if (relay.noticeAgeS < RELAY_NOTICE_LIFE_S) relay.noticeAgeS += dtS;
 }
 
 /**
@@ -336,9 +400,44 @@ export function pushKillfeed(
   recycled.victimName = victimName;
   recycled.victimTeam = victimTeam;
   recycled.source = source;
+  recycled.objective = null;
   recycled.ageS = 0;
   if (hud.killfeedCount < size) hud.killfeedCount++;
   return recycled;
+}
+
+/**
+ * Ember Relay: a shard was picked up, dropped, returned or captured. Adds the line to the feed
+ * (the actor in the killer's place, the shard's owner in the victim's) and makes it the
+ * announcement. `actorId` is NO_PLAYER when nobody did it (a shard that went home by itself).
+ */
+export function pushShardEvent(
+  hud: MutableHudState,
+  kind: ObjectiveKind,
+  shardTeam: TeamId,
+  actorId: PlayerId,
+  actorName: string,
+  actorTeam: TeamId | null,
+): MutableKillfeedEntry | null {
+  const entry = pushKillfeed(
+    hud,
+    actorId,
+    actorName,
+    actorTeam,
+    null,
+    NO_PLAYER,
+    // The line itself in the victim's place (a constant from a table: nothing is built), so
+    // whatever reads the feed as plain text gets the whole sentence.
+    shardLine(kind, shardTeam),
+    shardTeam,
+    'primary',
+  );
+  if (entry !== null) entry.objective = kind;
+  const relay = hud.relayPool;
+  relay.noticeKind = kind;
+  relay.noticeTeam = shardTeam;
+  relay.noticeAgeS = 0;
+  return entry;
 }
 
 /**

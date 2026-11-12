@@ -120,6 +120,33 @@ export interface MapTexture {
   /** Mean colour, linear RGB: `texel / mean` is a detail factor for painted vertex colours. */
   readonly meanLinear: readonly number[];
   readonly colorSpace: 'srgb' | 'linear';
+  /**
+   * The world-material slot this texture fills: `stone`, `cliff`, `moss`, `masonry` or `brush`.
+   * Absent = the slot is the texture's own `id` (the first map's textures are named after their
+   * slots; a second map's basalt fills `stone` and its ash fills `moss`).
+   */
+  readonly role?: string;
+  /** The one map this texture belongs to. Absent = the first map's set, shared by every map. */
+  readonly map?: MapId;
+}
+
+/**
+ * A heat vent: a vertical column of rising hot air (docs/GAME_DESIGN.md, Emberfall Caldera).
+ * A dragon inside it is pushed up, gains speed along its own heading and gets stamina back; the
+ * effect is strongest on the axis and gone at the edge (`applyHeatVents`, src/sim/flight.ts).
+ */
+export interface MapVent {
+  readonly id: string;
+  /** Centre of the vent's mouth (the lava throat of its chimney), world space. */
+  readonly position: Vec3;
+  /** Radius of the column, metres: full effect on the axis, none at the edge. */
+  readonly radius: number;
+  /** The column reaches this far above `position.y`. */
+  readonly height: number;
+  /** Upward acceleration on the axis at the mouth, m/s^2. */
+  readonly lift: number;
+  /** Acceleration along the dragon's own heading while inside, m/s^2 (the "free speed"). */
+  readonly boost: number;
 }
 
 export interface MapColliders {
@@ -156,6 +183,46 @@ export interface MapSky {
   readonly sunColor: number;
   readonly fogColor: number;
   readonly fogDensity: number;
+  // The map's own look. Everything below is sRGB hex and optional: a map that leaves a field out
+  // gets the first map's golden-hour value for it (`skyLookOf`, src/world/sky/sky-look.ts).
+  /** Hemisphere light (docs/ART_DIRECTION.md "Lighting recipe"). */
+  readonly hemisphereSkyColor?: number;
+  readonly hemisphereGroundColor?: number;
+  /** Procedural sky gradient: overhead, mid sky, and the band at the horizon. */
+  readonly zenithColor?: number;
+  readonly midSkyColor?: number;
+  readonly horizonColor?: number;
+  /** The sea (cloud or ash): trough, shadowed side, sun-lit side, crests. */
+  readonly seaDeepColor?: number;
+  readonly seaShadowColor?: number;
+  readonly seaLitColor?: number;
+  readonly seaCrestColor?: number;
+  /** Light showing through the sea from below (lava), and what it throws up onto undersides. */
+  readonly seaGlowColor?: number;
+  readonly bounceColor?: number;
+  /** World material: stone tint, the colour of the `_MASKS.g` slot (moss or ash), lit edges. */
+  readonly stoneColor?: number;
+  readonly ashColor?: number;
+  readonly edgeColor?: number;
+  /** Aerial perspective away from and toward the sun. */
+  readonly airColor?: number;
+  readonly airWarmColor?: number;
+  /**
+   * Saturation the world material gives painted stone (1 = as painted). Absent = 1.3, which
+   * pushes the first map's slate deeper and bluer; a map whose rock is painted with coloured
+   * light (the caldera's crimson undersides) keeps 1.
+   */
+  readonly stoneSaturation?: number;
+  /**
+   * How bright the map's glowing rock parts are (crystals, runes, lava cracks), as a multiple
+   * of their painted colour. Absent = 1.9, where the facets facing the eye burn white (the
+   * first map's crystals). Near 1 a glow keeps its hue: lava stays crimson.
+   */
+  readonly glowGain?: number;
+  /** False: no additive light shafts near the sun (the first map's accent). Absent = shafts. */
+  readonly lightShafts?: boolean;
+  /** True: ash and embers drift through the air around the camera. Absent = clear air. */
+  readonly ashFall?: boolean;
 }
 
 export interface MapAudio {
@@ -199,6 +266,8 @@ export interface MapManifest {
   readonly chunkSize?: number;
   /** Camera path for the match-intro flyby (format TBD in T-5.x). */
   readonly introSpline?: readonly Vec3[];
+  /** Heat vents: columns of rising air that lift and speed up a dragon. Absent = none. */
+  readonly vents?: readonly MapVent[];
   readonly audio?: MapAudio;
 }
 

@@ -25,6 +25,7 @@ import {
   MATCH_TUNING,
   NO_PLAYER,
   PROJECTILE_DEFS,
+  TEAM_EMBER,
   TICK_DT_S,
   ZONE_DEFS,
 } from '../shared';
@@ -40,6 +41,7 @@ import type {
   InputFrame,
   MatchTuning,
   MutableVec3,
+  ObjectiveKind,
   PlayerId,
   ProjectileDef,
   ProjectileKind,
@@ -65,7 +67,7 @@ import {
   resetScoreState,
   resetSimState,
 } from './sim-state';
-import type { SimState } from './sim-state';
+import type { RelayState, SimState } from './sim-state';
 
 /**
  * Inputs for one tick, indexed by `PlayerId` (a `u8`, so a plain array lookup with no hashing).
@@ -173,6 +175,18 @@ export interface Sim {
   ): boolean;
   /** Adds ultimate charge (0..1) to a dragon: objectives charge the ultimate too. */
   addUltimateCharge(playerId: PlayerId, amount: number): void;
+
+  // --- Objective seams (Ember Relay, T-6.3) -----------------------------------------------------
+  /**
+   * The objective state in `current`, mutable: the match rules (`match/relay.ts`) own it and
+   * change it between steps. Read `current.relay` anywhere else.
+   */
+  readonly relay: RelayState;
+  /**
+   * Sends an `objective` event to the event sink, stamped with the current tick. `team` is the
+   * team the event is good for; `dragonId` NO_PLAYER when no single dragon caused it.
+   */
+  emitObjective(kind: ObjectiveKind, team: TeamId, dragonId: PlayerId, position: Vec3): void;
 }
 
 /**
@@ -214,6 +228,22 @@ export function createSim(options: SimOptions = {}): Sim {
   let current = createSimState();
   /** Reused for the `prevPosition` argument of the collision world. */
   const prevPosition: MutableVec3 = { x: 0, y: 0, z: 0 };
+  /** Reused for every `emitObjective` (the sink copies what it is given). */
+  const objectiveEvent: {
+    type: 'objective';
+    tick: number;
+    kind: ObjectiveKind;
+    team: TeamId;
+    dragonId: PlayerId;
+    position: MutableVec3;
+  } = {
+    type: 'objective',
+    tick: 0,
+    kind: 'pickedUp',
+    team: TEAM_EMBER,
+    dragonId: NO_PLAYER,
+    position: { x: 0, y: 0, z: 0 },
+  };
 
   const combat = new CombatSystem(
     {
@@ -404,6 +434,23 @@ export function createSim(options: SimOptions = {}): Sim {
       const slot = findDragonSlot(current, playerId);
       const dragon = current.dragons[slot];
       if (slot >= 0 && dragon !== undefined) combat.addUltimateCharge(dragon, amount);
+    },
+
+    get relay() {
+      return current.relay;
+    },
+
+    emitObjective(kind, team, dragonId, position) {
+      const sink = combat.events;
+      if (sink === null) return;
+      objectiveEvent.tick = current.tick;
+      objectiveEvent.kind = kind;
+      objectiveEvent.team = team;
+      objectiveEvent.dragonId = dragonId;
+      objectiveEvent.position.x = position.x;
+      objectiveEvent.position.y = position.y;
+      objectiveEvent.position.z = position.z;
+      sink.emit(objectiveEvent);
     },
   };
 }

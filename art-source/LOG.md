@@ -39,3 +39,19 @@ Dragon previews (Blender EEVEE, warm low sun + cool hemisphere): `art-source/dra
 Rebuild: `blender -b -P tools/blender/map/build_rocks.py`, `blender -b -P tools/blender/map/build_props.py`,
 `python tools/textures/make_textures.py`, `node tools/blender/map/export_assets.mjs` (needs KTX-Software on PATH),
 `node tools/blender/map/export_map_manifest.mjs`, then `blender -b -P tools/blender/map/render_vista.py`.
+
+## T-6.4 Emberfall Caldera map art (2026-11-11, procedural, no Higgsfield job, 0 credits: DECISIONS 36)
+
+| Date | Asset | Tool | Source script | Raw output | Runtime output | Kept? | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-11 | 12 hero rocks (crater-wall, crater-breach, rim-tooth, cone-wall, basalt-columns, basalt-tall, obsidian-shards, obsidian-fan, ash-island-large/small, vent-chimney, lava-arch) | Blender 5.2 Python | `tools/blender/map/build_caldera_rocks.py` + `rocklib.py` | `art-source/maps/caldera/rocks/*.glb`, `rocks.blend`, `hulls/*.json` | `public/assets/maps/emberfall-caldera/rocks/*.glb` (4.11 MB) | yes | Basalt columns, obsidian shards and cracked crater walls; lava cracks and pools flagged in `_MASKS.a` in deep crimson (never orange: that is team Ember's); the lava's light from below painted into the vertex colours of undersides; 3 LODs, convex hulls. Blender prints "mesh not valid" for the lowest LOD of five rocks: the exported GLBs load and draw (checked in game), not investigated further |
+| 2026-11-11 | 7 props (vent-marker, caldera-gate, basalt-pylon, obsidian-cluster, fumarole, backdrop-ridge, backdrop-cone) | Blender 5.2 Python | `tools/blender/map/build_caldera_props.py` | `art-source/maps/caldera/props/*.glb`, `props.blend`, `hulls/*.json` | `public/assets/maps/emberfall-caldera/props/*.glb` (0.53 MB) | yes | `TeamTint` on the gate trim; vent markers glow magenta ("fly here"). The map also reuses three first-map props as they are: crystal-core, banner-tall, chain |
+| 2026-11-11 | 3 tileable textures 1024 (basalt, columnar, ash) | Python numpy + Pillow | `tools/textures/make_textures.py --set caldera` | `art-source/textures-raw/{basalt,columnar,ash}.png`, `means.json` | `public/assets/textures/{basalt,columnar,ash}.ktx2` (0.60 MB), entries added to `textures.json` with `map` and `role` | yes | Fill the world material's `stone`, `cliff` and `moss` slots on this map (`role`); masonry and brush are shared with the first map |
+| 2026-11-11 | Map layout + manifest | TypeScript | `src/shared/maps/emberfall-caldera.ts`, `tools/blender/map/export_caldera_manifest.mjs --register` | n/a | `public/assets/maps/emberfall-caldera/manifest.json`, `instances/*.bin`; entry in `public/assets/manifest.json` | yes | 206 placements in 22 types, 9 heat vents, half-turn symmetric. Re-baked after the sky gained its look fields (ash, glow gain) |
+| 2026-11-11 | Previews | Blender EEVEE | `tools/blender/map/render_caldera_vista.py` | `art-source/maps/caldera/previews/*.png` | n/a | yes | Vistas of the assembled layout under the dusk light |
+
+Rebuild: `blender -b -P tools/blender/map/build_caldera_rocks.py`, `blender -b -P tools/blender/map/build_caldera_props.py`,
+`python tools/textures/make_textures.py --set caldera`, `node tools/blender/map/export_caldera_assets.mjs` (needs
+KTX-Software on PATH), `node tools/blender/map/export_caldera_manifest.mjs --register`, then
+`blender -b -P tools/blender/map/render_caldera_vista.py`. Either map's export keeps the other map's entries in
+`textures.json`.

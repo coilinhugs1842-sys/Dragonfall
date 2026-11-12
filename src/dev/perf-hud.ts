@@ -7,6 +7,7 @@
  */
 import Stats from 'stats-gl';
 import type { GameRenderer } from '../render';
+import { shortGpuName } from '../render/gpu-info';
 import { FrameStats, createFrameStatsSummary } from './frame-stats';
 
 /** `begin`/`end` bracket the render work of one frame. */
@@ -121,6 +122,13 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
   const summary = createFrameStatsSummary();
   let lastText = -Infinity;
   let disposed = false;
+  // Which GPU these numbers are from: a screenshot of the HUD then says it by itself.
+  const gpuName = shortGpuName(renderer.gpuName);
+  /**
+   * stats-gl timed this frame. It does not while the automatic quality pick measures: both use
+   * the GPU timer query and a context can have only one open (src/render/gpu-cost-probe.ts).
+   */
+  let timing = false;
 
   /** Runs at 4 Hz only: all the string building of the HUD happens here. */
   function refreshText(): void {
@@ -144,7 +152,8 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
       `sim ${simText}
 ` +
       `${netText === '' ? `net ${NO_VALUE}` : netText}` +
-      `${fxText === '' ? '' : `\n${fxText}`}`;
+      `${fxText === '' ? '' : `\n${fxText}`}` +
+      `\ngpu ${gpuName}${renderer.costProbe.active ? '  (quality test running)' : ''}`;
   }
 
   return {
@@ -154,13 +163,16 @@ export async function createPerfHud(opts: PerfHudOptions): Promise<PerfHud> {
       // the begin/end bracket: it is what the player sees, unlike the CPU graph (render work
       // only; the sim has its own line in the text).
       if (frameMs < PAUSE_GAP_MS) frames.push(frameMs);
-      stats.begin();
+      timing = !renderer.costProbe.active;
+      if (timing) stats.begin();
     },
 
     end(): void {
       if (disposed) return;
-      stats.end();
-      stats.update();
+      if (timing) {
+        stats.end();
+        stats.update();
+      }
       // Read renderer.info here, after the frame's render calls. GameRenderer turns autoReset off
       // and resets once per frame, so the counts are whole-frame totals, not the last pass only.
       const now = performance.now();

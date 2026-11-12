@@ -6,20 +6,21 @@
  *   saves a little later (debounced, so dragging a slider is one write, not sixty).
  * - `flush()` saves now; call it on `pagehide` so the last change is not lost.
  *
- * `settings`, `bindings` and `controls` are replaced, never mutated: comparing references is
- * enough to tell that something changed, and `uiState.settings = store.settings` costs nothing
- * per frame.
+ * `settings`, both binding tables and their `controls` are replaced, never mutated: comparing
+ * references is enough to tell that something changed, and `uiState.settings = store.settings`
+ * costs nothing per frame.
  */
 
 import { bindingsEqual } from '../../input/bindings';
 import type { InputBindings } from '../../input/bindings';
 import { DEFAULT_GAME_SETTINGS } from '../../shared';
-import type { ControlsUiState, GameSettings } from '../../shared';
+import type { BindingDevice, ControlsUiState, GameSettings } from '../../shared';
 import { SETTINGS_STORAGE_KEY } from '../stored-quality';
 import {
   applyRebind,
   applyResetBindings,
   applyUnbind,
+  bindingDeviceOf,
   controlsUiStateFor,
 } from './bindings-bridge';
 import { SYSTEM_TIMERS, createDebounce } from './debounce';
@@ -58,7 +59,10 @@ export interface SettingsStore {
   readonly bindings: InputBindings;
   /** The binding table in the shape `UiState.controls` wants; replaced when bindings change. */
   readonly controls: ControlsUiState;
-  /** Both at once, as subscribers get them. */
+  /** The gamepad's table, and the same in the shape `UiState.gamepad.controls` wants. */
+  readonly gamepadBindings: InputBindings;
+  readonly gamepadControls: ControlsUiState;
+  /** Everything at once, as subscribers get it. */
   readonly data: SettingsData;
   /** A save is waiting for its debounce. */
   readonly dirty: boolean;
@@ -67,11 +71,18 @@ export interface SettingsStore {
    * current value, numbers are clamped. Returns true when a setting changed.
    */
   update(patch: unknown): boolean;
-  rebind(action: unknown, slot: unknown, code: unknown, swap: boolean): boolean;
-  unbind(action: unknown, slot: unknown): boolean;
+  /** `device` picks the table on these three: absent = the keyboard's. */
+  rebind(
+    action: unknown,
+    slot: unknown,
+    code: unknown,
+    swap: boolean,
+    device?: BindingDevice,
+  ): boolean;
+  unbind(action: unknown, slot: unknown, device?: BindingDevice): boolean;
   /** `null` resets every action. */
-  resetBindings(action: unknown): boolean;
-  /** Reset all: default settings and default bindings. */
+  resetBindings(action: unknown, device?: BindingDevice): boolean;
+  /** Reset all: default settings and default bindings, the keyboard's and the gamepad's. */
   reset(): boolean;
   /** Called after every change, with the new and the previous data. Returns the unsubscribe. */
   subscribe(listener: SettingsListener): () => void;
@@ -100,6 +111,7 @@ export function createSettingsStore(options: SettingsStoreOptions): SettingsStor
   const text = readText(storage, SETTINGS_STORAGE_KEY);
   let data: SettingsData = parseSettingsData(text, readText(storage, LEGACY_NAME_STORAGE_KEY));
   let controls = controlsUiStateFor(data.bindings);
+  let gamepadControls = controlsUiStateFor(data.gamepadBindings, 'gamepad');
   let listeners: readonly SettingsListener[] = [];
   let disposed = false;
 
@@ -130,15 +142,27 @@ export function createSettingsStore(options: SettingsStoreOptions): SettingsStor
     const previous = data;
     data = next;
     if (next.bindings !== previous.bindings) controls = controlsUiStateFor(next.bindings);
+    if (next.gamepadBindings !== previous.gamepadBindings) {
+      gamepadControls = controlsUiStateFor(next.gamepadBindings, 'gamepad');
+    }
     needsMigrationWrite = false;
     debounce.touch();
     for (const listener of listeners) listener(next, previous);
     return true;
   };
 
-  const commitBindings = (bindings: InputBindings): boolean => {
-    if (bindings === data.bindings || bindingsEqual(bindings, data.bindings)) return false;
-    return commit({ settings: data.settings, bindings });
+  const tableOf = (device: BindingDevice): InputBindings =>
+    device === 'gamepad' ? data.gamepadBindings : data.bindings;
+
+  /** Puts an edited table back in its place. False when the edit changed nothing. */
+  const commitBindings = (device: BindingDevice, table: InputBindings): boolean => {
+    const current = tableOf(device);
+    if (table === current || bindingsEqual(table, current)) return false;
+    return commit(
+      device === 'gamepad'
+        ? { settings: data.settings, bindings: data.bindings, gamepadBindings: table }
+        : { settings: data.settings, bindings: table, gamepadBindings: data.gamepadBindings },
+    );
   };
 
   return {
@@ -151,6 +175,12 @@ export function createSettingsStore(options: SettingsStoreOptions): SettingsStor
     get controls(): ControlsUiState {
       return controls;
     },
+    get gamepadBindings(): InputBindings {
+      return data.gamepadBindings;
+    },
+    get gamepadControls(): ControlsUiState {
+      return gamepadControls;
+    },
     get data(): SettingsData {
       return data;
     },
@@ -160,24 +190,42 @@ export function createSettingsStore(options: SettingsStoreOptions): SettingsStor
     update(patch: unknown): boolean {
       const settings = sanitizeSettings(patch, data.settings);
       if (settingsEqual(settings, data.settings)) return false;
-      return commit({ settings, bindings: data.bindings });
+      return commit({
+        settings,
+        bindings: data.bindings,
+        gamepadBindings: data.gamepadBindings,
+      });
     },
-    rebind(action: unknown, slot: unknown, code: unknown, swap: boolean): boolean {
-      return commitBindings(applyRebind(data.bindings, action, slot, code, swap));
+    rebind(
+      action: unknown,
+      slot: unknown,
+      code: unknown,
+      swap: boolean,
+      device?: BindingDevice,
+    ): boolean {
+      const kind = bindingDeviceOf(device);
+      return commitBindings(kind, applyRebind(tableOf(kind), action, slot, code, swap, kind));
     },
-    unbind(action: unknown, slot: unknown): boolean {
-      return commitBindings(applyUnbind(data.bindings, action, slot));
+    unbind(action: unknown, slot: unknown, device?: BindingDevice): boolean {
+      const kind = bindingDeviceOf(device);
+      return commitBindings(kind, applyUnbind(tableOf(kind), action, slot));
     },
-    resetBindings(action: unknown): boolean {
-      return commitBindings(applyResetBindings(data.bindings, action));
+    resetBindings(action: unknown, device?: BindingDevice): boolean {
+      const kind = bindingDeviceOf(device);
+      return commitBindings(kind, applyResetBindings(tableOf(kind), action, kind));
     },
     reset(): boolean {
       const bindings = applyResetBindings(data.bindings, null);
+      const padBindings = applyResetBindings(data.gamepadBindings, null, 'gamepad');
       const sameBindings = bindingsEqual(bindings, data.bindings);
-      if (sameBindings && settingsEqual(data.settings, DEFAULT_GAME_SETTINGS)) return false;
+      const samePad = bindingsEqual(padBindings, data.gamepadBindings);
+      if (sameBindings && samePad && settingsEqual(data.settings, DEFAULT_GAME_SETTINGS)) {
+        return false;
+      }
       return commit({
         settings: DEFAULT_GAME_SETTINGS,
         bindings: sameBindings ? data.bindings : bindings,
+        gamepadBindings: samePad ? data.gamepadBindings : padBindings,
       });
     },
     subscribe(listener: SettingsListener): () => void {

@@ -1,24 +1,41 @@
 /**
  * The host worker and the main thread each build their own copy of the map a match is flown on:
- * the worker through `createShatteredSpiresMatchWorldFactory` (src/game/worker/host.worker.ts),
- * the page through `createMatchAssetsCache` (prediction, camera, views). Nothing but the seed in
- * MATCH_START ties the two together, so they are compared here: a rider who predicts against
- * other rocks than the host simulates would rubber-band on every near miss.
+ * the worker through `createShatteredSpiresMatchWorldFactory` (src/game/worker/host.worker.ts;
+ * the old name of `createMapMatchWorldFactory`), the page through `createMatchAssetsCache`
+ * (prediction, camera, views). Nothing but the map id and the seed in MATCH_START ties the two
+ * together, so they are compared here, for every map: a rider who predicts against other rocks
+ * (or other heat vents) than the host simulates would rubber-band on every near miss.
  */
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_HOST_SETTINGS, SHATTERED_SPIRES_DEFAULT_SEED } from '../../src/shared';
-import type { HostSettings, SpawnGate } from '../../src/shared';
+import {
+  DEFAULT_HOST_SETTINGS,
+  DEFAULT_MAP_ID,
+  EMBERFALL_CALDERA_DEFAULT_SEED,
+  SHATTERED_SPIRES_DEFAULT_SEED,
+  createArenaMap,
+  defaultSeedOfMap,
+  matchSeedOfMap,
+} from '../../src/shared';
+import type { HostSettings, MapId, SpawnGate } from '../../src/shared';
 import { createMatchAssetsCache } from '../../src/game/match-assets';
-import { createShatteredSpiresMatchWorldFactory } from '../../src/net/session';
+import {
+  createMapMatchWorldFactory,
+  createShatteredSpiresMatchWorldFactory,
+} from '../../src/net/session';
 import type { MatchWorld } from '../../src/net/session';
+import { MAP_IDS } from '../../src/net/protocol';
 import { MapCollisionWorld } from '../../src/sim';
 
 const MODES = ['skirmish', 'duel'] as const;
-const SEEDS = [SHATTERED_SPIRES_DEFAULT_SEED, 1, 0xdeadbeef, -7];
+/** Layout seeds per map: its default (what matches fly), and others the generator must also agree on. */
+const SEEDS: Record<MapId, readonly number[]> = {
+  'shattered-spires': [SHATTERED_SPIRES_DEFAULT_SEED, 1, 0xdeadbeef, -7],
+  'emberfall-caldera': [EMBERFALL_CALDERA_DEFAULT_SEED, 1, -7],
+};
 
-function settingsFor(mode: HostSettings['mode']): HostSettings {
-  return { ...DEFAULT_HOST_SETTINGS, mode };
+function settingsFor(mode: HostSettings['mode'], map: MapId = DEFAULT_MAP_ID): HostSettings {
+  return { ...DEFAULT_HOST_SETTINGS, mode, map };
 }
 
 interface Fingerprint {
@@ -27,11 +44,15 @@ interface Fingerprint {
   readonly checksum: string;
 }
 
-/** Count and checksum of the exact float bits of every collision triangle. */
-function fingerprint(world: MatchWorld): Fingerprint {
+function collisionOf(world: MatchWorld): MapCollisionWorld {
   const collision = world.collisionWorld;
   if (!(collision instanceof MapCollisionWorld)) throw new Error('not a map collision world');
-  const terrain = collision.terrain;
+  return collision;
+}
+
+/** Count and checksum of the exact float bits of every collision triangle. */
+function fingerprint(world: MatchWorld): Fingerprint {
+  const terrain = collisionOf(world).terrain;
   const geometry = terrain?.bvh?.geometry;
   const index = geometry?.getIndex();
   if (terrain === null || geometry === undefined || index === null || index === undefined) {
@@ -73,9 +94,23 @@ function boundsOf(world: MatchWorld): number[] {
   return [world.centerX, world.centerZ, world.radius, world.floorY, world.ceilingY];
 }
 
+/** The heat vents a world pushes dragons with, as plain numbers (none on a map without them). */
+function ventsOf(world: MatchWorld): unknown {
+  return collisionOf(world).vents.map((vent) => [
+    vent.id,
+    vent.position.x,
+    vent.position.y,
+    vent.position.z,
+    vent.radius,
+    vent.height,
+    vent.lift,
+    vent.boost,
+  ]);
+}
+
 /** Distances of a fan of rays through the arena: what a dragon would actually run into. */
 function probes(world: MatchWorld): number[] {
-  const collision = world.collisionWorld as MapCollisionWorld;
+  const collision = collisionOf(world);
   const hits: number[] = [];
   for (let i = 0; i < 64; i++) {
     const angle = (i / 64) * Math.PI * 2;
@@ -97,58 +132,84 @@ function probes(world: MatchWorld): number[] {
 }
 
 describe('the host worker and the main thread fly the same map', () => {
-  // One of each for the whole file, as in the game: both keep the latest seed.
+  // One of each for the whole file, as in the game: both keep the latest map and seed.
   const worker = createShatteredSpiresMatchWorldFactory();
   const page = createMatchAssetsCache();
 
-  for (const mode of MODES) {
-    describe(mode, () => {
-      it.each(SEEDS)('seed %i: same collision triangles and the same spawn gates', (seed) => {
-        const settings = settingsFor(mode);
-        const hostWorld = worker(settings, seed);
-        const pageWorld = page.factory(settings, seed);
+  it('the name the worker entry still imports builds by map id', () => {
+    expect(createShatteredSpiresMatchWorldFactory).toBe(createMapMatchWorldFactory);
+  });
 
-        const host = fingerprint(hostWorld);
-        const main = fingerprint(pageWorld);
-        expect(host.triangles).toBeGreaterThan(1000);
-        expect(main.triangles).toBe(host.triangles);
-        expect(main.checksum).toBe(host.checksum);
+  for (const map of MAP_IDS) {
+    for (const mode of MODES) {
+      describe(`${map}, ${mode}`, () => {
+        it.each(SEEDS[map])('seed %i: same collision triangles, spawn gates and vents', (seed) => {
+          const settings = settingsFor(mode, map);
+          const hostWorld = worker(settings, seed);
+          const pageWorld = page.factory(settings, seed);
 
-        expect(gatesOf(pageWorld)).toEqual(gatesOf(hostWorld));
-        expect(hostWorld.spawnGates).toHaveLength(2);
-        for (const gate of hostWorld.spawnGates) expect(gate.slots.length).toBeGreaterThanOrEqual(5);
-        expect(boundsOf(pageWorld)).toEqual(boundsOf(hostWorld));
+          const host = fingerprint(hostWorld);
+          const main = fingerprint(pageWorld);
+          expect(host.triangles).toBeGreaterThan(1000);
+          expect(main.triangles).toBe(host.triangles);
+          expect(main.checksum).toBe(host.checksum);
 
-        // And they answer the same: every ray stops at the same distance, to the bit.
-        const hostHits = probes(hostWorld);
-        expect(probes(pageWorld)).toEqual(hostHits);
-        expect(hostHits.some((distance) => distance >= 0)).toBe(true);
+          expect(gatesOf(pageWorld)).toEqual(gatesOf(hostWorld));
+          expect(hostWorld.spawnGates).toHaveLength(2);
+          for (const gate of hostWorld.spawnGates) expect(gate.slots.length).toBeGreaterThanOrEqual(5);
+          expect(boundsOf(pageWorld)).toEqual(boundsOf(hostWorld));
+          expect(ventsOf(pageWorld)).toEqual(ventsOf(hostWorld));
+
+          // And they answer the same: every ray stops at the same distance, to the bit.
+          const hostHits = probes(hostWorld);
+          expect(probes(pageWorld)).toEqual(hostHits);
+          expect(hostHits.some((distance) => distance >= 0)).toBe(true);
+        });
       });
+    }
+
+    it(`${map}: the two modes share the collision world and differ only in the gates`, () => {
+      const seed = defaultSeedOfMap(map);
+      for (const factory of [worker, page.factory]) {
+        const skirmish = factory(settingsFor('skirmish', map), seed);
+        const duel = factory(settingsFor('duel', map), seed);
+        expect(duel.collisionWorld).toBe(skirmish.collisionWorld);
+        // Duel launches from the closer perches: were the two sets equal, the per-mode
+        // comparison above would prove nothing about the mode.
+        expect(gatesOf(duel)).not.toEqual(gatesOf(skirmish));
+      }
+    });
+
+    it(`${map}: what the page hands its views is the Skirmish world of the same map and seed`, () => {
+      const seed = 1;
+      const assets = page.get(seed, map);
+      const hostWorld = worker(settingsFor('skirmish', map), seed);
+      expect(assets.seed).toBe(seed);
+      expect(assets.mapId).toBe(map);
+      expect(assets.map.id).toBe(map);
+      expect(fingerprint(assets.world)).toEqual(fingerprint(hostWorld));
+      expect(gatesOf(assets.world)).toEqual(gatesOf(hostWorld));
+      expect(assets.world.collisionWorld).toBe(assets.collision);
+      // The session's factory and `get` hand out the one BVH, not a copy each.
+      expect(page.factory(settingsFor('duel', map), seed).collisionWorld).toBe(assets.collision);
     });
   }
 
-  it('the two modes share the collision world and differ only in the gates', () => {
-    const seed = SHATTERED_SPIRES_DEFAULT_SEED;
-    for (const factory of [worker, page.factory]) {
-      const skirmish = factory(settingsFor('skirmish'), seed);
-      const duel = factory(settingsFor('duel'), seed);
-      expect(duel.collisionWorld).toBe(skirmish.collisionWorld);
-      // Duel launches from the closer perches: were the two sets equal, the per-mode
-      // comparison above would prove nothing about the mode.
-      expect(gatesOf(duel)).not.toEqual(gatesOf(skirmish));
-    }
-  });
-
-  it('what the page hands its views is the Skirmish world of the same seed', () => {
+  it('the map id picks the world: the same seed on the two maps is two different arenas', () => {
     const seed = 1;
-    const assets = page.get(seed);
-    const hostWorld = worker(settingsFor('skirmish'), seed);
-    expect(assets.seed).toBe(seed);
-    expect(fingerprint(assets.world)).toEqual(fingerprint(hostWorld));
-    expect(gatesOf(assets.world)).toEqual(gatesOf(hostWorld));
-    expect(assets.world.collisionWorld).toBe(assets.collision);
-    // The session's factory and `get` hand out the one BVH, not a copy each.
-    expect(page.factory(settingsFor('duel'), seed).collisionWorld).toBe(assets.collision);
+    const spires = worker(settingsFor('skirmish', 'shattered-spires'), seed);
+    const spiresPrint = fingerprint(spires);
+    const spiresVents = ventsOf(spires);
+    const caldera = worker(settingsFor('skirmish', 'emberfall-caldera'), seed);
+    expect(fingerprint(caldera).checksum).not.toBe(spiresPrint.checksum);
+    expect(spiresVents).toEqual([]);
+    expect(ventsOf(caldera)).toHaveLength(9);
+    // The page's cache switches map with the settings too, and back.
+    expect(fingerprint(page.factory(settingsFor('skirmish', 'emberfall-caldera'), seed))).toEqual(fingerprint(caldera));
+    expect(fingerprint(page.factory(settingsFor('skirmish', 'shattered-spires'), seed))).toEqual(spiresPrint);
+    // Left out, the map is the default one (the cine viewer and older callers).
+    expect(page.get(seed).mapId).toBe(DEFAULT_MAP_ID);
+    expect(fingerprint(page.get(seed).world)).toEqual(spiresPrint);
   });
 
   it('the checksum tells two layouts apart (it is not blind)', () => {
@@ -166,5 +227,30 @@ describe('the host worker and the main thread fly the same map', () => {
     expect(fingerprint(worker(settings, 0xfffffff9))).toEqual(wrapped);
     expect(fingerprint(page.factory(settings, 0xfffffff9))).toEqual(wrapped);
     expect(page.get(-7).seed).toBe(0xfffffff9);
+  });
+});
+
+describe('the map registry', () => {
+  it('builds the map the id names, the same from the same two values', () => {
+    for (const map of MAP_IDS) {
+      const seed = defaultSeedOfMap(map);
+      const a = createArenaMap(map, seed);
+      const b = createArenaMap(map, seed);
+      expect(a.id).toBe(map);
+      expect(a.seed).toBe(seed);
+      expect(b.placements).toEqual(a.placements);
+      expect(b.spawnGates).toEqual(a.spawnGates);
+      expect(b.vents).toEqual(a.vents);
+    }
+    expect(defaultSeedOfMap('shattered-spires')).toBe(SHATTERED_SPIRES_DEFAULT_SEED >>> 0);
+    expect(defaultSeedOfMap('emberfall-caldera')).toBe(EMBERFALL_CALDERA_DEFAULT_SEED >>> 0);
+  });
+
+  it('the host flies Spires with its own seed and the Caldera with the Caldera layout', () => {
+    expect(matchSeedOfMap('shattered-spires', 1234)).toBe(1234);
+    expect(matchSeedOfMap('shattered-spires', -7)).toBe(0xfffffff9);
+    for (const hostSeed of [1234, -7, SHATTERED_SPIRES_DEFAULT_SEED]) {
+      expect(matchSeedOfMap('emberfall-caldera', hostSeed)).toBe(EMBERFALL_CALDERA_DEFAULT_SEED >>> 0);
+    }
   });
 });

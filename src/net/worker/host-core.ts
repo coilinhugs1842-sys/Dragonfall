@@ -14,7 +14,7 @@
  */
 
 import { TICK_DT_S, copyInputFrame, createInputFrame } from '../../shared';
-import type { BotDifficulty, GameEventSink, InputFrame, ModeId, Vec3 } from '../../shared';
+import type { BotDifficulty, GameEventSink, InputFrame, MapId, ModeId, Vec3 } from '../../shared';
 import { createNetBots } from '../bots';
 import type { NetBots } from '../bots';
 import { createHostSession } from '../session';
@@ -43,6 +43,8 @@ export interface LocalInputSource {
  * clicking through the host panel. Plain data, so it crosses to the host worker.
  */
 export interface HostAutoSettings {
+  /** `?map=`: the map the room starts on (refused by the lobby while the map is not shipped). */
+  readonly map?: MapId;
   readonly mode?: ModeId;
   /** Riders per side. Left out with `autoStart`: just enough for the host and its bots. */
   readonly teamSize?: number;
@@ -261,6 +263,7 @@ export class HostCore {
   private applyAutoSettings(settings: HostAutoSettings): void {
     this.autoSettings = null;
     const session = this.session;
+    if (settings.map !== undefined) session.applyIntent({ type: 'host.setMap', map: settings.map });
     if (settings.mode !== undefined)
       session.applyIntent({ type: 'host.setMode', mode: settings.mode });
     const teamSize =

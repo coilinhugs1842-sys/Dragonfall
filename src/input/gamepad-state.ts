@@ -20,6 +20,8 @@
  * - Dodge = flick the left stick sideways while the pad's boost button is held (`PadFlickLeft` /
  *   `PadFlickRight` in the table). It is a one-frame press, like a tap on Q or E.
  * - Menu (Start) = pause: never an action, the game layer asks with `consumeGamepadPause`.
+ * - While a menu is in front (no flight input) the same buttons and the left stick step
+ *   through it: ./gamepad-menu.ts.
  *
  * WHO STEERS. The pad takes the reticle when the left stick MOVES outside its dead zone, not
  * while it merely sits there: a worn stick that rests off-centre, or one held still while the
@@ -127,6 +129,12 @@ export interface GamepadState {
    * while flight input is off too (a spectator's scoreboard button).
    */
   actions: number;
+  /**
+   * The left stick as it sits (x right, y UP, no dead zone), also while flight input is off:
+   * what ./gamepad-menu.ts steps through the menus with. 0 until the pad is `awake`.
+   */
+  leftX: number;
+  leftY: number;
   // --- Lookup tables, rebuilt by setGamepadBindings ---
   bindings: InputBindings;
   /** Per button: the action bits it triggers. */
@@ -232,6 +240,8 @@ export function createGamepadState(
     standard: false,
     awake: false,
     actions: 0,
+    leftX: 0,
+    leftY: 0,
     bindings,
     buttonActions: new Int32Array(GAMEPAD_BUTTON_COUNT),
     flickLeftActions: 0,
@@ -321,6 +331,8 @@ export function disconnectGamepad(gp: GamepadState, input: InputState): void {
   gp.id = '';
   gp.standard = false;
   gp.awake = false;
+  gp.leftX = 0;
+  gp.leftY = 0;
   gp.ownsSteer = false;
   gp.pauseAtMs = -1;
   gp.pressButton = -1;
@@ -422,11 +434,14 @@ export function pollGamepad(
     }
   }
   gp.actions = actions;
+  // The menus read the stick too, so it is kept whether or not flight input is wanted.
+  const leftX = gp.awake ? readAxis(axes, 0) : 0;
+  const leftY = gp.awake ? readAxisUp(axes, 1) : 0;
+  gp.leftX = leftX;
+  gp.leftY = leftY;
   if (!flight || !gp.awake) return;
 
   // --- Left stick: the reticle -----------------------------------------------------------------
-  const leftX = readAxis(axes, 0);
-  const leftY = readAxisUp(axes, 1);
   const leftLength = Math.sqrt(leftX * leftX + leftY * leftY);
   const outside = reticleSteerGain(leftLength, options.deadZone, 1) > 0;
   if (input.steerDevice !== 'gamepad') {

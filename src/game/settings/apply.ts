@@ -37,6 +37,16 @@ export interface SettingsTargets {
   setCamera?(fovDeg: number, shake: number, reduceMotion: boolean): void;
   setInput?(sensitivity: number, invertY: boolean, boostToggle: boolean): void;
   setBindings?(bindings: InputBindings): void;
+  /** The gamepad's feel: `InputController.gamepad.options`. */
+  setGamepad?(
+    sensitivity: number,
+    invertY: boolean,
+    deadZone: number,
+    curveExponent: number,
+    rumble: boolean,
+  ): void;
+  /** The gamepad's own rebind table: `InputController.setGamepadBindings`. */
+  setGamepadBindings?(bindings: InputBindings): void;
   /** All 0..1. */
   setVolumes?(master: number, sfx: number, music: number, ui: number): void;
   setUi?(
@@ -59,8 +69,8 @@ export function applySettings(
   const p = previous === null ? null : previous.settings;
   const all = p === null;
 
-  const preset = effectiveQuality(s.quality);
-  const presetChanged = all || effectiveQuality(p.quality) !== preset;
+  const preset = effectiveQuality(s.quality, s.autoQuality);
+  const presetChanged = all || effectiveQuality(p.quality, p.autoQuality) !== preset;
   if (presetChanged) targets.setQuality?.(preset);
   if (
     presetChanged ||
@@ -92,6 +102,25 @@ export function applySettings(
   }
   if (previous === null || previous.bindings !== next.bindings) {
     targets.setBindings?.(next.bindings);
+  }
+  if (
+    all ||
+    p.gamepadSensitivity !== s.gamepadSensitivity ||
+    p.gamepadInvertY !== s.gamepadInvertY ||
+    p.gamepadDeadZone !== s.gamepadDeadZone ||
+    p.gamepadCurve !== s.gamepadCurve ||
+    p.gamepadRumble !== s.gamepadRumble
+  ) {
+    targets.setGamepad?.(
+      s.gamepadSensitivity,
+      s.gamepadInvertY,
+      s.gamepadDeadZone,
+      s.gamepadCurve,
+      s.gamepadRumble,
+    );
+  }
+  if (previous === null || previous.gamepadBindings !== next.gamepadBindings) {
+    targets.setGamepadBindings?.(next.gamepadBindings);
   }
   if (
     all ||
@@ -129,6 +158,8 @@ export interface SettingsIntentHooks {
   close?(): void;
   /** `settings.redetectDisplay`: `renderer.resolution.reset()` (docs/DECISIONS.md 16). */
   redetectDisplay?(): void;
+  /** `settings.retestQuality`: run the automatic quality pick again (T-6.2). */
+  retestQuality?(): void;
 }
 
 /**
@@ -149,16 +180,19 @@ export function handleSettingsIntent(
       hooks.redetectDisplay?.();
       return true;
     case 'settings.rebind':
-      store.rebind(intent.action, intent.slot, intent.code, intent.swap);
+      store.rebind(intent.action, intent.slot, intent.code, intent.swap, intent.device);
       return true;
     case 'settings.unbind':
-      store.unbind(intent.action, intent.slot);
+      store.unbind(intent.action, intent.slot, intent.device);
       return true;
     case 'settings.resetBindings':
-      store.resetBindings(intent.action);
+      store.resetBindings(intent.action, intent.device);
       return true;
     case 'settings.redetectDisplay':
       hooks.redetectDisplay?.();
+      return true;
+    case 'settings.retestQuality':
+      hooks.retestQuality?.();
       return true;
     case 'settings.open':
       hooks.open?.(intent.tab);

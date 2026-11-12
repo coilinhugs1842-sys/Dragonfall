@@ -21,8 +21,12 @@ export type AwardId = 0 | 1 | 2;
 
 /** Card titles, indexed by AwardId. */
 export const AWARD_TITLES: readonly string[] = ['MVP', 'Most takedowns', 'Most damage'];
-/** The short mark next to a name in the table, indexed by AwardId. */
-export const AWARD_MARKS: readonly string[] = ['MVP', 'Takedowns', 'Damage'];
+/**
+ * The short mark next to a name in the table, indexed by AwardId. The same abbreviations as the
+ * table's column headings: the full words did not fit beside a name at any interface size, and
+ * the award cards spell them out.
+ */
+export const AWARD_MARKS: readonly string[] = ['MVP', 'TKD', 'DMG'];
 
 export interface AwardView {
   /** False when nobody earned it (NO_PLAYER) or the rider is not in the table. */
@@ -170,7 +174,7 @@ export function computeResultsView(
   return out;
 }
 
-/** The awards a rider holds, as the short marks for the table ("MVP · Damage"), or ''. */
+/** The awards a rider holds, as the short marks for the table ("MVP · DMG"), or ''. */
 export function awardMarks(results: Readonly<ResultsState>, playerId: PlayerId): string {
   if (playerId === NO_PLAYER) return '';
   let text = '';

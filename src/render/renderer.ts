@@ -7,6 +7,9 @@ import type { Camera, Scene } from 'three';
 import { QUALITY_PRESETS } from '../shared/quality';
 import type { QualityPresetId } from '../shared/quality';
 import { DynamicResolution } from './dynamic-resolution';
+import { GpuCostProbe } from './gpu-cost-probe';
+import type { RenderCostProbe } from './gpu-cost-probe';
+import { readGpuName } from './gpu-info';
 import { createPostPipeline } from './post';
 import type { PostPipeline } from './post';
 import { computePixelRatio } from './render-scale';
@@ -51,6 +54,14 @@ export interface GameRenderer {
   readonly post: PostPipeline;
   readonly presetId: QualityPresetId;
   readonly stats: RenderStats;
+  /** The renderer string of the GPU (see ./gpu-info.ts). Read from the context once. */
+  readonly gpuName: string;
+  /**
+   * The automatic quality pick's instrument (./gpu-cost-probe.ts). While it is active `render`
+   * holds the render scale at the probe's, leaves the dynamic-resolution scaler alone, and
+   * draws the scene `repeats` times inside one GPU timer query.
+   */
+  readonly costProbe: RenderCostProbe;
   /**
    * Applies the preset's renderer settings and render-scale bounds, resets the scaler, then
    * tells every `onPresetChange` listener (the active scene forwards it to its views).
@@ -100,7 +111,10 @@ class GameRendererImpl implements GameRenderer {
   readonly resolution = new DynamicResolution();
   readonly post: PostPipeline;
   readonly stats: RenderStats;
+  readonly costProbe: GpuCostProbe;
 
+  /** '' until first asked for. */
+  private cachedGpuName = '';
   private readonly mutableStats: MutableStats = {
     renderScale: 1,
     pixelRatio: 1,
@@ -146,6 +160,7 @@ class GameRendererImpl implements GameRenderer {
     this.webgl.info.autoReset = false;
     this.post = createPostPipeline(this.webgl, QUALITY_PRESETS[id]);
     this.mutableStats.hdr = this.post.stats.hdr;
+    this.costProbe = new GpuCostProbe(context);
 
     canvas.addEventListener('webglcontextlost', this.onContextLost);
     canvas.addEventListener('webglcontextrestored', this.onContextRestored);
@@ -155,6 +170,11 @@ class GameRendererImpl implements GameRenderer {
 
   get presetId(): QualityPresetId {
     return this.currentPresetId;
+  }
+
+  get gpuName(): string {
+    if (this.cachedGpuName === '') this.cachedGpuName = readGpuName(this.webgl.getContext());
+    return this.cachedGpuName;
   }
 
   setPreset(id: QualityPresetId): void {
@@ -189,6 +209,19 @@ class GameRendererImpl implements GameRenderer {
   render(scene: Scene, camera: Camera, frameMs: number): void {
     // Drawing with a lost context only produces GL errors; the scaler would also read garbage.
     if (this.mutableStats.contextLost) return;
+    const probe = this.costProbe;
+    if (probe.active) {
+      // The automatic quality test: a fixed scale, the scaler not fed (these frames are loaded
+      // on purpose), and the GPU's time for `repeats` draws of the scene. The last one is seen.
+      if (this.resizePending || probe.scale !== this.mutableStats.renderScale) {
+        this.applyResolution();
+      }
+      this.webgl.info.reset();
+      probe.begin();
+      for (let i = 0; i < probe.repeats; i++) this.post.render(scene, camera);
+      probe.end();
+      return;
+    }
     // Also picks up a scale pinned from the debug GUI through resolution.setScale().
     if (
       this.resolution.update(frameMs) ||
@@ -209,6 +242,7 @@ class GameRendererImpl implements GameRenderer {
   dispose(): void {
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored);
+    this.costProbe.dispose();
     this.post.dispose();
     this.webgl.dispose();
   }
@@ -219,7 +253,8 @@ class GameRendererImpl implements GameRenderer {
    */
   private applyResolution(): void {
     this.resizePending = false;
-    const scale = this.resolution.scale;
+    // The automatic quality test holds its own scale, whatever the scaler and its bounds say.
+    const scale = this.costProbe.active ? this.costProbe.scale : this.resolution.scale;
     const pixelRatio = computePixelRatio(this.cssHeight, this.devicePixelRatio, 1);
 
     // One call for size and ratio together: setPixelRatio followed by setSize would reallocate
@@ -259,6 +294,7 @@ class GameRendererImpl implements GameRenderer {
     // three.js re-creates its GL state in its own listener; frame times from before the loss
     // say nothing about the fresh context.
     this.mutableStats.contextLost = false;
+    this.costProbe.contextRestored();
     this.resolution.reset();
     this.applyResolution();
   };

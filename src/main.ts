@@ -11,8 +11,10 @@ import type { Bench } from './dev/bench';
 import { loadDevTools, loadNetsim } from './dev/boot';
 import type { PerfHud } from './dev/perf-hud';
 import { getQueryFlags } from './dev/query-flags';
-import { FrameDriver, createGame, readStoredQuality } from './game';
-import type { Game } from './game';
+import type { QueryFlags } from './dev/query-flags';
+import type { RecordRig } from './dev/record';
+import { FrameDriver, createAutoQualityRun, createGame, readStoredQuality } from './game';
+import type { AutoQualityReport, AutoQualityRun, Game } from './game';
 import { WebGL2UnavailableError, createGameRenderer } from './render';
 import type { GameRenderer } from './render';
 import { DEFAULT_QUALITY, TICK_MS } from './shared';
@@ -25,6 +27,8 @@ interface DebugHook {
   /** For browser tests that draw something of their own with the page's renderer. */
   readonly renderer: GameRenderer;
   report(): unknown;
+  /** The automatic quality pick: GPU name, what was measured, the console line (T-6.2). */
+  readonly quality: AutoQualityReport;
 }
 
 function requireElement<T extends HTMLElement>(id: string, type: new () => T): T {
@@ -42,9 +46,27 @@ function storageOrNull(kind: 'localStorage' | 'sessionStorage'): Storage | null 
   }
 }
 
-/** `?quality=` wins, then the saved setting, then the default (until the automatic pick exists). */
+/**
+ * `?quality=` wins, then the saved setting (a preset chosen by hand, or what the automatic pick
+ * chose), then the default: a first launch, where the automatic pick runs behind the title.
+ */
 function pickQuality(forced: QualityPresetId | null): QualityPresetId {
   return forced ?? readStoredQuality(storageOrNull('localStorage')) ?? DEFAULT_QUALITY;
+}
+
+/**
+ * Why the automatic quality pick must not run on this page ('' = it may). The scripted pages
+ * (`?bench`, `?autopilot`, `?record`) and a browser driven by a test tool start from an empty
+ * profile every time and would look like a first launch; `?autoquality` asks for the test in a
+ * driven browser, but never beats the other switches.
+ */
+function autoQualityBlocker(flags: QueryFlags, recording: boolean): string {
+  if (flags.quality !== null) return 'forced by ?quality=';
+  if (flags.bench) return '?bench';
+  if (flags.autopilot) return '?autopilot';
+  if (recording) return '?record';
+  if (navigator.webdriver && !flags.autoQuality) return 'automated browser';
+  return '';
 }
 
 /** Returns null after showing the index.html fallback when WebGL2 cannot be created. */
@@ -82,7 +104,8 @@ function watchDevicePixelRatio(onChange: () => void): void {
   arm();
 }
 
-function boot(): void {
+/** `rig`: the `?record` clock and frame stepping (src/dev/record.ts); null in normal play. */
+function boot(rig: RecordRig | null): void {
   const flags = getQueryFlags();
   const canvas = requireElement('game', HTMLCanvasElement);
   const renderer = createRendererOrFallback(canvas, pickQuality(flags.quality));
@@ -108,6 +131,7 @@ function boot(): void {
         uiRoot: requireElement('ui', HTMLElement),
         renderer,
         spec: flags.viewer,
+        record: rig,
       });
     });
     return;
@@ -124,7 +148,7 @@ function boot(): void {
     return;
   }
 
-  const now = (): number => performance.now();
+  const now = rig !== null ? rig.now : (): number => performance.now();
   // Fetched only with `?netsim` or `?debug`; the game waits for it before its first transport.
   const netsim = loadNetsim(flags, now);
 
@@ -132,7 +156,10 @@ function boot(): void {
   // cannot end (no score or time limit), a bot flies the local dragon, and the room starts by
   // itself. Explicit flags (`?mode=`, `?teamsize=`, `?botlevel=`) still win.
   const bench = flags.bench;
+  // Made right after the game (it reads the game's settings); "Test again" reaches it by name.
+  let autoQuality: AutoQualityRun | null = null;
   const game = createGame({
+    onRetestQuality: () => autoQuality?.requestRetest(),
     canvas,
     uiRoot: requireElement('ui', HTMLElement),
     renderer,
@@ -145,6 +172,7 @@ function boot(): void {
           ? { mode: 'skirmish' as const, teamSize: 5, scoreLimit: 200, timeLimitS: 0, fillBots: true }
           : {}),
         ...(flags.mode !== null ? { mode: flags.mode } : {}),
+        ...(flags.map !== null ? { map: flags.map } : {}),
         ...(flags.teamSize > 0 ? { teamSize: flags.teamSize } : {}),
         ...(flags.scoreLimit > 0 ? { scoreLimit: flags.scoreLimit } : {}),
         ...(flags.timeLimitS >= 0 ? { timeLimitS: flags.timeLimitS } : {}),
@@ -158,7 +186,8 @@ function boot(): void {
       lan: flags.lan,
       solo: flags.solo && !bench,
       autostart: flags.autostart || bench,
-      noWorker: flags.noWorker,
+      // A recording steps the host's sim with its own frames: a worker would run on real time.
+      noWorker: flags.noWorker || rig !== null,
       // The bench measures the fight, not the way into it.
       cinematics: !flags.noCinematics && !bench,
       measure: flags.perf || flags.debug || bench || import.meta.env.DEV,
@@ -168,6 +197,26 @@ function boot(): void {
     now,
     shaper: netsim,
   });
+
+  // The automatic quality pick (docs/PERFORMANCE.md): measures behind the title screen on a
+  // first launch and saves what it picks as a setting. Also the one console line with the GPU.
+  const quality = createAutoQualityRun({
+    renderer,
+    blocked: autoQualityBlocker(flags, rig !== null),
+    force: flags.autoQuality,
+    titleIdle: () => game.titleIdle,
+    settings: () => game.settings,
+    save: (patch) => {
+      game.handleIntent({ type: 'settings.update', patch });
+    },
+    visible: () => document.visibilityState === 'visible',
+    now,
+    log: (line) => {
+      console.info(line);
+    },
+    storage: storageOrNull('localStorage'),
+  });
+  autoQuality = quality;
 
   const applySize = (): void => {
     const width = canvas.clientWidth;
@@ -218,6 +267,7 @@ function boot(): void {
       perfHud?.begin(frameMs);
       game.frame(alpha, frameMs);
       perfHud?.end();
+      quality.frame();
       benchRun?.frame(frameMs);
     },
     // The "30 / 45 fps" setting: callbacks it turns down neither step nor draw.
@@ -226,7 +276,10 @@ function boot(): void {
     background: () => {
       game.background();
     },
+    ...(rig !== null ? { host: rig.frameHost } : {}),
   });
+  // The recorder holds its clock while a scene's shaders are still compiling.
+  rig?.setBusyProbe(() => game.report().show.warming);
 
   driver.start();
 
@@ -236,8 +289,15 @@ function boot(): void {
     game.shutdown();
   });
 
-  if (import.meta.env.DEV || flags.debug) {
-    const hook: DebugHook = { game, renderer, report: () => game.report() };
+  if (import.meta.env.DEV || flags.debug || rig !== null) {
+    const hook: DebugHook = {
+      game,
+      renderer,
+      report: () => game.report(),
+      get quality() {
+        return quality.report;
+      },
+    };
     Reflect.set(window, '__dragonfall', hook);
   }
 
@@ -263,4 +323,11 @@ function boot(): void {
   );
 }
 
-boot();
+// `?record`: the recorder's clock must exist before anything reads one, so its chunk comes first.
+if (getQueryFlags().record) {
+  void import('./dev/record').then((m) => {
+    boot(m.createRecordRig());
+  });
+} else {
+  boot(null);
+}

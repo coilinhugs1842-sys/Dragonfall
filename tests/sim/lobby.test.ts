@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_HOST_SETTINGS,
   DRAGON_CLASS_IDS,
+  MAPS,
   MAX_LOBBY_MEMBERS,
   MAX_SPECTATORS,
   PROTOCOL_VERSION,
@@ -146,7 +147,11 @@ describe('createLobby', () => {
       },
     });
     expect(lobby.state.settings.mode).toBe('duel');
-    expect(lobby.state.settings.map).toBe('shattered-spires');
+    // A map that has not shipped falls back to the default; one that has is kept. Emberfall
+    // Caldera is switched on by its own task (Phase 6), so this follows the table.
+    expect(lobby.state.settings.map).toBe(
+      MAPS['emberfall-caldera'].available ? 'emberfall-caldera' : 'shattered-spires',
+    );
     expect(lobby.state.settings.teamSize).toBe(2);
     expect(lobby.state.settings.scoreLimit).toBe(1);
     expect(lobby.state.settings.allowedClasses).toEqual(DRAGON_CLASS_IDS);
@@ -755,7 +760,7 @@ describe('host settings', () => {
   it('sets mode, pulling the team size into range with overflow', () => {
     let lobby = withPlayers(newLobby(), 5);
     expect(reasonOf(setMode(lobby, 1, 'duel'))).toBe('notHost');
-    expect(reasonOf(setMode(lobby, HOST, 'emberRelay'))).toBe('unavailable');
+    expect(reasonOf(setMode(lobby, HOST, 'skyCrown'))).toBe('unavailable');
     expect(reasonOf(setMode(lobby, HOST, 'toString' as never))).toBe('invalidValue');
     lobby = must(setMode(lobby, HOST, 'duel'));
     expect(lobby.state.settings).toMatchObject({ mode: 'duel', teamSize: 2 });
@@ -768,7 +773,13 @@ describe('host settings', () => {
 
   it('sets map, limits and friendly fire with clamping', () => {
     let lobby = withPlayers(newLobby(), 1);
-    expect(reasonOf(setMap(lobby, HOST, 'emberfall-caldera'))).toBe('unavailable');
+    // Follows the table: Emberfall Caldera is switched on by its own task (Phase 6).
+    if (MAPS['emberfall-caldera'].available) {
+      const picked = must(setMap(lobby, HOST, 'emberfall-caldera'));
+      expect(picked.state.settings.map).toBe('emberfall-caldera');
+    } else {
+      expect(reasonOf(setMap(lobby, HOST, 'emberfall-caldera'))).toBe('unavailable');
+    }
     expect(reasonOf(setMap(lobby, HOST, 'atlantis' as never))).toBe('invalidValue');
     expect(setMap(lobby, HOST, 'shattered-spires').lobby).toBe(lobby);
     expect(reasonOf(setMap(lobby, 1, 'shattered-spires'))).toBe('notHost');

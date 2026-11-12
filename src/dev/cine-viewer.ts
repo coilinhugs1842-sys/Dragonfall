@@ -20,6 +20,7 @@ import type { GameRenderer } from '../render';
 import { FixedStepLoop } from '../sim';
 import { SHATTERED_SPIRES_DEFAULT_SEED, TICK_MS } from '../shared';
 import type { ArenaMap, WorldView } from '../shared';
+import type { RecordRig } from './record';
 
 /** What a scene module asks the harness to draw this frame. */
 export type CineFrame =
@@ -57,6 +58,8 @@ export interface CineViewerOptions {
   readonly renderer: GameRenderer;
   /** The value of `?viewer=`: `cine:aerie`, `cine:intro`, ... */
   readonly spec: string;
+  /** `?record`: frames are stepped by the recorder (src/dev/record.ts); the caption is left out. */
+  readonly record?: RecordRig | null;
 }
 
 const SCENES = import.meta.glob<CineSceneModule>('./cine/*.ts');
@@ -94,7 +97,10 @@ export function startCineViewer(options: CineViewerOptions): void {
     'background:rgba(20,24,36,0.7);white-space:pre;';
   const captionText = document.createTextNode(`cine:${name}`);
   caption.appendChild(captionText);
-  if (params.get('hud') !== '0') uiRoot.appendChild(caption);
+  const record = options.record ?? null;
+  if (params.get('hud') !== '0' && record === null) uiRoot.appendChild(caption);
+  // The recorder holds its clock while the map is still loading or shaders are compiling.
+  record?.setBusyProbe(() => stage.warming || stage.mapLoadState === 'loading');
 
   const probe: CineProbe = { name, timeS, info: '' };
   Reflect.set(window, '__cine', probe);
@@ -135,6 +141,7 @@ export function startCineViewer(options: CineViewerOptions): void {
 
   const driver = new FrameDriver({
     loop: new FixedStepLoop(TICK_MS, () => {}),
+    ...(record !== null ? { host: record.frameHost } : {}),
     render: (_alpha, frameMs) => {
       // A hidden tab or a breakpoint must not fast-forward the scene.
       const dtS = (frameMs < 100 ? frameMs : 100) * 0.001 * speed;

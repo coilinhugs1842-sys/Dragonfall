@@ -71,6 +71,16 @@ function isThenable(value: unknown): value is Promise<unknown> {
   return typeof value === 'object' && value !== null && 'then' in value;
 }
 
+/**
+ * Whether gamepads can be read here at all, for the settings page ("no gamepad support" is a
+ * different message from "no gamepad yet"). False without the API (an old browser; Firefox on a
+ * page that is not a secure context) and once the browser has refused a call.
+ */
+export function gamepadSourceSupported(source: GamepadSource): boolean {
+  const provider = source.provider;
+  return provider !== null && typeof provider.getGamepads === 'function';
+}
+
 /** `provider`: defaults to the real `navigator`; pass null for "no gamepads". */
 export function createGamepadSource(
   provider?: GamepadProvider | null,

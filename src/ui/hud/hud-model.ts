@@ -10,6 +10,7 @@
 
 import type { PlayerId, TeamId } from '../../shared/constants';
 import { NO_PLAYER, TEAM_EMBER, TEAM_FROST } from '../../shared/constants';
+import type { ObjectiveKind } from '../../shared/events';
 import type { MatchPhase, MatchWinner, ModeId } from '../../shared/match';
 import type { HudDamageArc, ScoreboardRow } from '../../shared/ui';
 
@@ -363,6 +364,10 @@ export function killfeedOpacityStep(ageS: number): number {
 // --- Scoreboard ---------------------------------------------------------------------------------------
 
 function ranksBefore(a: Readonly<ScoreboardRow>, b: Readonly<ScoreboardRow>): boolean {
+  // Ember Relay: the riders who brought shards home lead. 0 for everybody in other modes.
+  const capturesA = a.captures ?? 0;
+  const capturesB = b.captures ?? 0;
+  if (capturesA !== capturesB) return capturesA > capturesB;
   if (a.takedowns !== b.takedowns) return a.takedowns > b.takedowns;
   if (a.deaths !== b.deaths) return a.deaths < b.deaths;
   const assistsA = a.assists ?? 0;
@@ -374,7 +379,8 @@ function ranksBefore(a: Readonly<ScoreboardRow>, b: Readonly<ScoreboardRow>): bo
 
 /**
  * Writes into `out` the indices of `team`'s rows among the first `count`, best first: most
- * takedowns, then fewest deaths, most assists, most damage, lowest id (stable between frames).
+ * captures (Ember Relay), most takedowns, then fewest deaths, most assists, most damage, lowest
+ * id (stable between frames).
  * Returns how many it wrote (at most `out.length`). Insertion sort in place: no allocation.
  */
 export function sortTeamRows(
@@ -493,6 +499,104 @@ export const BANNER_TITLES: readonly string[] = [
   'Ember Order',
   'Frost Order',
 ];
+
+// --- Ember Relay (T-6.3) ------------------------------------------------------------------------------
+
+/** What the scoreboard's note counts toward: "First to 3 captures". */
+export function scoreNoun(mode: ModeId): string {
+  return mode === 'duel' ? 'rounds' : mode === 'emberRelay' ? 'captures' : 'takedowns';
+}
+
+/** An announcement ("Your shard is taken") stays this long, fading over the last part. */
+export const RELAY_NOTICE_LIFE_S = 4.5;
+export const RELAY_NOTICE_FADE_S = 0.8;
+
+/** OPACITY_STEPS while fresh, fading at the end, 0 once it is over (or there is none). */
+export function relayNoticeStep(kind: ObjectiveKind | null | undefined, ageS: number): number {
+  if (kind === null || kind === undefined || kind === 'zoneTaken') return 0;
+  if (!(ageS >= 0) || ageS >= RELAY_NOTICE_LIFE_S) return 0;
+  const left = RELAY_NOTICE_LIFE_S - ageS;
+  if (left >= RELAY_NOTICE_FADE_S) return OPACITY_STEPS;
+  const step = Math.ceil((left / RELAY_NOTICE_FADE_S) * OPACITY_STEPS);
+  return step < 1 ? 1 : step;
+}
+
+type ShardEventKind = Exclude<ObjectiveKind, 'zoneTaken'>;
+
+/** The announcement when it is the local team's own shard. */
+const NOTICE_OURS: Readonly<Record<ShardEventKind, string>> = {
+  pickedUp: 'Your shard has been taken',
+  dropped: 'Your shard was dropped: touch it to send it home',
+  returned: 'Your shard is home',
+  captured: 'The enemy captured your shard',
+};
+
+/** The announcement when it is the enemy's shard. */
+const NOTICE_THEIRS: Readonly<Record<ShardEventKind, string>> = {
+  pickedUp: 'Your side has the enemy shard',
+  dropped: 'The enemy shard was dropped',
+  returned: 'The enemy shard went home',
+  captured: 'Shard captured',
+};
+
+/** What a spectator reads, and the wording of the feed lines: by the shard's owner. */
+const SHARD_LINES: readonly Readonly<Record<ShardEventKind, string>>[] = [
+  {
+    pickedUp: 'Ember shard taken',
+    dropped: 'Ember shard dropped',
+    returned: 'Ember shard returned',
+    captured: 'Ember shard captured',
+  },
+  {
+    pickedUp: 'Frost shard taken',
+    dropped: 'Frost shard dropped',
+    returned: 'Frost shard returned',
+    captured: 'Frost shard captured',
+  },
+];
+
+/** The feed line for a shard event: "Frost shard taken". `shardTeam` owns the shard. */
+export function shardLine(kind: ObjectiveKind, shardTeam: TeamId): string {
+  if (kind === 'zoneTaken') return '';
+  return SHARD_LINES[shardTeam === TEAM_FROST ? 1 : 0]?.[kind] ?? '';
+}
+
+/**
+ * The announcement for a shard event, worded for whoever reads it: about "your" shard, about
+ * the enemy's, or by name for a spectator (`localTeam` null).
+ */
+export function relayNoticeText(
+  kind: ObjectiveKind,
+  shardTeam: TeamId,
+  localTeam: TeamId | null,
+): string {
+  if (kind === 'zoneTaken') return '';
+  if (localTeam === null) return shardLine(kind, shardTeam);
+  return (shardTeam === localTeam ? NOTICE_OURS : NOTICE_THEIRS)[kind];
+}
+
+/**
+ * Whether the announcement is good news for the reader: taking and capturing the enemy's shard,
+ * getting the own one back or seeing it dropped. Null for a spectator (no side).
+ */
+export function relayNoticeGood(
+  kind: ObjectiveKind,
+  shardTeam: TeamId,
+  localTeam: TeamId | null,
+): boolean | null {
+  if (localTeam === null) return null;
+  const ours = shardTeam === localTeam;
+  return kind === 'pickedUp' || kind === 'captured' ? !ours : ours;
+}
+
+/** `data-status` and the word for a shard's state, indexed by SHARD_HOME / CARRIED / DROPPED. */
+export const SHARD_STATUS_KEYS: readonly string[] = ['home', 'carried', 'dropped'];
+export const SHARD_STATUS_WORDS: readonly string[] = ['Home', 'Taken', 'Dropped'];
+
+/** 0..2 for a shard status, whatever arrives. */
+export function shardStatusIndex(status: number): number {
+  return status === 1 || status === 2 ? status : 0;
+}
 
 // --- Cinematic phases (T-5.4, T-5.5) ------------------------------------------------------------------
 

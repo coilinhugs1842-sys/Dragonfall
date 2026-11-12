@@ -33,6 +33,10 @@
  * diving cannot sink out of the bottom of the map (the terrain ends a little below the floor).
  * The limit is applied before the terrain sweep, so it never moves a dragon into the rock.
  *
+ * HEAT VENTS (T-6.4). A map may carry `vents`: columns of rising air. `resolveDragon` applies
+ * them (`applyHeatVents`, ../flight.ts) on every tick, here and not in `sim.ts`, because this
+ * is the one step the host's sim and a client's predictor both run against the map.
+ *
  * Deterministic and allocation-free per tick: scalars and instance scratch only.
  */
 
@@ -43,6 +47,7 @@ import {
   DRAGON_FLAG_IN_STORM,
   DRAGON_FLAG_PHASING,
   MATCH_TUNING,
+  VENT_TUNING,
   buildMapTriangles,
 } from '../../shared';
 import type {
@@ -51,15 +56,17 @@ import type {
   DragonClassId,
   FlightTuning,
   MapManifest,
+  MapVent,
   MatchTuning,
   MutableVec3,
   TerrainQuery,
   Vec3,
+  VentTuning,
 } from '../../shared';
 import { ENV_SOURCE_NONE, ENV_SOURCE_STORM, ENV_SOURCE_TERRAIN } from '../collision-world';
 import type { SimCollisionWorld, TerrainRay } from '../collision-world';
 import type { DragonState } from '../dragon-state';
-import { damageDragon, secondsToTicks, setDragonVelocity } from '../flight';
+import { applyHeatVents, damageDragon, secondsToTicks, setDragonVelocity } from '../flight';
 import { TerrainBvh } from './terrain-bvh';
 
 // Numeric guards, not tuning.
@@ -97,7 +104,7 @@ const TWO_PI = Math.PI * 2;
 /** What the collision world needs from a map; a MapManifest (greybox or not) fits. */
 export type CollisionMapSource = Pick<
   MapManifest,
-  'size' | 'solids' | 'placements' | 'chunkSize' | 'colliders'
+  'size' | 'solids' | 'placements' | 'chunkSize' | 'colliders' | 'vents'
 >;
 
 /**
@@ -122,6 +129,7 @@ export interface MapCollisionOptions {
   collisionTuning?: CollisionTuning;
   classTuning?: Record<DragonClassId, ClassTuning>;
   matchTuning?: MatchTuning;
+  ventTuning?: VentTuning;
   /**
    * Low-detail collision: prisms get at most this many sides (see `MapTriangleOptions`). The
    * coarse prism sits INSIDE the drawn one, so dragons then clip the drawn corners. Default:
@@ -162,7 +170,10 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
   ceilingY: number;
   floorY: number;
   onTerrainHit: TerrainHitListener | null;
+  /** The map's heat vents (empty on a map without any): see `applyHeatVents`. */
+  readonly vents: readonly MapVent[];
 
+  private readonly ventTuning: VentTuning;
   private readonly classes: Record<DragonClassId, ClassTuning>;
   private readonly match: MatchTuning;
   // Scratch of `contactNormal`.
@@ -175,6 +186,8 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
     this.classes = options.classTuning ?? CLASS_TUNING;
     this.match = options.matchTuning ?? MATCH_TUNING;
     this.onTerrainHit = options.onTerrainHit ?? null;
+    this.vents = map.vents ?? [];
+    this.ventTuning = options.ventTuning ?? VENT_TUNING;
 
     const colliders = map.colliders;
     this.stormCenterX = colliders.stormCenter.x;
@@ -211,6 +224,9 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
       return;
     }
     this.limitStormDepth(dragon);
+    // Heat vents push where the dragon is now; the push moves it from the next tick on, through
+    // that tick's terrain sweep like any other burst.
+    if (this.vents.length > 0) applyHeatVents(dragon, this.vents, this.ventTuning);
     // The timer decides, not DRAGON_FLAG_PHASING: the bit is only refreshed at the end of the
     // tick. That makes the bit "was phasing last tick", which is how the end of a phase shows.
     if (this.terrain !== null && dragon.phaseTicks <= 0) {

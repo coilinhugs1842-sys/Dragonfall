@@ -41,17 +41,9 @@ import {
 import type { QualityPreset } from '../../shared';
 import { WORLD_LIGHT_FOG_PARS_FRAGMENT } from '../light/light-glsl';
 import { setPaintedColor } from '../light/light-math';
-import { createHazeUniforms } from '../light/light-setup';
-import {
-  GOLDEN_HOUR_SKY,
-  SKY_CLOUD_LIT,
-  SKY_CLOUD_SHADOW,
-  SKY_CREAM,
-  SKY_DUSK_VIOLET,
-  SKY_MAUVE,
-  SKY_PEACH,
-  SKY_ROSE,
-} from './sky-math';
+import { createHazeUniforms, writeHazeUniforms } from '../light/light-setup';
+import { skyLookOf } from './sky-look';
+import { GOLDEN_HOUR_SKY } from './sky-math';
 import type { SkySetup } from './sky-math';
 import { SKY_NOISE_SIZE, generateSkyNoise } from './sky-noise';
 
@@ -190,6 +182,11 @@ export interface SkyDome {
   update(timeS: number): void;
   /** Low: flat-lit sheets, 2 fetches. Medium/High: lit sheets, detail and the tight sun core. */
   setQuality(preset: QualityPreset): void;
+  /**
+   * Repaints the sky for another map's sun, fog and colours (a match on a map other than the
+   * one the stage was built with). Uniform writes only, no recompile. Not per frame.
+   */
+  setSky(setup: SkySetup): void;
   dispose(): void;
 }
 
@@ -220,17 +217,47 @@ export function createSkyDome(setup: SkySetup = GOLDEN_HOUR_SKY): SkyDome {
   noise.needsUpdate = true;
 
   const haze = createHazeUniforms(setup);
-  const flatLength = Math.hypot(setup.sunDirection.x, setup.sunDirection.z);
-  const sunFlat =
-    flatLength > 1e-6
-      ? new Vector2(setup.sunDirection.x / flatLength, setup.sunDirection.z / flatLength)
-      : new Vector2(1, 0);
-  // The sheet uv of a planar step toward the sun (same rotation and stretch as the shader).
-  const sunUv = new Vector2(
-    sunFlat.x * SHEET_AXIS_X + sunFlat.y * SHEET_AXIS_Z,
-    (sunFlat.y * SHEET_AXIS_X - sunFlat.x * SHEET_AXIS_Z) * SHEET_STRETCH,
-  ).multiplyScalar(SHEET_SCALE * SHEET_LIGHT_STEP);
+  const sunFlat = new Vector2(1, 0);
+  const sunUv = new Vector2();
   const drift = new Vector4(0, 0, 0, 0);
+  const cream = new Color();
+  const peach = new Color();
+  const rose = new Color();
+  const mauve = new Color();
+  const zenith = new Color();
+  const sunDisc = new Color();
+  const sunGlow = new Color();
+  const cloudLit = new Color();
+  const cloudShadow = new Color();
+
+  /** Writes every value that comes from the map's sky. Load-time. */
+  function applySky(sky: SkySetup): void {
+    writeHazeUniforms(haze, sky);
+    const flatLength = Math.hypot(sky.sunDirection.x, sky.sunDirection.z);
+    if (flatLength > 1e-6) {
+      sunFlat.set(sky.sunDirection.x / flatLength, sky.sunDirection.z / flatLength);
+    } else {
+      sunFlat.set(1, 0);
+    }
+    // The sheet uv of a planar step toward the sun (same rotation and stretch as the shader).
+    sunUv
+      .set(
+        sunFlat.x * SHEET_AXIS_X + sunFlat.y * SHEET_AXIS_Z,
+        (sunFlat.y * SHEET_AXIS_X - sunFlat.x * SHEET_AXIS_Z) * SHEET_STRETCH,
+      )
+      .multiplyScalar(SHEET_SCALE * SHEET_LIGHT_STEP);
+    const look = skyLookOf(sky);
+    setPaintedColor(cream, look.horizonSun);
+    setPaintedColor(peach, look.midSun);
+    setPaintedColor(rose, look.horizonAway);
+    setPaintedColor(mauve, look.midAway);
+    setPaintedColor(zenith, look.zenith);
+    sunDisc.setHex(sky.sunColor).multiplyScalar(SUN_DISC_GAIN);
+    sunGlow.setHex(sky.sunColor);
+    setPaintedColor(cloudLit, look.skyCloudLit);
+    setPaintedColor(cloudShadow, look.skyCloudShadow);
+  }
+  applySky(setup);
 
   const material = new ShaderMaterial({
     name: 'SkyDome',
@@ -239,15 +266,15 @@ export function createSkyDome(setup: SkySetup = GOLDEN_HOUR_SKY): SkyDome {
     uniforms: {
       ...haze,
       uNoise: { value: noise },
-      uCream: { value: setPaintedColor(new Color(), SKY_CREAM) },
-      uPeach: { value: setPaintedColor(new Color(), SKY_PEACH) },
-      uRose: { value: setPaintedColor(new Color(), SKY_ROSE) },
-      uMauve: { value: setPaintedColor(new Color(), SKY_MAUVE) },
-      uZenith: { value: setPaintedColor(new Color(), SKY_DUSK_VIOLET) },
-      uSunDisc: { value: new Color(setup.sunColor).multiplyScalar(SUN_DISC_GAIN) },
-      uSunGlow: { value: new Color(setup.sunColor) },
-      uCloudLit: { value: setPaintedColor(new Color(), SKY_CLOUD_LIT) },
-      uCloudShadow: { value: setPaintedColor(new Color(), SKY_CLOUD_SHADOW) },
+      uCream: { value: cream },
+      uPeach: { value: peach },
+      uRose: { value: rose },
+      uMauve: { value: mauve },
+      uZenith: { value: zenith },
+      uSunDisc: { value: sunDisc },
+      uSunGlow: { value: sunGlow },
+      uCloudLit: { value: cloudLit },
+      uCloudShadow: { value: cloudShadow },
       uSunFlat: { value: sunFlat },
       uSunUv: { value: sunUv },
       uDrift: { value: drift },
@@ -289,6 +316,7 @@ export function createSkyDome(setup: SkySetup = GOLDEN_HOUR_SKY): SkyDome {
       else delete defines['SKY_DETAIL'];
       material.needsUpdate = true;
     },
+    setSky: applySky,
     dispose(): void {
       geometry.dispose();
       material.dispose();

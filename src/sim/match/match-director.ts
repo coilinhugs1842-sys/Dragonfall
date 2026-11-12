@@ -47,6 +47,12 @@
  * the gates with full health, effects are cleared and ultimate charge is kept. The storm wall
  * follows `storm-schedule.ts`.
  *
+ * EMBER RELAY (T-6.3). One round with respawns, like Skirmish, but the score is captures: carry
+ * the enemy's sky-shard into your own brazier (`relay.ts` has the rules). First team to the
+ * score limit wins; at the time limit the team with more captures wins; level at that point =
+ * sudden death (next capture wins) for `emberRelay.overtimeS`, then a draw. Takedowns do not
+ * score. Each rider's captures are counted in its stats row.
+ *
  * DISCONNECTS. A team with no riders left (seats freed) ends the match for the other team at
  * once. A team whose riders are all disconnected (seats held) for `forfeitGraceS` gives up: the
  * round in Duel, the match in Skirmish. A solo sandbox has none of this and never ends by itself.
@@ -80,13 +86,30 @@ import type {
   TeamId,
 } from '../../shared';
 import type { Sim } from '../sim';
-import { findDragonSlot } from '../sim-state';
+import { findDragonSlot, resetRelayState } from '../sim-state';
 import type { SimState } from '../sim-state';
 import { secondsToTicks } from '../ticks';
 import { createModeConfig } from './mode-config';
 import type { ModeConfig } from './mode-config';
+import { RelayRules } from './relay';
+import type { RelayArena } from './relay-sites';
 import { createStormRadii, writeDuelStorm } from './storm-schedule';
 import type { MatchArena, StormRadii } from './storm-schedule';
+
+/**
+ * A rider's stats row as the director keeps it: the shared row plus what only an objective mode
+ * counts. Rows are handed out as `MatchPlayerStats` wherever the extra is not needed.
+ */
+export interface MatchRiderStats extends MatchPlayerStats {
+  /** Ember Relay: shards this rider carried into its team's brazier. */
+  captures: number;
+}
+
+/** `captures` of a stats row, 0 for a row that does not carry it (another build, a test). */
+export function capturesOf(stats: Readonly<MatchPlayerStats>): number {
+  const captures = (stats as Partial<MatchRiderStats>).captures;
+  return typeof captures === 'number' ? captures : 0;
+}
 
 export interface MatchDirectorListener {
   /**
@@ -120,7 +143,7 @@ interface Rider {
   playerId: PlayerId;
   team: TeamId;
   connected: boolean;
-  stats: MatchPlayerStats;
+  stats: MatchRiderStats;
   // The sim's score sheet as last seen, so only what changed while a round was live is counted.
   seenTakedowns: number;
   seenDeaths: number;
@@ -146,6 +169,7 @@ function createRider(): Rider {
       assists: 0,
       damage: 0,
       healing: 0,
+      captures: 0,
     },
     seenTakedowns: 0,
     seenDeaths: 0,
@@ -175,11 +199,11 @@ export class MatchDirector {
   /** The results are over: take everyone back to the lobby. */
   finished = false;
   endReason: MatchEndReason = 'none';
-  /** Index = TeamId. Takedowns in Skirmish, rounds won in Duel. */
+  /** Index = TeamId. Takedowns in Skirmish, rounds won in Duel, captures in Ember Relay. */
   readonly scores: number[] = [0, 0];
   /** Seconds left of the round (or of sudden death); Infinity with no limit. */
   timeRemainingS = Infinity;
-  /** Skirmish sudden death is running. */
+  /** Sudden death (Skirmish, Ember Relay) is running. */
   overtime = false;
   /** The storm radius the mode set, or -1 while the map's own applies. */
   stormRadius = -1;
@@ -187,10 +211,11 @@ export class MatchDirector {
    * One row per rider that started the match, in the order they were added; the first
    * `statsCount` are live. A rider that left keeps its row (`present` false).
    */
-  readonly stats: MatchPlayerStats[] = [];
+  readonly stats: MatchRiderStats[] = [];
   statsCount = 0;
 
   private modeConfig: ModeConfig = createModeConfig(DEFAULT_HOST_SETTINGS);
+  private readonly relay: RelayRules;
   private readonly tuning: ModeTuning;
   private readonly matchTuning: MatchTuning;
   private readonly listener: MatchDirectorListener | null;
@@ -216,6 +241,7 @@ export class MatchDirector {
 
   constructor(options: MatchDirectorOptions = {}) {
     this.tuning = options.modeTuning ?? MODE_TUNING;
+    this.relay = new RelayRules(this.tuning);
     this.matchTuning = options.matchTuning ?? MATCH_TUNING;
     this.listener = options.listener ?? null;
     for (let i = 0; i < MAX_PLAYERS; i++) {
@@ -266,6 +292,8 @@ export class MatchDirector {
    * begins on `tick`. Play starts `countdownTicks` after the countdown began. Sets the sim's
    * rules (friendly fire, respawns, the storm). Add the riders after this. The same
    * `countdownTicks` are used before every later round; the intro is for round 1 only.
+   * `relayArena` is what Ember Relay places its stands and braziers from (the gates, the map
+   * bounds, the terrain); null = open sky. Other modes ignore it.
    */
   begin(
     sim: Sim,
@@ -274,6 +302,7 @@ export class MatchDirector {
     tick: number,
     countdownTicks: number,
     introTicks = 0,
+    relayArena: Readonly<RelayArena> | null = null,
   ): void {
     this.modeConfig = config;
     this.arena.stormRadius = (arena ?? NO_ARENA).stormRadius;
@@ -317,6 +346,9 @@ export class MatchDirector {
     this.stormRadius = -1;
     this.applyStorm(sim, true);
     this.writeTimeRemaining();
+    // The shards are on their stands from the first frame of the intro; any other mode has none.
+    if (config.mode === 'emberRelay') this.relay.begin(sim, relayArena);
+    else resetRelayState(sim.relay);
   }
 
   /** A rider of the match. False when the table is full or the id is already in it. */
@@ -354,7 +386,7 @@ export class MatchDirector {
   }
 
   /** The rider's stats row, or null. */
-  statsOf(playerId: PlayerId): MatchPlayerStats | null {
+  statsOf(playerId: PlayerId): MatchRiderStats | null {
     const rider = this.riderOf(playerId);
     return rider === null ? null : rider.stats;
   }
@@ -424,6 +456,8 @@ export class MatchDirector {
     if (!live) return;
     this.liveTicks++;
     const config = this.modeConfig;
+    // Also in a solo sandbox: the lone rider can still carry a shard home, it just never ends.
+    if (config.mode === 'emberRelay') this.stepRelay(tick, sim);
     if (config.sandbox) {
       this.timeRemainingS = Infinity;
       return;
@@ -432,13 +466,28 @@ export class MatchDirector {
       this.applyStorm(sim, false);
       this.judgeDuel(tick, state);
     } else {
-      this.judgeSkirmish(tick);
+      this.judgeScore(tick);
     }
   }
 
-  // --- Skirmish ------------------------------------------------------------------------------------
+  // --- Ember Relay -----------------------------------------------------------------------------------
 
-  private judgeSkirmish(tick: number): void {
+  /** The shard rules for this tick; a capture is a point for the team and for the rider. */
+  private stepRelay(tick: number, sim: Sim): void {
+    const relay = this.relay;
+    relay.step(sim, tick);
+    for (let team = 0; team < 2; team++) {
+      const scorerId = relay.capturer[team] ?? NO_PLAYER;
+      if (scorerId === NO_PLAYER) continue;
+      this.scores[team] = (this.scores[team] ?? 0) + 1;
+      const rider = this.riderOf(scorerId);
+      if (rider !== null) rider.stats.captures++;
+    }
+  }
+
+  // --- Skirmish and Ember Relay: first to the score limit, or ahead when time runs out ------------
+
+  private judgeScore(tick: number): void {
     const config = this.modeConfig;
     const ember = this.scores[TEAM_EMBER] ?? 0;
     const frost = this.scores[TEAM_FROST] ?? 0;
@@ -463,7 +512,10 @@ export class MatchDirector {
       this.endRound(leader, this.overtime ? 'suddenDeath' : 'timeLimit', tick);
       return;
     }
-    const overtimeTicks = secondsToTicks(this.tuning.skirmish.overtimeS);
+    // Read here, not passed in: a float argument to a call the JIT did not inline is boxed.
+    const overtimeS =
+      config.mode === 'emberRelay' ? this.tuning.emberRelay.overtimeS : this.tuning.skirmish.overtimeS;
+    const overtimeTicks = secondsToTicks(overtimeS);
     if (this.liveTicks >= limitTicks + overtimeTicks) {
       this.endRound('draw', 'timeLimit', tick);
       return;
@@ -744,6 +796,7 @@ export class MatchDirector {
     stats.assists = 0;
     stats.damage = 0;
     stats.healing = 0;
+    stats.captures = 0;
     rider.seenTakedowns = 0;
     rider.seenDeaths = 0;
     rider.seenAssists = 0;

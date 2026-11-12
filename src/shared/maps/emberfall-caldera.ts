@@ -15,9 +15,10 @@
  * - Right flank of each team: the trench, flown low between the rim wall and a row of basalt
  *   columns, a lava arch across it and a vent at its far end.
  * - Left flank: a staircase of ash islands spiralling up around a tall bundle of columns.
- * - Heat vents (`vents`, `EMBERFALL_VENTS`): columns of rising hot air that give lift and free
- *   speed. DATA ONLY for now: nothing in the sim reads them yet. Each stands over a small
- *   chimney, is marked with magenta rings, and has rock within a few seconds of flight.
+ * - Heat vents (`vents`, `EMBERFALL_VENTS`): columns of rising hot air that give lift, free
+ *   speed and stamina (`applyHeatVents`, src/sim/flight.ts, stepped by host and predictor
+ *   alike). Each stands over a small chimney, is marked with magenta rings, and has rock within
+ *   a few seconds of flight.
  *
  * BALANCE: like Shattered Spires the map is its own image under a HALF TURN about the vertical
  * axis through the centre. Only Ember's half is generated; Frost's is `rotatePlacementHalfTurn`
@@ -29,63 +30,20 @@
 
 import type { TeamId } from '../constants';
 import { MAX_TEAM_SIZE, TEAM_EMBER, TEAM_FROST } from '../constants';
-import type { MapPropSet, MapSky, SpawnGate } from '../manifests';
+import type { MapPropSet, MapSky, MapVent, SpawnGate } from '../manifests';
 import type { Vec3 } from '../math-types';
 import type { ArenaMap } from './arena-map';
-import { CALDERA_ASSET_TYPES, CALDERA_HULL_QUANTUM } from './generated/emberfall-caldera-hulls';
-import type { GeneratedMapAssetType } from './generated/shattered-spires-hulls';
 import { mapAssetType, mapAssetTypes, placementPoint, rotatePlacementHalfTurn } from './placements';
-import type { MapAssetType, MapAssetTypeId, MapPlacement } from './placements';
+import type { MapAssetType, MapPlacement } from './placements';
 import { createSeededRandom } from './seeded-random';
 
 // --- Contract --------------------------------------------------------------------------------------
 
 /**
- * A heat vent: a vertical column of rising hot air. PROPOSED addition to src/shared/manifests.ts
- * (`MapManifest.vents?: readonly MapVent[]`); until then the type and the list live here.
+ * The dusk look, every optional `MapSky` field filled in: the view reads them through
+ * `skyLookOf` (src/world/sky/sky-look.ts). sRGB hex like `sunColor`.
  */
-export interface MapVent {
-  readonly id: string;
-  /** Centre of the vent's mouth (the lava throat of its chimney), world space. */
-  readonly position: Vec3;
-  /** Radius of the column, metres: full effect on the axis, none at the edge. */
-  readonly radius: number;
-  /** The column reaches this far above `position.y`. */
-  readonly height: number;
-  /** Upward acceleration on the axis at the mouth, m/s^2. */
-  readonly lift: number;
-  /** Acceleration along the dragon's own heading while inside, m/s^2 (the "free speed"). */
-  readonly boost: number;
-}
-
-/**
- * The map's dusk look. Everything beyond `MapSky` is a PROPOSED optional field for the view
- * (sky gradient, hemisphere light, cloud/ash sea, world material); sRGB hex like `sunColor`.
- */
-export interface CalderaSky extends MapSky {
-  /** Hemisphere light (docs/ART_DIRECTION.md "Lighting recipe", Emberfall column). */
-  readonly hemisphereSkyColor: number;
-  readonly hemisphereGroundColor: number;
-  /** Procedural sky gradient: overhead, mid sky, and the band at the horizon. */
-  readonly zenithColor: number;
-  readonly midSkyColor: number;
-  readonly horizonColor: number;
-  /** The sea is ash, lit from below: trough, shadowed side, sun-lit side, crests. */
-  readonly seaDeepColor: number;
-  readonly seaShadowColor: number;
-  readonly seaLitColor: number;
-  readonly seaCrestColor: number;
-  /** Lava showing through the ash sea, and the light it throws up onto undersides. */
-  readonly seaGlowColor: number;
-  readonly bounceColor: number;
-  /** World material: stone tint, the colour of the `_MASKS.g` slot (ash here, moss on the first map), lit edges. */
-  readonly stoneColor: number;
-  readonly ashColor: number;
-  readonly edgeColor: number;
-  /** Aerial perspective away from and toward the sun. */
-  readonly airColor: number;
-  readonly airWarmColor: number;
-}
+export type CalderaSky = Required<Omit<MapSky, 'panorama'>>;
 
 export interface EmberfallCalderaMap extends ArenaMap {
   /**
@@ -138,78 +96,6 @@ export const CALDERA_DUEL_RING_OUTER = 350;
 export const CALDERA_RIM_RADIUS = 825;
 /** The cover rule: rock within this many seconds of flight at cruise speed (45 m/s) on every route. */
 export const CALDERA_COVER_SECONDS = 4;
-
-// --- Asset types: registration ----------------------------------------------------------------------
-
-const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-function decodeBase64(text: string): Uint8Array {
-  const lookup = new Int16Array(128).fill(-1);
-  for (let i = 0; i < BASE64.length; i++) lookup[BASE64.charCodeAt(i)] = i;
-  let length = text.length;
-  while (length > 0 && text.charCodeAt(length - 1) === 61) length--;
-  const out = new Uint8Array(Math.floor((length * 3) / 4));
-  let bits = 0;
-  let bitCount = 0;
-  let o = 0;
-  for (let i = 0; i < length; i++) {
-    const value = lookup[text.charCodeAt(i)] ?? -1;
-    if (value < 0) continue;
-    bits = (bits << 6) | value;
-    bitCount += 6;
-    if (bitCount >= 8) {
-      bitCount -= 8;
-      out[o++] = (bits >> bitCount) & 0xff;
-    }
-  }
-  return out;
-}
-
-function decodeType(source: GeneratedMapAssetType): MapAssetType {
-  const vertBytes = decodeBase64(source.verts);
-  const triBytes = decodeBase64(source.tris);
-  const vertView = new DataView(vertBytes.buffer, vertBytes.byteOffset, vertBytes.byteLength);
-  const triView = new DataView(triBytes.buffer, triBytes.byteOffset, triBytes.byteLength);
-  const hullPositions = new Float32Array(vertBytes.byteLength >> 1);
-  for (let i = 0; i < hullPositions.length; i++) {
-    hullPositions[i] = vertView.getInt16(i * 2, true) * CALDERA_HULL_QUANTUM;
-  }
-  const hullIndices = new Uint16Array(triBytes.byteLength >> 1);
-  for (let i = 0; i < hullIndices.length; i++) hullIndices[i] = triView.getUint16(i * 2, true);
-  return {
-    id: source.id,
-    kind: source.kind,
-    glb: source.glb,
-    lodTriangles: source.lodTriangles,
-    hasTint: source.hasTint,
-    radius: source.radius,
-    boundsMin: { x: source.boundsMin[0], y: source.boundsMin[1], z: source.boundsMin[2] },
-    boundsMax: { x: source.boundsMax[0], y: source.boundsMax[1], z: source.boundsMax[2] },
-    anchor: source.anchor,
-    top: source.top,
-    opening: source.opening,
-    hullPositions,
-    hullIndices,
-    hullTriangles: hullIndices.length / 3,
-  };
-}
-
-/**
- * Makes the caldera's asset types known to `mapAssetType()` / `buildMapTriangles`.
- *
- * STOPGAP: ./placements.ts decodes only the Shattered Spires list, and it is not this task's file
- * to change. Until it also decodes `CALDERA_ASSET_TYPES`, this adds the missing types to the
- * registry it returns (the object is a plain `Map` behind its read-only type, one per realm).
- * Types already present are left alone, so the call becomes a no-op the day placements.ts lists
- * them itself, and can then be deleted. Called by `createEmberfallCaldera`; idempotent.
- */
-export function registerEmberfallAssetTypes(): void {
-  // The cast is the stopgap described above: the registry is only read-only by its declared type.
-  const registry = mapAssetTypes() as Map<MapAssetTypeId, MapAssetType>;
-  for (const source of CALDERA_ASSET_TYPES) {
-    if (!registry.has(source.id)) registry.set(source.id, decodeType(source));
-  }
-}
 
 // --- Heat vents --------------------------------------------------------------------------------------
 
@@ -410,7 +296,6 @@ const TRENCH_LINE: readonly (readonly [number, number])[] = TRENCH_ANGLES.map(
  * manifest (public/assets/maps/emberfall-caldera/manifest.json) describes.
  */
 export function createEmberfallCaldera(seed: number = EMBERFALL_CALDERA_DEFAULT_SEED): EmberfallCalderaMap {
-  registerEmberfallAssetTypes();
   const random = createSeededRandom(seed);
   const range = (min: number, max: number): number => min + (max - min) * random();
   const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
@@ -892,7 +777,14 @@ export const CALDERA_SKY: CalderaSky = {
   ashColor: 0xa39c9c,
   edgeColor: 0xb08a90,
   airColor: 0x3c2c54,
-  airWarmColor: 0xa85a4c,
+  airWarmColor: 0x8e4a48,
+  // The rocks' undersides are painted with the lava's crimson: more saturation turns it to plastic.
+  stoneSaturation: 1,
+  // Lava cracks stay crimson: brighter, they burn out to the pale pink of a "fly here" marker.
+  glowGain: 1.3,
+  // The caldera's accent is the glow from below, not shafts of sun (ART_DIRECTION, "Accents").
+  lightShafts: false,
+  ashFall: true,
 };
 
 /**

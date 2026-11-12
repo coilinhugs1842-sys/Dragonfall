@@ -4,15 +4,19 @@
  *
  * Saved under `SETTINGS_STORAGE_KEY` as one flat JSON object:
  *
- *   { "version": 2, "quality": "auto", "fpsCap": 0, ..., "bindings": { "boost": ["ShiftLeft"] } }
+ *   { "version": 3, "quality": "auto", "fpsCap": 0, ..., "bindings": { "boost": ["ShiftLeft"] },
+ *     "gamepadBindings": { "boost": ["Pad4"] } }
  *
  * The setting fields stay at the top level under their Phase 0-2 names, so `stored-quality.ts`
  * (which reads `quality` at boot, before anything else exists) and the old `parseSettings` in
- * `storage.ts` keep working on a version 2 save.
+ * `storage.ts` keep working on a save of any version.
  *
  * Version 1 is what `saveSettings` wrote before T-3.9: the same object with no `version`, no
- * bindings and only the first ten fields. Migration is "read what is there, default the rest";
- * the rider name moves in from its own key (`dragonfall.name`) when the save has none.
+ * bindings and only the first ten fields. Version 2 (T-3.9) has no gamepad: no `gamepad*` fields
+ * and no `gamepadBindings`. Migration is the same for both and needs no version check: "read
+ * what is there, default the rest". Keys this version does not know are ignored, so a save
+ * written by a newer build loads too. The rider name moves in from its own key
+ * (`dragonfall.name`) when the save has none.
  *
  * Rules for every field: a wrong type falls back (to the default on load, to the current value
  * in a patch); a number outside its range is clamped and snapped to the slider step; a string is
@@ -22,6 +26,7 @@
 
 import { BINDINGS_FORMAT_VERSION, cloneBindings, parseBindings } from '../../input/bindings';
 import type { InputBindings } from '../../input/bindings';
+import { parseGamepadBindings } from '../../input/gamepad-bindings';
 import {
   DEFAULT_GAME_SETTINGS,
   MAX_LAN_HOST_LENGTH,
@@ -32,7 +37,7 @@ import {
 } from '../../shared';
 import type { GameSettings, NumberLimit, TurnSettings } from '../../shared';
 
-export const SETTINGS_VERSION = 2;
+export const SETTINGS_VERSION = 3;
 
 /** Saved text longer than this is not parsed at all (a real save is about 1 KB). */
 export const MAX_SETTINGS_TEXT_LENGTH = 32_768;
@@ -42,7 +47,10 @@ export const SENSITIVE_SETTING_KEYS: readonly (keyof GameSettings)[] = ['turn'];
 
 export interface SettingsData {
   readonly settings: GameSettings;
+  /** The keyboard and mouse table. */
   readonly bindings: InputBindings;
+  /** The gamepad's own table (`Pad0`..`Pad16` and the two flick codes). */
+  readonly gamepadBindings: InputBindings;
 }
 
 /** A plain object's own property, or undefined. Inherited keys (`__proto__` tricks) do not count. */
@@ -155,9 +163,13 @@ export function sanitizeSettings(
   const quality = own(source, 'quality');
   const fpsCap = own(source, 'fpsCap');
   const signaling = own(source, 'signaling');
+  // The automatic pick's result (T-6.2): a preset, or an explicit null for "not tested yet".
+  const autoQuality = own(source, 'autoQuality');
   const volume = SETTINGS_LIMITS.volume;
   return {
     quality: quality === 'auto' || isQualityPresetId(quality) ? quality : base.quality,
+    autoQuality:
+      autoQuality === null || isQualityPresetId(autoQuality) ? autoQuality : base.autoQuality,
     fpsCap: fpsCap === 0 || fpsCap === 30 || fpsCap === 45 ? fpsCap : base.fpsCap,
     dynamicResolution: bool(own(source, 'dynamicResolution'), base.dynamicResolution),
     renderScaleCap: clampSetting(
@@ -190,6 +202,23 @@ export function sanitizeSettings(
     lanHost: sanitizeLanHost(own(source, 'lanHost'), base.lanHost),
     turn: Object.hasOwn(source, 'turn') ? sanitizeTurn(own(source, 'turn')) : base.turn,
     playerName: sanitizePlayerName(own(source, 'playerName'), base.playerName),
+    gamepadSensitivity: clampSetting(
+      own(source, 'gamepadSensitivity'),
+      SETTINGS_LIMITS.gamepadSensitivity,
+      base.gamepadSensitivity,
+    ),
+    gamepadInvertY: bool(own(source, 'gamepadInvertY'), base.gamepadInvertY),
+    gamepadDeadZone: clampSetting(
+      own(source, 'gamepadDeadZone'),
+      SETTINGS_LIMITS.gamepadDeadZone,
+      base.gamepadDeadZone,
+    ),
+    gamepadCurve: clampSetting(
+      own(source, 'gamepadCurve'),
+      SETTINGS_LIMITS.gamepadCurve,
+      base.gamepadCurve,
+    ),
+    gamepadRumble: bool(own(source, 'gamepadRumble'), base.gamepadRumble),
   };
 }
 
@@ -208,6 +237,7 @@ export function settingsEqual(a: GameSettings, b: GameSettings): boolean {
   return (
     sameTurn &&
     a.quality === b.quality &&
+    a.autoQuality === b.autoQuality &&
     a.fpsCap === b.fpsCap &&
     a.dynamicResolution === b.dynamicResolution &&
     a.renderScaleCap === b.renderScaleCap &&
@@ -226,7 +256,12 @@ export function settingsEqual(a: GameSettings, b: GameSettings): boolean {
     a.showNetChip === b.showNetChip &&
     a.signaling === b.signaling &&
     a.lanHost === b.lanHost &&
-    a.playerName === b.playerName
+    a.playerName === b.playerName &&
+    a.gamepadSensitivity === b.gamepadSensitivity &&
+    a.gamepadInvertY === b.gamepadInvertY &&
+    a.gamepadDeadZone === b.gamepadDeadZone &&
+    a.gamepadCurve === b.gamepadCurve &&
+    a.gamepadRumble === b.gamepadRumble
   );
 }
 
@@ -265,7 +300,20 @@ export function parseSettingsData(
   } catch {
     bindings = parseBindings(null);
   }
-  return { settings, bindings };
+  // The pad's table: the same reader with the pad's defaults, which also drops any code that is
+  // not a gamepad code. A save from before the gamepad has none and gets the defaults.
+  const padTable = own(root, 'gamepadBindings');
+  let gamepadBindings: InputBindings;
+  try {
+    gamepadBindings = parseGamepadBindings(
+      isRecord(padTable)
+        ? JSON.stringify({ version: BINDINGS_FORMAT_VERSION, bindings: padTable })
+        : null,
+    );
+  } catch {
+    gamepadBindings = parseGamepadBindings(null);
+  }
+  return { settings, bindings, gamepadBindings };
 }
 
 /** The text to store. Contains the TURN credential: write it to localStorage and nowhere else. */
@@ -274,6 +322,7 @@ export function serializeSettingsData(data: SettingsData): string {
     version: SETTINGS_VERSION,
     ...data.settings,
     bindings: cloneBindings(data.bindings),
+    gamepadBindings: cloneBindings(data.gamepadBindings),
   });
 }
 

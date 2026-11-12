@@ -48,15 +48,10 @@ import {
 import type { QualityPreset, QualityPresetId } from '../../shared';
 import { WORLD_LIGHT_FOG_PARS_FRAGMENT } from '../light/light-glsl';
 import { setPaintedColor } from '../light/light-math';
-import { createHazeUniforms } from '../light/light-setup';
+import { createHazeUniforms, writeHazeUniforms } from '../light/light-setup';
+import { skyLookOf } from '../sky/sky-look';
 import { GOLDEN_HOUR_SKY, fogDistanceForOpacity } from '../sky/sky-math';
 import type { SkySetup } from '../sky/sky-math';
-import {
-  CLOUD_CREST_COLOR,
-  CLOUD_LIT_COLOR,
-  CLOUD_SEA_DEEP_COLOR,
-  CLOUD_SHADOW_COLOR,
-} from './cloud-math';
 import { PUFF_ATLAS_GRID, PUFF_CONTENT_RADIUS, generatePuffAtlas } from './cloud-noise';
 import {
   CLOUD_DEFAULT_SEED,
@@ -220,6 +215,11 @@ export interface CloudBillboards {
   update(timeS: number): void;
   /** Layers shown, instances per layer and the on-screen size cap. No shader recompile. */
   setQuality(preset: QualityPreset): void;
+  /**
+   * Another map: scatters the puffs over its field again and repaints them for its sky.
+   * Buffer and uniform writes only, no recompile. Load-time: allocates the placement lists.
+   */
+  setField(field: CloudField, sky: SkySetup): void;
   dispose(): void;
 }
 
@@ -263,36 +263,33 @@ export function createCloudBillboards(options: CloudBillboardsOptions): CloudBil
   atlas.generateMipmaps = true;
   atlas.needsUpdate = true;
 
-  const farEnd = Math.min(
-    fogDistanceForOpacity(sky.fogDensity, FAR_FADE_FOG_OPACITY),
-    FAR_FADE_FALLBACK,
-  );
   // Shared by every layer: one program, one set of per-frame uniform writes.
   const sway = { value: 0 };
   const maxScreen = { value: CLOUD_QUALITY_LIMITS.medium.maxScreenSize };
+  // z, w (the far fade) and the colours below are written by `applySky`.
+  const fade = new Vector4(PUFF_NEAR_FADE_START, PUFF_NEAR_FADE_END, 0, 1);
+  // The puffs rest on the sea, so the sea haze softens their bases into it.
+  const haze = createHazeUniforms(sky, options.field.cloudSeaY);
+  const crest = new Color();
+  const lit = new Color();
+  const shadow = new Color();
+  const deep = new Color();
+  const sunGlow = new Color();
   const material = new ShaderMaterial({
     name: 'CloudPuffs',
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     uniforms: {
       uAtlas: { value: atlas },
-      uFade: {
-        value: new Vector4(
-          PUFF_NEAR_FADE_START,
-          PUFF_NEAR_FADE_END,
-          farEnd * FAR_FADE_START_FRACTION,
-          farEnd,
-        ),
-      },
+      uFade: { value: fade },
       uMaxScreen: maxScreen,
       uSway: sway,
-      // The puffs rest on the sea, so the sea haze softens their bases into it.
-      ...createHazeUniforms(sky, options.field.cloudSeaY),
-      uCrest: { value: setPaintedColor(new Color(), CLOUD_CREST_COLOR) },
-      uLit: { value: setPaintedColor(new Color(), CLOUD_LIT_COLOR) },
-      uShadow: { value: setPaintedColor(new Color(), CLOUD_SHADOW_COLOR) },
-      uDeep: { value: setPaintedColor(new Color(), CLOUD_SEA_DEEP_COLOR) },
-      uSunGlow: { value: new Color(sky.sunColor) },
+      ...haze,
+      uCrest: { value: crest },
+      uLit: { value: lit },
+      uShadow: { value: shadow },
+      uDeep: { value: deep },
+      uSunGlow: { value: sunGlow },
     },
     transparent: true,
     premultipliedAlpha: true,
@@ -308,11 +305,15 @@ export function createCloudBillboards(options: CloudBillboardsOptions): CloudBil
   const placedCounts: number[] = [];
   const matrix = new Matrix4();
 
+  const layerSpecs: CloudLayerSpec[] = [];
+  const puffAttributes: InstancedBufferAttribute[] = [];
+
   for (let layer = 0; layer < specs.length; layer++) {
     const spec = specs[layer];
     if (spec === undefined) continue;
-    const placement = placeCloudLayer(options.field, spec, seed, layer);
-    const count = placement.count;
+    // Room for the layer's cap: another map's field may place more puffs than this one did.
+    // At least one slot so three never sees an empty instance buffer.
+    const capacity = Math.max(Math.floor(spec.count), 1);
 
     // Own geometry per layer (it carries that layer's per-instance attribute); the vertex and
     // index buffers are shared.
@@ -320,39 +321,93 @@ export function createCloudBillboards(options: CloudBillboardsOptions): CloudBil
     geometry.setAttribute('position', baseGeometry.getAttribute('position'));
     geometry.setIndex(baseGeometry.getIndex());
     geometry.boundingSphere = baseGeometry.boundingSphere;
-    const puff = new Float32Array(Math.max(count, 1) * 4);
+    const puff = new InstancedBufferAttribute(new Float32Array(capacity * 4), 4);
+    geometry.setAttribute('aPuff', puff);
 
-    // At least one slot so three never sees an empty instance buffer.
-    const mesh = new InstancedMesh(geometry, material, Math.max(count, 1));
-    for (let i = 0; i < count; i++) {
-      const o = i * CLOUD_PUFF_STRIDE;
-      const data = placement.data;
-      matrix.makeScale(data[o + PUFF_HALF_WIDTH] ?? 1, data[o + PUFF_HALF_HEIGHT] ?? 1, 1);
-      matrix.setPosition(data[o + PUFF_X] ?? 0, data[o + PUFF_Y] ?? 0, data[o + PUFF_Z] ?? 0);
-      mesh.setMatrixAt(i, matrix);
-      puff[i * 4] = data[o + PUFF_VARIANT] ?? 0;
-      puff[i * 4 + 1] = data[o + PUFF_FLIP] ?? 1;
-      puff[i * 4 + 2] = data[o + PUFF_PHASE] ?? 0;
-      puff[i * 4 + 3] = data[o + PUFF_OPACITY] ?? 1;
-    }
-    geometry.setAttribute('aPuff', new InstancedBufferAttribute(puff, 4));
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.count = count;
-    // Bounds of ALL placed puffs (computed at the full count, so any smaller count fits), grown
-    // by the sway. The renderer culls the whole layer against this; the GPU clips single puffs.
-    mesh.computeBoundingSphere();
-    if (mesh.boundingSphere !== null) mesh.boundingSphere.radius += SWAY_AMPLITUDE;
+    const mesh = new InstancedMesh(geometry, material, capacity);
     mesh.name = `CloudPuffs:${spec.name}`;
     mesh.matrixAutoUpdate = false;
     mesh.renderOrder = CLOUD_RENDER_ORDER_BASE + layer;
 
     geometries.push(geometry);
     objects.push(mesh);
-    placedCounts.push(count);
+    placedCounts.push(0);
+    layerSpecs.push(spec);
+    puffAttributes.push(puff);
+  }
+
+  /** Scatters every layer over `field` and writes the instances. Load-time. */
+  function placeField(field: CloudField): void {
+    for (let layer = 0; layer < objects.length; layer++) {
+      const mesh = objects[layer];
+      const spec = layerSpecs[layer];
+      const puff = puffAttributes[layer];
+      if (mesh === undefined || spec === undefined || puff === undefined) continue;
+      const placement = placeCloudLayer(field, spec, seed, layer);
+      const count = placement.count;
+      const data = placement.data;
+      const values = puff.array;
+      for (let i = 0; i < count; i++) {
+        const o = i * CLOUD_PUFF_STRIDE;
+        matrix.makeScale(data[o + PUFF_HALF_WIDTH] ?? 1, data[o + PUFF_HALF_HEIGHT] ?? 1, 1);
+        matrix.setPosition(data[o + PUFF_X] ?? 0, data[o + PUFF_Y] ?? 0, data[o + PUFF_Z] ?? 0);
+        mesh.setMatrixAt(i, matrix);
+        values[i * 4] = data[o + PUFF_VARIANT] ?? 0;
+        values[i * 4 + 1] = data[o + PUFF_FLIP] ?? 1;
+        values[i * 4 + 2] = data[o + PUFF_PHASE] ?? 0;
+        values[i * 4 + 3] = data[o + PUFF_OPACITY] ?? 1;
+      }
+      puff.needsUpdate = true;
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.count = count;
+      // Bounds of ALL placed puffs (computed at the full count, so any smaller count fits),
+      // grown by the sway. The renderer culls the whole layer against this; the GPU clips
+      // single puffs.
+      mesh.computeBoundingSphere();
+      if (mesh.boundingSphere !== null) mesh.boundingSphere.radius += SWAY_AMPLITUDE;
+      placedCounts[layer] = count;
+    }
+  }
+
+  /** The colours, the sun and the fog of a sky. Load-time. */
+  function applySky(next: SkySetup, cloudSeaY: number): void {
+    writeHazeUniforms(haze, next, cloudSeaY);
+    const farEnd = Math.min(
+      fogDistanceForOpacity(next.fogDensity, FAR_FADE_FOG_OPACITY),
+      FAR_FADE_FALLBACK,
+    );
+    fade.z = farEnd * FAR_FADE_START_FRACTION;
+    fade.w = farEnd;
+    const look = skyLookOf(next);
+    setPaintedColor(crest, look.puffCrest);
+    setPaintedColor(lit, look.puffLit);
+    setPaintedColor(shadow, look.puffShadow);
+    setPaintedColor(deep, look.puffDeep);
+    sunGlow.setHex(next.sunColor);
   }
 
   let activeInstances = 0;
-  for (const count of placedCounts) activeInstances += count;
+  // Until the first `setQuality`: every placed puff of every layer.
+  let limits: CloudQualityLimits = CLOUD_QUALITY_LIMITS.high;
+  let layersShown = objects.length;
+
+  /** Instances and layers drawn, from the preset's limits and what is placed. */
+  function applyLimits(): void {
+    activeInstances = 0;
+    for (let layer = 0; layer < objects.length; layer++) {
+      const mesh = objects[layer];
+      const placed = placedCounts[layer] ?? 0;
+      if (mesh === undefined) continue;
+      const count = Math.min(placed, Math.ceil(placed * limits.instanceFraction));
+      mesh.count = count;
+      mesh.visible = layer < layersShown && count > 0;
+      if (mesh.visible) activeInstances += count;
+    }
+  }
+
+  applySky(sky, options.field.cloudSeaY);
+  placeField(options.field);
+  applyLimits();
 
   return {
     objects,
@@ -365,18 +420,15 @@ export function createCloudBillboards(options: CloudBillboardsOptions): CloudBil
       sway.value = angle - Math.floor(angle / TWO_PI) * TWO_PI;
     },
     setQuality(preset: QualityPreset): void {
-      const limits = CLOUD_QUALITY_LIMITS[preset.id];
+      limits = CLOUD_QUALITY_LIMITS[preset.id];
+      layersShown = preset.cloudLayers;
       maxScreen.value = limits.maxScreenSize;
-      activeInstances = 0;
-      for (let layer = 0; layer < objects.length; layer++) {
-        const mesh = objects[layer];
-        const placed = placedCounts[layer] ?? 0;
-        if (mesh === undefined) continue;
-        const count = Math.min(placed, Math.ceil(placed * limits.instanceFraction));
-        mesh.count = count;
-        mesh.visible = layer < preset.cloudLayers && count > 0;
-        if (mesh.visible) activeInstances += count;
-      }
+      applyLimits();
+    },
+    setField(field: CloudField, next: SkySetup): void {
+      applySky(next, field.cloudSeaY);
+      placeField(field);
+      applyLimits();
     },
     dispose(): void {
       for (const mesh of objects) mesh.dispose();

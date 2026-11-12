@@ -56,6 +56,7 @@ export interface LoadedMapTexture {
 export interface MapAssetBundle {
   readonly mapId: string;
   readonly assets: ReadonlyMap<string, PropAsset>;
+  /** By material slot (`textureSlotOf`): 'stone', 'masonry', 'moss', 'cliff', 'brush'. */
   readonly textures: ReadonlyMap<string, LoadedMapTexture>;
   /** Wall-clock milliseconds the fetch + decode took. */
   readonly loadMs: number;
@@ -250,6 +251,32 @@ function disposeAsset(asset: PropAsset): void {
   }
 }
 
+/** The material slot a texture fills: its `role`, or its own id (the first map's textures). */
+export function textureSlotOf(info: MapTexture): string {
+  return info.role ?? info.id;
+}
+
+/**
+ * The textures of the shared list that `mapId` draws with, one per material slot: a texture
+ * made for this map wins its slot, a texture made for another map is left out, and the shared
+ * ones (no `map`) fill what is left. So the caldera gets basalt in the `stone` slot and never
+ * downloads the first map's slate, and a map with no textures of its own gets the shared set.
+ */
+export function texturesForMap(list: readonly MapTexture[], mapId: string): MapTexture[] {
+  const own = new Set<string>();
+  for (const info of list) if (info.map === mapId) own.add(textureSlotOf(info));
+  const picked: MapTexture[] = [];
+  const taken = new Set<string>();
+  for (const info of list) {
+    const slot = textureSlotOf(info);
+    if (info.map !== undefined ? info.map !== mapId : own.has(slot)) continue;
+    if (taken.has(slot)) continue;
+    taken.add(slot);
+    picked.push(info);
+  }
+  return picked;
+}
+
 /** What a group of load jobs came to: everything that did load, and the first failure if any. */
 interface Settled<T> {
   readonly loaded: T[];
@@ -292,7 +319,7 @@ export async function collectMapAssets(
   const assetsDone = settle(map.props.map((set) => source.loadAsset(set)));
   let textureGroup: Settled<LoadedMapTexture>;
   try {
-    const list = map.textures ?? (await source.loadTextureList());
+    const list = texturesForMap(map.textures ?? (await source.loadTextureList()), map.id);
     textureGroup = await settle(list.map((info) => source.loadTexture(info)));
   } catch (error) {
     // The list itself failed: no texture job ever started.
@@ -311,7 +338,8 @@ export async function collectMapAssets(
     for (const lod of asset.lods) bytes += geometryBytes(lod.stone) + geometryBytes(lod.tint);
   }
   const textures = new Map<string, LoadedMapTexture>();
-  for (const entry of textureGroup.loaded) textures.set(entry.info.id, entry);
+  // Keyed by slot, so every reader asks for 'stone' and gets this map's rock texture.
+  for (const entry of textureGroup.loaded) textures.set(textureSlotOf(entry.info), entry);
   return {
     mapId: map.id,
     assets,
@@ -321,15 +349,53 @@ export async function collectMapAssets(
   };
 }
 
+/**
+ * One texture transcoder for all the map loads that overlap. With two maps in the game the
+ * default map (lobby, podium) and the match's own map can load at the same time, and two
+ * loaders would mean two sets of transcoder workers (three.js warns about exactly that).
+ */
+interface SharedKtx2 {
+  readonly loader: KTX2Loader;
+  readonly renderer: WebGLRenderer;
+  readonly transcoderUrl: string;
+  users: number;
+}
+
+let sharedKtx2: SharedKtx2 | null = null;
+
+function acquireKtx2(renderer: WebGLRenderer, transcoderUrl: string): SharedKtx2 {
+  const shared = sharedKtx2;
+  if (shared !== null && shared.renderer === renderer && shared.transcoderUrl === transcoderUrl) {
+    shared.users++;
+    return shared;
+  }
+  // A different renderer or path (tests, viewers) gets its own loader, never shared.
+  const own: SharedKtx2 = {
+    loader: new KTX2Loader().setTranscoderPath(transcoderUrl).detectSupport(renderer),
+    renderer,
+    transcoderUrl,
+    users: 1,
+  };
+  if (shared === null) sharedKtx2 = own;
+  return own;
+}
+
+function releaseKtx2(held: SharedKtx2): void {
+  held.users--;
+  if (held.users > 0) return;
+  // The transcoder workers are only needed while loading.
+  held.loader.dispose();
+  if (sharedKtx2 === held) sharedKtx2 = null;
+}
+
 async function loadBundle(
   map: MapManifest,
   renderer: WebGLRenderer,
   options: MapAssetLoadOptions,
 ): Promise<MapAssetBundle> {
   const base = options.baseUrl ?? `${defaultBase()}assets/`;
-  const ktx2 = new KTX2Loader()
-    .setTranscoderPath(options.transcoderUrl ?? `${defaultBase()}vendor/basis/`)
-    .detectSupport(renderer);
+  const held = acquireKtx2(renderer, options.transcoderUrl ?? `${defaultBase()}vendor/basis/`);
+  const ktx2 = held.loader;
   const gltf = new GLTFLoader().setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder);
   const source: MapAssetSource = {
     async loadAsset(set) {
@@ -361,8 +427,7 @@ async function loadBundle(
   try {
     return await collectMapAssets(map, source);
   } finally {
-    // The transcoder workers are only needed while loading.
-    ktx2.dispose();
+    releaseKtx2(held);
   }
 }
 

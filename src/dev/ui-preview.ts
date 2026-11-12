@@ -13,6 +13,8 @@
  *   o        intro card opacity 0..1               fade     fade amount 0..1
  *   progress loading progress 0..1                 size     riders per team, 1..5
  *   still=1  name cards do not drift
+ *   tab      `settings`: video | controls | audio | game
+ *   pad=1    `settings`: a gamepad is connected     pad=0    no Gamepad API on this page
  *
  * Intents the UI sends are printed with `console.info` and otherwise ignored, except the few
  * that only change what this preview shows (focus a rider, ready, class, side).
@@ -35,10 +37,14 @@ import type {
   UiState,
 } from '../shared/ui';
 import { DEFAULT_SETTINGS } from '../shared/ui';
+import { createSettingsStore, handleSettingsIntent } from '../game/settings';
 import { createUi } from '../ui';
 import type { Ui } from '../ui';
-import { createHudState } from '../ui/hud';
+import { SHARD_CARRIED, SHARD_DROPPED } from '../shared/world-view';
+import { createHudState, pushShardEvent } from '../ui/hud';
 import type { MutableHudState } from '../ui/hud';
+import { createSettingsPanel, isSettingsTab } from '../ui/settings';
+import type { SettingsPanel } from '../ui/settings';
 import { applyPageSettings } from '../ui/settings/page-settings';
 
 export const UI_PREVIEW_SCREENS = [
@@ -58,6 +64,13 @@ export const UI_PREVIEW_SCREENS = [
   'fade',
   'loading',
   'loading-over-match',
+  // T-6.6 (accessibility sweep): the screens the list above did not reach.
+  'title',
+  'pause',
+  'settings',
+  // T-6.3 (Ember Relay): the HUD of a rider carrying the enemy shard, and that mode's results.
+  'relay-hud',
+  'results-relay',
 ] as const;
 export type UiPreviewScreen = (typeof UI_PREVIEW_SCREENS)[number];
 
@@ -94,6 +107,10 @@ interface MutableUiState {
   lobbyPlateCount: number;
   lobbyFocusId: PlayerId;
   fade: number;
+  pauseMenuOpen: boolean;
+  settingsOpen: boolean;
+  controls: UiState['controls'];
+  gamepad: UiState['gamepad'];
 }
 
 // Ten riders: a host, four more people (one not ready, one reconnecting) and five bots.
@@ -221,6 +238,9 @@ function buildScoreboard(): ScoreboardRow[] {
   return rows;
 }
 
+/** Shards captured per rider in the Ember Relay previews, in RIDERS order. */
+const RELAY_CAPTURES: readonly number[] = [2, 0, 0, 1, 1, 0, 0, 0, 0, 0];
+
 function buildResults(winner: MatchWinner): ResultsState {
   const scoreboard = buildScoreboard();
   if (winner === 'draw') {
@@ -299,6 +319,10 @@ export function startUiPreview(uiRoot: HTMLElement, params: URLSearchParams): Ui
     lobbyPlateCount: 0,
     lobbyFocusId: screen === 'aerie-focus' ? 1 : NO_PLAYER,
     fade: 0,
+    pauseMenuOpen: false,
+    settingsOpen: false,
+    controls: undefined,
+    gamepad: undefined,
   };
 
   const hud = createHudState(MAX_PLAYERS);
@@ -376,9 +400,100 @@ export function startUiPreview(uiRoot: HTMLElement, params: URLSearchParams): Ui
         label: `Charting ${MAPS[hostSettings.map].name}…`,
       };
       break;
+    case 'title':
+    case 'settings':
+      state.screen = 'title';
+      state.lobby = null;
+      state.connection = { ...state.connection, status: 'offline', isHost: false };
+      state.settingsOpen = screen === 'settings';
+      break;
+    case 'pause':
+      matchPhase('playing');
+      state.pauseMenuOpen = true;
+      break;
+    case 'relay-hud': {
+      // Ember Relay: the local rider carries the Frost shard home while its own lies dropped.
+      matchPhase('playing');
+      hud.mode = 'emberRelay';
+      hud.scoreLimit = 3;
+      hud.scores = [2, 1];
+      for (let i = 0; i < hud.scoreboardCount; i++) {
+        const row = hud.scoreboard[i];
+        if (row !== undefined) row.captures = RELAY_CAPTURES[i] ?? 0;
+      }
+      const relay = hud.relayPool;
+      relay.shards[TEAM_EMBER].status = SHARD_DROPPED;
+      relay.shards[TEAM_EMBER].returnInS = 14;
+      relay.shards[TEAM_FROST].status = SHARD_CARRIED;
+      relay.shards[TEAM_FROST].carrierName = RIDERS[0]?.name ?? '';
+      relay.carrying = localId === 0;
+      relay.brazierDistanceM = 640;
+      hud.relay = relay;
+      pushShardEvent(hud, 'pickedUp', TEAM_FROST, 0, RIDERS[0]?.name ?? '', TEAM_EMBER);
+      pushShardEvent(hud, 'dropped', TEAM_EMBER, 3, RIDERS[3]?.name ?? '', TEAM_FROST);
+      // The own shard where it fell, and the way home.
+      const fallen = hud.compass[0];
+      const home = hud.compass[1];
+      if (fallen !== undefined && home !== undefined) {
+        fallen.kind = 'shard';
+        fallen.team = TEAM_EMBER;
+        fallen.angle = 0.45;
+        fallen.distanceM = 310;
+        fallen.alive = true;
+        home.kind = 'brazier';
+        home.team = TEAM_EMBER;
+        home.angle = -0.25;
+        home.distanceM = 640;
+        home.alive = true;
+        hud.compassCount = 2;
+      }
+      break;
+    }
+    case 'results-relay': {
+      matchPhase('results');
+      hud.mode = 'emberRelay';
+      hud.scoreLimit = 3;
+      hud.scores = [3, 1];
+      const base = buildResults(TEAM_EMBER);
+      state.results = {
+        ...base,
+        mode: 'emberRelay',
+        scores: [3, 1],
+        mostCapturesId: 0,
+        scoreboard: base.scoreboard.map((row, i) => ({ ...row, captures: RELAY_CAPTURES[i] ?? 0 })),
+      };
+      break;
+    }
     default:
       break;
   }
+
+  // The settings panel is its own root beside the UI, as in the game. Here it runs on a store
+  // that lives in memory, so sliders and rebinding work and nothing is saved.
+  let panel: SettingsPanel | null = null;
+  const store = screen === 'settings' ? createSettingsStore({ storage: null }) : null;
+  const padParam = params.get('pad');
+  const syncSettings = (): void => {
+    if (store === null) return;
+    state.settings = {
+      ...store.settings,
+      uiScale: scale,
+      reduceMotion,
+      colorBlindMarkers: strongMarkers,
+    };
+    state.controls = store.controls;
+    state.gamepad = {
+      supported: padParam !== '0',
+      secure: padParam !== '0',
+      connected: padParam === '1',
+      name: padParam === '1' ? 'Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e)' : '',
+      standard: true,
+      controls: store.gamepadControls,
+      pressCode: '',
+      pressSeq: 0,
+    };
+  };
+  syncSettings();
 
   const replacePlayer = (id: PlayerId, change: Partial<LobbyPlayer>): void => {
     players = players.map((player) => (player.id === id ? { ...player, ...change } : player));
@@ -386,6 +501,14 @@ export function startUiPreview(uiRoot: HTMLElement, params: URLSearchParams): Ui
   };
   const onIntent = (intent: UiIntent): void => {
     console.info('[ui-preview] intent', JSON.stringify(intent));
+    if (store !== null) {
+      handleSettingsIntent(store, intent, {
+        close: () => {
+          state.settingsOpen = false;
+        },
+      });
+      syncSettings();
+    }
     switch (intent.type) {
       case 'lobby.focusPlayer':
         state.lobbyFocusId = intent.playerId ?? NO_PLAYER;
@@ -450,9 +573,16 @@ export function startUiPreview(uiRoot: HTMLElement, params: URLSearchParams): Ui
     if (stopped) return;
     if (state.aerie) placePlates(still ? 0 : (performance.now() - startMs) / 1000);
     ui.update(state);
+    panel?.update(state);
     clockAheadMs = aheadMs;
     frame = requestAnimationFrame(tick);
   };
+  if (store !== null) {
+    panel = createSettingsPanel(uiRoot, onIntent);
+    panel.update(state);
+    const tab = params.get('tab');
+    if (isSettingsTab(tab)) panel.open(tab);
+  }
   tick();
 
   if (screen === 'aerie-rules') {
@@ -468,6 +598,7 @@ export function startUiPreview(uiRoot: HTMLElement, params: URLSearchParams): Ui
       stopped = true;
       cancelAnimationFrame(frame);
       ui.dispose();
+      panel?.dispose();
       if (running === preview) running = null;
     },
   };

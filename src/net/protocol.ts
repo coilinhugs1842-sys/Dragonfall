@@ -78,6 +78,11 @@ export const MSG_PLAYER_PINGS = 29;
  * every rider's takedowns, deaths, assists, damage and healing. Codec in `./session/scores`.
  */
 export const MSG_SCOREBOARD = 30;
+/**
+ * `ctrl`, H->C, Ember Relay only: where the stands and braziers are and the state of both
+ * shards. Sent when it changes and to whoever joins mid-match. Codec in `./session/relay`.
+ */
+export const MSG_RELAY = 31;
 
 /** What `Reader.peekType` returns for an empty buffer or an id that is not in the table. */
 export const MSG_INVALID = -1;
@@ -98,7 +103,8 @@ export type MessageType =
   | typeof MSG_KICK
   | typeof MSG_HOST_LEFT
   | typeof MSG_PLAYER_PINGS
-  | typeof MSG_SCOREBOARD;
+  | typeof MSG_SCOREBOARD
+  | typeof MSG_RELAY;
 
 export function isMessageType(value: number): value is MessageType {
   return (
@@ -106,7 +112,8 @@ export function isMessageType(value: number): value is MessageType {
     value === MSG_SNAPSHOT ||
     (value >= MSG_HELLO && value <= MSG_HOST_LEFT) ||
     value === MSG_PLAYER_PINGS ||
-    value === MSG_SCOREBOARD
+    value === MSG_SCOREBOARD ||
+    value === MSG_RELAY
   );
 }
 
@@ -245,7 +252,7 @@ export const HELLO_MAX_BYTES =
 export const REJECT_BYTES = HEADER_BYTES + 1;
 export const PING_BYTES = HEADER_BYTES + 8;
 export const PONG_BYTES = HEADER_BYTES + 8 + 8 + 4;
-export const MATCH_START_BYTES = HEADER_BYTES + 4 + 4;
+export const MATCH_START_BYTES = HEADER_BYTES + 4 + 4 + 1;
 export const MATCH_PHASE_BYTES = HEADER_BYTES + 4 + 1 + 1 + 1;
 export const KICK_BYTES = HEADER_BYTES;
 export const HOST_LEFT_BYTES = HEADER_BYTES;
@@ -755,12 +762,18 @@ export interface MatchStartMessage {
   tick: number;
   /** Full host tick at which the match sim starts (dragons spawn). */
   startTick: number;
-  /** Map layout seed (u32); mode, map and teams come from the lobby state. */
+  /** Map layout seed (u32); mode and teams come from the lobby state. */
   seed: number;
+  /**
+   * The map the match is flown on (u8 index into MAP_IDS). Sent here, next to the seed, so a
+   * client builds its collision world from this one message and can never pair the host's seed
+   * with a map id from a lobby state that is a moment older or newer.
+   */
+  map: MapId;
 }
 
 export function createMatchStartMessage(): MatchStartMessage {
-  return { tick: 0, startTick: 0, seed: 0 };
+  return { tick: 0, startTick: 0, seed: 0, map: 'shattered-spires' };
 }
 
 export interface MatchPhaseMessage {

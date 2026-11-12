@@ -22,6 +22,7 @@ import {
   acquireDragonView,
   acquireZoneView,
   beginWorldView,
+  writeRelayView,
 } from '../shared';
 import type { MatchPhase, MutableQuat, MutableWorldView, PlayerId, Quat } from '../shared';
 import type { HostViewState } from '../net';
@@ -157,5 +158,8 @@ export function buildWorldView(
   clock.phaseTimeS = prev.timeS + (current.timeS - prev.timeS) * t;
   clock.timeRemainingS = Infinity;
   clock.round = 1;
+  // Ember Relay's shards and braziers (off in every other mode). After the dragons: a carried
+  // shard is put on its carrier as drawn this frame.
+  writeRelayView(view, current.relay, current.tick);
   return view;
 }

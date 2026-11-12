@@ -15,7 +15,7 @@
  *   INTENT       u8 intent, body                   see `encodeIntent`
  *   PING         f64 clientTimeMs
  *   PONG         f64 clientTimeMs, f64 hostTimeMs, u32 hostTick
- *   MATCH_START  u32 startTick, u32 seed
+ *   MATCH_START  u32 startTick, u32 seed, u8 map   (index into MAP_IDS)
  *   MATCH_PHASE  u32 phaseStartTick, u8 phase, u8 round, u8 winner
  *                (header tick = low 16 bits of the tick play begins while `intro` / `countdown`)
  *   KICK         (nothing)
@@ -484,6 +484,7 @@ export function encodeMatchStart(w: Writer, msg: Readonly<MatchStartMessage>): n
   w.header(MSG_MATCH_START, msg.tick);
   w.u32(msg.startTick >>> 0);
   w.u32(msg.seed >>> 0);
+  w.u8(wireIndex(MAP_IDS.indexOf(msg.map), w));
   return w.finish();
 }
 
@@ -491,10 +492,13 @@ export function decodeMatchStart(r: Reader, into: MatchStartMessage): boolean {
   const tick = r.header(MSG_MATCH_START, MATCH_START_BYTES);
   const startTick = r.u32();
   const seed = r.u32();
-  if (!r.finish()) return false;
+  const map = MAP_IDS[r.u8()];
+  // A map this build does not know: refuse the message whole, never guess a map.
+  if (!r.finish() || map === undefined) return false;
   into.tick = tick;
   into.startTick = startTick;
   into.seed = seed;
+  into.map = map;
   return true;
 }
 

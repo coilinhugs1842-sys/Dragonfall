@@ -27,7 +27,7 @@ import { createSeededRandom } from '../../shared';
 import type { QualityPreset, QualityPresetId, Vec3 } from '../../shared';
 import type { SkySetup } from '../sky/sky-math';
 import { WORLD_LIGHT_FOG_PARS_FRAGMENT } from './light-glsl';
-import { createHazeUniforms } from './light-setup';
+import { createHazeUniforms, writeHazeUniforms } from './light-setup';
 
 /** Cards built; presets draw a prefix of them. */
 export const LIGHT_SHAFT_MAX = 9;
@@ -151,46 +151,62 @@ export interface LightShafts {
   readonly activeCount: number;
   update(timeS: number): void;
   setQuality(preset: QualityPreset): void;
+  /** Another map: its arena, its sun direction and colour. Buffer writes only. Load-time. */
+  setField(field: LightShaftField, sky: SkySetup): void;
   dispose(): void;
 }
 
 export function createLightShafts(options: LightShaftsOptions): LightShafts {
-  const placed = placeLightShafts(options, options.sky.sunDirection, options.seed ?? 0x5afe);
-  const positions = new Float32Array(LIGHT_SHAFT_MAX * 4 * 3);
+  const seed = options.seed ?? 0x5afe;
+  const positions = new BufferAttribute(new Float32Array(LIGHT_SHAFT_MAX * 4 * 3), 3);
   const corners = new Float32Array(LIGHT_SHAFT_MAX * 4 * 2);
-  const shapes = new Float32Array(LIGHT_SHAFT_MAX * 4 * 3);
+  const shapes = new BufferAttribute(new Float32Array(LIGHT_SHAFT_MAX * 4 * 3), 3);
   const indices: number[] = [];
   const cornerX = [-1, 1, 1, -1];
   const cornerY = [0, 0, 1, 1];
   for (let i = 0; i < LIGHT_SHAFT_MAX; i++) {
-    const o = i * LIGHT_SHAFT_STRIDE;
     for (let c = 0; c < 4; c++) {
       const v = i * 4 + c;
-      positions[v * 3] = placed[o] ?? 0;
-      positions[v * 3 + 1] = placed[o + 1] ?? 0;
-      positions[v * 3 + 2] = placed[o + 2] ?? 0;
       corners[v * 2] = cornerX[c] ?? 0;
       corners[v * 2 + 1] = cornerY[c] ?? 0;
-      shapes[v * 3] = placed[o + 3] ?? 1;
-      shapes[v * 3 + 1] = placed[o + 4] ?? 1;
-      shapes[v * 3 + 2] = placed[o + 5] ?? 0;
     }
     indices.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3);
   }
   const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('position', positions);
   geometry.setAttribute('aCorner', new BufferAttribute(corners, 2));
-  geometry.setAttribute('aShape', new BufferAttribute(shapes, 3));
+  geometry.setAttribute('aShape', shapes);
   geometry.setIndex(indices);
 
   const time = { value: 0 };
+  const haze = createHazeUniforms(options.sky);
+  const color = new Color();
+
+  /** Stands the shafts in `field` along the sun of `sky`, in its colour. Load-time. */
+  function place(field: LightShaftField, sky: SkySetup): void {
+    const placed = placeLightShafts(field, sky.sunDirection, seed);
+    for (let i = 0; i < LIGHT_SHAFT_MAX; i++) {
+      const o = i * LIGHT_SHAFT_STRIDE;
+      for (let c = 0; c < 4; c++) {
+        const v = i * 4 + c;
+        positions.setXYZ(v, placed[o] ?? 0, placed[o + 1] ?? 0, placed[o + 2] ?? 0);
+        shapes.setXYZ(v, placed[o + 3] ?? 1, placed[o + 4] ?? 1, placed[o + 5] ?? 0);
+      }
+    }
+    positions.needsUpdate = true;
+    shapes.needsUpdate = true;
+    writeHazeUniforms(haze, sky);
+    color.setHex(sky.sunColor).multiplyScalar(SHAFT_STRENGTH);
+  }
+  place(options, options.sky);
+
   const material = new ShaderMaterial({
     name: 'LightShafts',
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     uniforms: {
-      ...createHazeUniforms(options.sky),
-      uColor: { value: new Color(options.sky.sunColor).multiplyScalar(SHAFT_STRENGTH) },
+      ...haze,
+      uColor: { value: color },
       uTime: time,
     },
     blending: AdditiveBlending,
@@ -225,6 +241,7 @@ export function createLightShafts(options: LightShaftsOptions): LightShafts {
       geometry.setDrawRange(0, activeCount * 6);
       object.visible = activeCount > 0;
     },
+    setField: place,
     dispose(): void {
       geometry.dispose();
       material.dispose();

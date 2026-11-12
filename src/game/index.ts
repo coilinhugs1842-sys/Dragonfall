@@ -2,6 +2,32 @@
 
 export { APP_STATE_IDS, APP_TRANSITIONS, App } from './app';
 export type { AppChangeListener, AppStateHandler, AppStateId } from './app';
+export {
+  AUTO_QUALITY_PRESET,
+  AUTO_QUALITY_REFERENCE_PIXELS,
+  AUTO_QUALITY_SCALE,
+  AUTO_QUALITY_TUNING,
+  AutoQualityMeter,
+  createAutoQualityMeasurement,
+  decideQuality,
+  drawMsAtReference,
+  repeatsForScene,
+} from './auto-quality';
+export type {
+  AutoQualityDecision,
+  AutoQualityMeasurement,
+  AutoQualityMeterState,
+  AutoQualityMethod,
+} from './auto-quality';
+export { createAutoQualityRun } from './auto-quality-run';
+export type {
+  AutoQualityPatch,
+  AutoQualityRenderer,
+  AutoQualityReport,
+  AutoQualityRun,
+  AutoQualityRunOptions,
+  AutoQualityRunState,
+} from './auto-quality-run';
 export { AUTOPILOT_CYCLE_TICKS, writeAutopilotFrame } from './autopilot';
 export type { AutopilotCourse, AutopilotSubject } from './autopilot';
 export { createDebugProbe } from './debug-probe';
@@ -32,7 +58,13 @@ export {
   writeRejoin,
 } from './storage';
 export type { RejoinRecord } from './storage';
-export { SETTINGS_STORAGE_KEY, readStoredQuality } from './stored-quality';
+export {
+  AUTO_QUALITY_LINE_KEY,
+  SETTINGS_STORAGE_KEY,
+  readAutoQualityLine,
+  readStoredQuality,
+  writeAutoQualityLine,
+} from './stored-quality';
 export {
   applySessionFacts,
   connectFailure,

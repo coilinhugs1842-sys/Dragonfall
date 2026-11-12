@@ -38,6 +38,7 @@ export type { DragonState } from './dragon-state';
 export { DEFAULT_MAX_STEPS_PER_ADVANCE, FixedStepLoop } from './fixed-loop';
 export type { FixedStepFn } from './fixed-loop';
 export {
+  applyHeatVents,
   damageDragon,
   finalizeDragon,
   initDragon,
@@ -53,12 +54,22 @@ export { createSim, stepDragon } from './sim';
 export type { Sim, SimInputs, SimOptions } from './sim';
 export {
   clearSimEffects,
+  copyRelayState,
   copySimState,
   createProjectileState,
+  createRelayState,
   createSimState,
   createZoneState,
   findDragon,
   findDragonSlot,
+  resetRelayState,
   resetSimState,
 } from './sim-state';
-export type { ProjectileState, ScoreState, SimState, ZoneState } from './sim-state';
+export type {
+  ProjectileState,
+  RelayShardState,
+  RelayState,
+  ScoreState,
+  SimState,
+  ZoneState,
+} from './sim-state';

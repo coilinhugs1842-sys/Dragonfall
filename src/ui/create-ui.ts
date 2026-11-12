@@ -9,9 +9,10 @@
  */
 
 import './ui.css';
-import type { UiIntentHandler, UiState } from '../shared/ui';
+import type { UiIntentHandler, UiNavCommand, UiState } from '../shared/ui';
 import { el } from './dom';
 import { createHud } from './hud';
+import { createPadNav } from './pad-nav';
 import { LobbyScreen } from './screens/lobby';
 import { ConnectionChip, PauseMenu, SessionNotice, createReconnectStrip } from './screens/overlays';
 import { ResultsPanel } from './screens/results';
@@ -39,6 +40,14 @@ export interface UiOptions {
 export interface Ui {
   /** Renders the state. Cheap when nothing changed; safe to call every frame. */
   update(state: UiState): void;
+  /**
+   * One menu step from a gamepad (D-pad or stick, A, B), from the game layer, which reads the
+   * pad. Moves the focus, presses the focused button, or does what Escape does (./pad-nav.ts).
+   * Also reaches the settings panel when it is mounted in the same root.
+   */
+  navigate(command: UiNavCommand): void;
+  /** The pad opened a menu: show the focus ring on the button that menu focuses. */
+  markPadUsed(): void;
   /** Removes every element and listener. */
   dispose(): void;
 }
@@ -99,6 +108,26 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
     node.hidden = true;
   }
   let baseInert = false;
+  // Keyboard use (T-6.6): the button that had the focus when a dialog covered the page gets it
+  // back when the dialog goes. The settings panel tries this itself, but it closes while the
+  // page is still disabled, where `focus()` does nothing; the focus was left on nothing.
+  let focusBehind: EventTarget | null = null;
+  const onBaseFocusIn = (event: Event): void => {
+    focusBehind = event.target;
+  };
+  const onBaseFocusOut = (event: FocusEvent): void => {
+    // The focus was dropped on purpose (a click on the empty page), not taken by a dialog.
+    if (!baseInert && event.relatedTarget === null) focusBehind = null;
+  };
+  const restoreFocusBehind = (): void => {
+    const target = focusBehind;
+    if (!(target instanceof HTMLElement) || !target.isConnected) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    if (target.closest('[hidden]') === null) target.focus();
+  };
+  base.addEventListener('focusin', onBaseFocusIn);
+  base.addEventListener('focusout', onBaseFocusOut);
 
   base.append(title.root, lobby.root, chip.root, strip);
   // Stacking, bottom to top: the page (HUD, menus), the scene-cut fade, the loading
@@ -166,6 +195,7 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
     if (inert !== baseInert) {
       baseInert = inert;
       base.inert = inert;
+      if (!inert) restoreFocusBehind();
     }
     if (layers.pause !== shown.pause) {
       setHidden(pause.root, !(shown.pause = layers.pause));
@@ -220,12 +250,38 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
   };
   document.addEventListener('keydown', onKeyDown);
 
+  // The whole root, not just this container: the settings panel is mounted beside it.
+  const padNav = createPadNav(root);
+
+  const navigate = (command: UiNavCommand): void => {
+    if (disposed || last === null) return;
+    const dialogOpen = shown.pause || shown.notice || last.settingsOpen === true;
+    if (last.screen === 'match' && !dialogOpen) {
+      // No menu in front of the match. A skips the intro like Space does; B does not open the
+      // flight menu (that is the Menu button's job), and there is nothing to step through
+      // except the results' buttons.
+      if (command === 'accept' && takeSkip(skip, last.screen, last.hud, false)) {
+        onIntent({ type: 'match.skipIntro' });
+        return;
+      }
+      if (command === 'back' || !resultsShown) return;
+    }
+    padNav.navigate(command);
+  };
+
   return {
     update,
+    navigate,
+    markPadUsed(): void {
+      if (!disposed) padNav.markUsed();
+    },
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      padNav.dispose();
       document.removeEventListener('keydown', onKeyDown);
+      base.removeEventListener('focusin', onBaseFocusIn);
+      base.removeEventListener('focusout', onBaseFocusOut);
       hud.dispose();
       title.dispose();
       lobby.dispose();

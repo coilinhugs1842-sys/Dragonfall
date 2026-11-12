@@ -46,10 +46,12 @@ describe('SCOREBOARD codec', () => {
     const stats = [row(0, TEAM_EMBER, 3), row(1, TEAM_FROST, 0), row(7, TEAM_FROST, 12)];
     const writer = new Writer(SCOREBOARD_MAX_BYTES);
     const length = encodeScoreboard(writer, 4242, stats, stats.length);
-    expect(length).toBe(4 + 3 * 12);
+    expect(length).toBe(4 + 3 * 13);
     const table = createScoreTable();
     expect(decodeScoreboard(readerFor(writer, length), table)).toBe(true);
     expect(table.count).toBe(3);
+    // Rows without `captures` (any mode but Ember Relay) arrive as 0.
+    expect(table.rows.slice(0, 3).map((entry) => entry.captures)).toEqual([0, 0, 0]);
     for (let i = 0; i < stats.length; i++) {
       const sent = stats[i];
       const got = table.rows[i];
@@ -75,6 +77,19 @@ describe('SCOREBOARD codec', () => {
     expect(decodeScoreboard(readerFor(writer, length), table)).toBe(true);
     expect(table.count).toBe(1);
     expect(table.rows[0]).toMatchObject({ takedowns: 0xffff, damage: 0xffff, healing: 0 });
+  });
+
+  it('carries Ember Relay captures per rider', () => {
+    const stats = [
+      { ...row(0, TEAM_EMBER, 3), captures: 2 },
+      { ...row(1, TEAM_FROST, 0), captures: 0 },
+      { ...row(4, TEAM_FROST, 1), captures: 999 },
+    ];
+    const writer = new Writer(SCOREBOARD_MAX_BYTES);
+    const length = encodeScoreboard(writer, 7, stats, stats.length);
+    const table = createScoreTable();
+    expect(decodeScoreboard(readerFor(writer, length), table)).toBe(true);
+    expect(table.rows.slice(0, 3).map((entry) => entry.captures)).toEqual([2, 0, 255]);
   });
 
   it('fits the largest table and refuses malformed input', () => {

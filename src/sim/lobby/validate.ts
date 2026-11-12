@@ -64,7 +64,18 @@ export function validateHostSettings(raw: unknown): HostSettings | null {
   if (difficultyRaw !== undefined && !isBotDifficulty(difficultyRaw)) return null;
   const limits = HOST_SETTING_LIMITS;
   if (!isModeId(mode) || !isMapId(map)) return null;
-  if (!isInt(teamSize, MIN_TEAM_SIZE, MAX_TEAM_SIZE)) return null;
+  // Inside the mode's own range too (Duel 1-2, Ember Relay 2-5): the host clamps it on every
+  // change, so anything else is a broken or stale message.
+  const modeInfo = MODES[mode];
+  if (
+    !isInt(
+      teamSize,
+      Math.max(MIN_TEAM_SIZE, modeInfo.minTeamSize),
+      Math.min(MAX_TEAM_SIZE, modeInfo.maxTeamSize),
+    )
+  ) {
+    return null;
+  }
   if (!isInt(scoreLimit, limits.scoreLimitMin, limits.scoreLimitMax)) return null;
   if (timeLimitS !== 0 && !isInt(timeLimitS, limits.timeLimitMinS, limits.timeLimitMaxS)) {
     return null;

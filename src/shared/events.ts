@@ -72,7 +72,9 @@ export interface AbilityCastEvent {
 }
 
 /**
- * TBD in T-6.x (Ember Relay, Sky Crown): the kinds will follow the objective modes.
+ * Ember Relay (T-6.3) sends the first four, about a sky-shard: `pickedUp` and `captured` are good
+ * for the team of the rider who did it (the shard is the OTHER team's), `dropped` and `returned`
+ * for the shard's owner. `zoneTaken` is Sky Crown's (T-6.x).
  * Index = `u8` wire value. Append only.
  */
 export const OBJECTIVE_KINDS = [

@@ -44,6 +44,7 @@ export type {
 } from './host-session';
 export {
   DEFAULT_MATCH_SEED,
+  createMapMatchWorldFactory,
   createShatteredSpiresMatchWorldFactory,
   matchWorldOf,
   createGreyboxMatchWorld,
@@ -74,6 +75,7 @@ export {
   encodeScoreboard,
 } from './scores';
 export type { ScoreTable } from './scores';
+export { RELAY_BYTES, decodeRelay, encodeRelay } from './relay';
 export { steerToCourse } from './pilot';
 export type { PilotCourse, PilotSubject } from './pilot';
 export {

@@ -414,7 +414,7 @@ function sampleMessages(): Uint8Array[] {
   keep(encodeIntent(w, { tick: 1, intent: { type: 'host.setTimeLimit', timeLimitS: 480 } }));
   keep(encodePing(w, { tick: 1, clientTimeMs: 1234.5 }));
   keep(encodePong(w, { tick: 1, clientTimeMs: 1234.5, hostTimeMs: 999.25, hostTick: 9001 }));
-  keep(encodeMatchStart(w, { tick: 1, startTick: 9100, seed: 42 }));
+  keep(encodeMatchStart(w, { tick: 1, startTick: 9100, seed: 42, map: 'emberfall-caldera' }));
   keep(
     encodeMatchPhase(w, { tick: 1, phaseStartTick: 9100, phase: 'results', round: 1, winner: 0 }),
   );

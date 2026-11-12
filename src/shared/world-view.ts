@@ -16,7 +16,7 @@ import type { AbilityTable } from './abilities';
 import { ABILITY_SLOTS } from './classes';
 import type { DragonClassId } from './classes';
 import type { PlayerId, TeamId } from './constants';
-import { NO_PLAYER, TEAM_EMBER, TICK_DT_S, TICK_HZ } from './constants';
+import { NO_PLAYER, TEAM_EMBER, TEAM_FROST, TICK_DT_S, TICK_HZ } from './constants';
 import type { MatchPhase } from './match';
 import type { MutableQuat, MutableVec3, Quat, Vec3 } from './math-types';
 import { createQuat, createVec3 } from './math-types';
@@ -208,6 +208,41 @@ export interface MatchClockView {
   readonly round: number;
 }
 
+// --- Ember Relay (T-6.3) ---------------------------------------------------------------------------
+
+/** Where a sky-shard is. The same numbers in the sim's state and on the wire. Append only. */
+export const SHARD_HOME = 0;
+export const SHARD_CARRIED = 1;
+export const SHARD_DROPPED = 2;
+export const SHARD_STATUS_COUNT = 3;
+
+export interface ShardView {
+  /** The team that owns it (its enemies carry it away). */
+  readonly team: TeamId;
+  /** SHARD_HOME, SHARD_CARRIED or SHARD_DROPPED. */
+  readonly status: number;
+  /** Who carries it, or NO_PLAYER. */
+  readonly carrierId: PlayerId;
+  /** Its stand while home, the carrier's position while carried, where it lies while dropped. */
+  readonly position: Vec3;
+  /** Dropped: seconds until it goes home by itself. Otherwise 0. */
+  readonly returnInS: number;
+}
+
+/**
+ * The objective state of an Ember Relay match. Fixed size (two teams), so nothing here is
+ * pooled by count: when `active` is false (any other mode) ignore the rest.
+ */
+export interface RelayView {
+  readonly active: boolean;
+  /** Index = owning TeamId. */
+  readonly shards: readonly ShardView[];
+  /** Where each team's shard rests. Index = TeamId. */
+  readonly stands: readonly Vec3[];
+  /** Where each team scores. Index = TeamId. */
+  readonly braziers: readonly Vec3[];
+}
+
 export interface WorldView {
   /** Pool: only the first `dragonCount` entries are live. See the rules at the top of the file. */
   readonly dragons: readonly DragonView[];
@@ -220,6 +255,8 @@ export interface WorldView {
   readonly localDragonId: PlayerId;
   readonly clock: MatchClockView;
   readonly local: LocalCombatView;
+  /** Ember Relay's shards and braziers; `relay.active` is false in every other mode. */
+  readonly relay: RelayView;
 }
 
 // --- Writable side: only `src/game` (the builder) uses these ---------------------------------------
@@ -281,6 +318,21 @@ export interface MutableMatchClockView {
   round: number;
 }
 
+export interface MutableShardView {
+  team: TeamId;
+  status: number;
+  carrierId: PlayerId;
+  position: MutableVec3;
+  returnInS: number;
+}
+
+export interface MutableRelayView {
+  active: boolean;
+  shards: MutableShardView[];
+  stands: MutableVec3[];
+  braziers: MutableVec3[];
+}
+
 /** Structurally assignable to WorldView, so the builder passes it to views as-is. */
 export interface MutableWorldView {
   dragons: MutableDragonView[];
@@ -292,6 +344,32 @@ export interface MutableWorldView {
   localDragonId: PlayerId;
   clock: MutableMatchClockView;
   local: MutableLocalCombatView;
+  relay: MutableRelayView;
+}
+
+/** Both shards at the origin and `active` false: what every mode but Ember Relay shows. */
+export function createRelayView(): MutableRelayView {
+  return {
+    active: false,
+    shards: [
+      {
+        team: TEAM_EMBER,
+        status: SHARD_HOME,
+        carrierId: NO_PLAYER,
+        position: createVec3(),
+        returnInS: 0,
+      },
+      {
+        team: TEAM_FROST,
+        status: SHARD_HOME,
+        carrierId: NO_PLAYER,
+        position: createVec3(),
+        returnInS: 0,
+      },
+    ],
+    stands: [createVec3(), createVec3()],
+    braziers: [createVec3(), createVec3()],
+  };
 }
 
 export function createLocalCombatView(): MutableLocalCombatView {
@@ -324,6 +402,7 @@ export function createWorldView(): MutableWorldView {
     localDragonId: NO_PLAYER,
     clock: { tick: 0, phase: 'lobby', phaseTimeS: 0, timeRemainingS: Infinity, round: 1 },
     local: createLocalCombatView(),
+    relay: createRelayView(),
   };
 }
 
@@ -334,6 +413,8 @@ export function beginWorldView(view: MutableWorldView): void {
   view.zoneCount = 0;
   // A builder that knows the local dragon's combat state calls `writeLocalCombatView` after this.
   view.local.valid = false;
+  // A builder of an Ember Relay match fills it again after this (`writeRelayView`).
+  view.relay.active = false;
 }
 
 /**
@@ -498,4 +579,71 @@ export function findDragonView(view: WorldView, id: PlayerId): DragonView | unde
     if (dragon !== undefined && dragon.id === id) return dragon;
   }
   return undefined;
+}
+
+/**
+ * What `writeRelayView` reads of Ember Relay's state. The sim's `RelayState` fits, and so does
+ * the copy of it a client keeps from the host's RELAY messages.
+ */
+export interface RelaySource {
+  readonly active: boolean;
+  /** Index = owning TeamId. */
+  readonly shards: readonly {
+    readonly status: number;
+    readonly carrierId: PlayerId;
+    readonly position: Vec3;
+    /** Dropped: the tick on which it goes home by itself. */
+    readonly returnTick: number;
+  }[];
+  readonly stands: readonly Vec3[];
+  readonly braziers: readonly Vec3[];
+}
+
+/**
+ * Fills the frame's `view.relay`. Call it after the dragons were written, once per frame;
+ * without the call the views see `active: false` (`beginWorldView`).
+ *
+ * A carried shard is put on its carrier as this frame draws it (interpolated or predicted), so
+ * it never trails a tick behind the dragon; the state's own position is only the fallback.
+ *
+ * @param tick The tick this frame shows, on the clock `returnTick` counts in (host ticks).
+ */
+export function writeRelayView(
+  view: MutableWorldView,
+  relay: RelaySource,
+  tick: number,
+): MutableWorldView {
+  const out = view.relay;
+  out.active = relay.active;
+  if (!relay.active) return view;
+  for (let team = 0; team < 2; team++) {
+    const stand = relay.stands[team];
+    const outStand = out.stands[team];
+    if (stand !== undefined && outStand !== undefined) {
+      outStand.x = stand.x;
+      outStand.y = stand.y;
+      outStand.z = stand.z;
+    }
+    const brazier = relay.braziers[team];
+    const outBrazier = out.braziers[team];
+    if (brazier !== undefined && outBrazier !== undefined) {
+      outBrazier.x = brazier.x;
+      outBrazier.y = brazier.y;
+      outBrazier.z = brazier.z;
+    }
+    const shard = relay.shards[team];
+    const outShard = out.shards[team];
+    if (shard === undefined || outShard === undefined) continue;
+    outShard.status = shard.status;
+    outShard.carrierId = shard.carrierId;
+    const carrier =
+      shard.status === SHARD_CARRIED ? findDragonView(view, shard.carrierId) : undefined;
+    const at = carrier !== undefined ? carrier.position : shard.position;
+    outShard.position.x = at.x;
+    outShard.position.y = at.y;
+    outShard.position.z = at.z;
+    const left = shard.status === SHARD_DROPPED ? (shard.returnTick - tick) * TICK_DT_S : 0;
+    outShard.returnInS = left > 0 ? left : 0;
+  }
+  return view;
 }

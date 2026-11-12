@@ -169,6 +169,27 @@ export interface BotTuning {
   /** A projectile that will pass within this many metres inside `dodgeProjectileS` is dodged. */
   dodgeMissDistance: number;
   dodgeProjectileS: number;
+
+  // --- Ember Relay (T-6.3) ------------------------------------------------------------------------
+  /**
+   * Share of a team's living riders that go for the enemy shard while it can be taken (the
+   * ones nearest to it, at least one). The rest fight.
+   */
+  relayRunnerShare: number;
+  /** Its own team's dropped shard within this range is fetched even if a mate is nearer. */
+  relayReturnRange: number;
+  /**
+   * A dragon cannot turn on the spot: closer to a shard or brazier than `relayMinTurnM` with
+   * it more than `relayTurnAngle` off the nose, the bot flies on and comes round again instead
+   * of circling it for ever.
+   */
+  relayMinTurnM: number;
+  relayTurnAngle: number;
+  /** Target score multipliers (lower = preferred): the enemy carrying its team's shard... */
+  relayCarrierBias: number;
+  /** ...and an enemy within `relayEscortRange` of a mate who carries the enemy's. */
+  relayEscortBias: number;
+  relayEscortRange: number;
 }
 
 export const BOT_TUNING: BotTuning = {
@@ -258,6 +279,14 @@ export const BOT_TUNING: BotTuning = {
 
   dodgeMissDistance: 9,
   dodgeProjectileS: 0.45,
+
+  relayRunnerShare: 0.5,
+  relayReturnRange: 400,
+  relayMinTurnM: 110,
+  relayTurnAngle: 0.9,
+  relayCarrierBias: 0.35,
+  relayEscortBias: 0.6,
+  relayEscortRange: 250,
 };
 
 /** What separates the difficulty levels. Everything else is shared by all bots. */

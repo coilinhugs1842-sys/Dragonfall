@@ -1,6 +1,8 @@
 /** Barrel for the render base: the one renderer, quality application and dynamic resolution. */
 
 export { DYNRES_SCALE_STEP, DYNRES_TARGET_FRAME_MS, DynamicResolution } from './dynamic-resolution';
+export type { RenderCostProbe } from './gpu-cost-probe';
+export { isSoftwareRenderer, readGpuName, shortGpuName } from './gpu-info';
 export * from './post';
 export { computePixelRatio } from './render-scale';
 export { createGameRenderer, WebGL2UnavailableError } from './renderer';

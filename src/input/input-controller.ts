@@ -45,7 +45,12 @@ import type { InputFrame } from '../shared';
 import { inputActionBit, mouseButtonCode } from './bindings';
 import type { InputAction, InputBindings, InputCode } from './bindings';
 import { gamepadButtonCode } from './gamepad-bindings';
-import { createGamepadSource, pollGamepadSource, rumbleGamepad } from './gamepad-source';
+import {
+  createGamepadSource,
+  gamepadSourceSupported,
+  pollGamepadSource,
+  rumbleGamepad,
+} from './gamepad-source';
 import type { GamepadProvider, GamepadSource } from './gamepad-source';
 import {
   consumeGamepadPause,
@@ -202,6 +207,14 @@ export class InputController implements EventListenerObject {
   /** The device that gave input last, for the HUD's button glyphs. */
   get activeDevice(): InputDevice {
     return this.state.activeDevice;
+  }
+
+  /**
+   * False where the browser gives this page no gamepads at all (no Gamepad API, or it refused):
+   * the settings page then says so instead of "press a button".
+   */
+  get gamepadSupported(): boolean {
+    return gamepadSourceSupported(this.pads);
   }
 
   /**

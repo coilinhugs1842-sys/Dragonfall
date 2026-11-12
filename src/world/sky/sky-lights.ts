@@ -4,13 +4,8 @@
  */
 import { DirectionalLight, HemisphereLight } from 'three';
 import type { QualityPreset } from '../../shared';
-import {
-  GOLDEN_HOUR_SKY,
-  HEMISPHERE_GROUND_COLOR,
-  HEMISPHERE_INTENSITY,
-  HEMISPHERE_SKY_COLOR,
-  SUN_INTENSITY,
-} from './sky-math';
+import { skyLookOf } from './sky-look';
+import { GOLDEN_HOUR_SKY, HEMISPHERE_INTENSITY, SUN_INTENSITY } from './sky-math';
 import type { SkySetup } from './sky-math';
 
 export interface SkyLightsOptions {
@@ -32,6 +27,8 @@ export interface SkyLights {
   readonly hemisphere: HemisphereLight;
   /** Shadow map on/off and size from the preset. Never per frame. */
   setQuality(preset: QualityPreset): void;
+  /** Another map's sun and hemisphere colours and sun direction. Not per frame. */
+  setSky(setup: SkySetup): void;
   dispose(): void;
 }
 
@@ -47,15 +44,25 @@ export function createSkyLights(
   sun.position.set(setup.sunDirection.x, setup.sunDirection.y, setup.sunDirection.z).normalize();
   sun.castShadow = false;
 
+  const look = skyLookOf(setup);
   const hemisphere = new HemisphereLight(
-    options.hemisphereSkyColor ?? HEMISPHERE_SKY_COLOR,
-    options.hemisphereGroundColor ?? HEMISPHERE_GROUND_COLOR,
+    options.hemisphereSkyColor ?? look.hemisphereSky,
+    options.hemisphereGroundColor ?? look.hemisphereGround,
     options.hemisphereIntensity ?? HEMISPHERE_INTENSITY,
   );
 
   return {
     sun,
     hemisphere,
+    setSky(next: SkySetup): void {
+      sun.color.setHex(next.sunColor);
+      // While the sun casts no shadow only its direction matters; `WorldLighting.update`
+      // places it for the shadow pass.
+      sun.position.set(next.sunDirection.x, next.sunDirection.y, next.sunDirection.z).normalize();
+      const nextLook = skyLookOf(next);
+      hemisphere.color.setHex(options.hemisphereSkyColor ?? nextLook.hemisphereSky);
+      hemisphere.groundColor.setHex(options.hemisphereGroundColor ?? nextLook.hemisphereGround);
+    },
     setQuality(preset: QualityPreset): void {
       const size = preset.shadowMapSize;
       const cast = allowShadows && size > 0 && preset.shadowCasters !== 'none';

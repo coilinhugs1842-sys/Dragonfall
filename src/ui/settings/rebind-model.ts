@@ -8,9 +8,13 @@
  * The model never edits a binding table: it reads `ControlsUiState` and returns the UiIntent for
  * `src/game` to apply (which answers with a new `ControlsUiState`). Fields are mutated in place
  * and hold only strings and numbers.
+ *
+ * The gamepad has a table of its own and so a model of its own (`createRebindModel('gamepad')`):
+ * the same machine, fed `Pad0`..`Pad16` codes; its intents say `device: 'gamepad'` and its
+ * words speak of buttons. Esc and Backspace on the keyboard cancel and clear there too.
  */
 
-import type { ControlsUiState, UiIntent } from '../../shared/ui';
+import type { BindingDevice, ControlsUiState, UiIntent } from '../../shared/ui';
 
 export type RebindPhase = 'idle' | 'listening' | 'conflict';
 
@@ -18,6 +22,8 @@ export type RebindPhase = 'idle' | 'listening' | 'conflict';
 export type RebindNote = '' | 'reserved';
 
 export interface RebindModel {
+  /** The table this model edits. Set once, when it is made. */
+  readonly device: BindingDevice;
   phase: RebindPhase;
   /** The slot being rebound; '' / -1 while idle. */
   action: string;
@@ -31,8 +37,9 @@ export interface RebindModel {
   revision: number;
 }
 
-export function createRebindModel(): RebindModel {
+export function createRebindModel(device: BindingDevice = 'keyboard'): RebindModel {
   return {
+    device,
     phase: 'idle',
     action: '',
     slot: -1,
@@ -123,7 +130,10 @@ export function captureCode(
   const current = controls.bindings[action]?.[slot];
   if (code === 'Backspace') {
     toIdle(model);
-    return current === undefined ? null : { type: 'settings.unbind', action, slot };
+    if (current === undefined) return null;
+    return model.device === 'gamepad'
+      ? { type: 'settings.unbind', action, slot, device: 'gamepad' }
+      : { type: 'settings.unbind', action, slot };
   }
   if (code === '' || controls.reservedCodes.includes(code)) {
     model.note = 'reserved';
@@ -145,7 +155,40 @@ export function captureCode(
     return null;
   }
   toIdle(model);
-  return { type: 'settings.rebind', action, slot, code, swap: false };
+  return rebindIntent(model.device, action, slot, code, false);
+}
+
+/** The keyboard's intents carry no `device`, as they always have; the pad's name theirs. */
+function rebindIntent(
+  device: BindingDevice,
+  action: string,
+  slot: number,
+  code: string,
+  swap: boolean,
+): UiIntent {
+  return device === 'gamepad'
+    ? { type: 'settings.rebind', action, slot, code, swap, device: 'gamepad' }
+    : { type: 'settings.rebind', action, slot, code, swap };
+}
+
+/** The pad's Menu (Start) button: never bindable, so while listening it means "never mind". */
+export const GAMEPAD_CANCEL_CODE = 'Pad9';
+
+/**
+ * A pad button was pressed while the pad's model listens: `captureCode`, except that Menu
+ * cancels, so a player with no keyboard in reach can back out of a capture.
+ */
+export function captureGamepadCode(
+  model: RebindModel,
+  controls: ControlsUiState,
+  code: string,
+): UiIntent | null {
+  if (model.phase !== 'listening') return null;
+  if (code === GAMEPAD_CANCEL_CODE) {
+    toIdle(model);
+    return null;
+  }
+  return captureCode(model, controls, code);
 }
 
 /** True when a swap has something to give back: the slot being rebound holds a key now. */
@@ -161,16 +204,17 @@ export function resolveConflict(model: RebindModel, choice: 'swap' | 'cancel'): 
   if (model.phase !== 'conflict') return null;
   const intent: UiIntent | null =
     choice === 'swap'
-      ? {
-          type: 'settings.rebind',
-          action: model.action,
-          slot: model.slot,
-          code: model.code,
-          swap: true,
-        }
+      ? rebindIntent(model.device, model.action, model.slot, model.code, true)
       : null;
   toIdle(model);
   return intent;
+}
+
+/** `settings.resetBindings` for the model's table: one action, or all of them with null. */
+export function resetBindingsIntent(model: RebindModel, action: string | null): UiIntent {
+  return model.device === 'gamepad'
+    ? { type: 'settings.resetBindings', action, device: 'gamepad' }
+    : { type: 'settings.resetBindings', action };
 }
 
 /** Drops a capture whose action or slot no longer exists (the table changed under it). */
@@ -247,6 +291,28 @@ const CODE_LABELS: Readonly<Record<string, string>> = {
   Slash: '/',
   PageUp: 'Page Up',
   PageDown: 'Page Down',
+  // The gamepad, named as on an Xbox pad like the controls table of the design doc. The same
+  // words as `gamepadCodeLabel` in src/input, which this module may not import (a test holds
+  // the two lists together).
+  Pad0: 'A',
+  Pad1: 'B',
+  Pad2: 'X',
+  Pad3: 'Y',
+  Pad4: 'LB',
+  Pad5: 'RB',
+  Pad6: 'LT',
+  Pad7: 'RT',
+  Pad8: 'View',
+  Pad9: 'Menu',
+  Pad10: 'Left stick click',
+  Pad11: 'Right stick click',
+  Pad12: 'D-pad up',
+  Pad13: 'D-pad down',
+  Pad14: 'D-pad left',
+  Pad15: 'D-pad right',
+  Pad16: 'Home',
+  PadFlickLeft: 'Boost + flick left',
+  PadFlickRight: 'Boost + flick right',
 };
 
 /**
@@ -292,7 +358,16 @@ const SHORT_CODE_LABELS: Readonly<Record<string, string>> = {
   NumpadMultiply: 'N*',
   NumpadDivide: 'N/',
   NumpadDecimal: 'N.',
+  Pad10: 'LS',
+  Pad11: 'RS',
+  Pad12: 'D\u2191',
+  Pad13: 'D\u2193',
+  Pad14: 'D\u2190',
+  Pad15: 'D\u2192',
+  PadFlickLeft: 'Flick\u2190',
+  PadFlickRight: 'Flick\u2192',
 };
+
 /** Longest caption `codeShortLabel` returns. */
 export const SHORT_CODE_LABEL_MAX = 6;
 
@@ -311,6 +386,12 @@ export function codeShortLabel(code: string): string {
 /** The line shown while listening or in a conflict; '' while idle. */
 export function rebindPrompt(model: RebindModel): string {
   if (model.phase === 'listening') {
+    if (model.device === 'gamepad') {
+      const lead = `Press a button on the gamepad for ${actionLabel(model.action)}.`;
+      return model.note === 'reserved'
+        ? `That button cannot be used. ${lead} Menu (Start) or Esc cancels.`
+        : `${lead} Menu (Start) or Esc cancels, Backspace clears.`;
+    }
     const lead = `Press a key or mouse button for ${actionLabel(model.action)}.`;
     return model.note === 'reserved'
       ? `That key cannot be used. ${lead} Esc cancels.`

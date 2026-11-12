@@ -381,6 +381,58 @@
   margin: 0;
 }
 
+/* --- Gamepad ----------------------------------------------------------------------------------- */
+
+.dfs-keys[data-device='gamepad'] .dfs-key-row[data-unbound='true'] .dfs-key-name::after {
+  content: '  ·  no button';
+}
+
+/* Room for the longest pad caption, "Boost + flick right". */
+.dfs-keys[data-device='gamepad'] .dfs-key {
+  width: 11em;
+}
+
+.dfs-pad {
+  padding: 0.5em 0 0.7em;
+}
+
+.dfs-pad-name {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  margin: 0;
+  font-size: 0.95em;
+}
+
+/* Connected or not is a shape (filled disc / hollow ring) next to the words, not a colour. */
+.dfs-pad-name::before {
+  content: '';
+  flex: none;
+  width: 0.6em;
+  height: 0.6em;
+  border: 2px solid var(--dfu-faint);
+  border-radius: 50%;
+}
+
+.dfs-pad[data-connected='true'] .dfs-pad-name::before {
+  border-color: var(--dfu-text);
+  background: var(--dfu-text);
+}
+
+.dfs-pad[data-connected='false'] .dfs-pad-name {
+  color: var(--dfu-muted);
+}
+
+.dfs-pad-note {
+  max-width: 46em;
+  margin: 0.25em 0 0;
+  line-height: 1.35;
+}
+
+.dfs-pad + .dfs-row {
+  border-top: 1px solid var(--dfu-line);
+}
+
 /* --- Foot -------------------------------------------------------------------------------------- */
 
 .dfs-foot {

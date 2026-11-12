@@ -135,6 +135,27 @@
   outline-offset: 2px;
 }
 
+/*
+ * Menus stepped through with a gamepad: the browser draws its ring only after keyboard use, so
+ * pad use marks the UI root (pad-nav.ts) and the same ring is drawn for plain :focus.
+ */
+[data-df-padnav='true'] .dfu-root :focus {
+  outline: 2px solid var(--dfu-text);
+  outline-offset: 2px;
+}
+
+[data-df-padnav='true'] .dfu-root .dfs-tab:focus {
+  outline-offset: -3px;
+}
+
+/*
+ * A connected gamepad (`data-df-pad` on <html>, set by src/game): the HUD's "Click to fly"
+ * prompt adds that a button on the pad takes control too.
+ */
+[data-df-pad='connected'] .dfh-prompt::after {
+  content: ' · or press a button on the gamepad';
+}
+
 .dfu-btn {
   display: inline-flex;
   align-items: center;
@@ -487,9 +508,9 @@
   grid-template-rows: 1fr auto auto 1fr auto;
   row-gap: 1.6em;
   padding: 2em 0 1.4em clamp(2em, 8vw, 12em);
-  /* Safety net for very short windows; normally nothing overflows. */
+  /* Safety net for very short windows; normally nothing overflows. The bar shows only then. */
   overflow-y: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
 }
 
 .dfu-title-head {
@@ -1461,6 +1482,16 @@
     margin-top: 0;
     overflow: visible;
   }
+
+  /* Stacked blocks keep their full height (T-6.6): squeezed, the rules covered the rosters. */
+  .dfu-lobby:not([data-layout='aerie']) {
+    align-content: start;
+  }
+
+  .dfu-lobby:not([data-layout='aerie']) .dfu-lobby-main,
+  .dfu-lobby:not([data-layout='aerie']) .dfu-rules {
+    min-height: auto;
+  }
 }
 
 /* --- Short windows (1280×720 class): tighten the title so an error still fits ----------------- */
@@ -1487,6 +1518,100 @@
 
   .dfu-signaling {
     padding-top: 0.7em;
+  }
+}
+
+/*
+ * --- Interface size (T-6.6) ------------------------------------------------------------------------
+ *
+ * The two blocks above measure the window in px. The interface-size setting (0.8 to 1.3) changes
+ * how much fits in the same window, so a 1920x1080 window at the largest size is as cramped as a
+ * small one. What counts is the window measured in em, and a container query on the root gives
+ * exactly that (its em is the root's own font size, scale included).
+ */
+
+.dfu-root {
+  container: dfu-root / size;
+}
+
+/*
+ * Same squeeze as "Small windows" above: the rules go under the teams and the page scrolls.
+ * Only the flat lobby (the aerie layout has its own frame, aerie.css). Both blocks need their
+ * full height here, or the rules are drawn on top of the rosters.
+ */
+@container dfu-root (max-width: 80em) {
+  .dfu-lobby:not([data-layout='aerie']) {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    overflow-y: auto;
+  }
+
+  .dfu-lobby:not([data-layout='aerie']) .dfu-lobby-main {
+    min-height: auto;
+    overflow: visible;
+  }
+
+  .dfu-lobby:not([data-layout='aerie']) .dfu-rules {
+    min-height: auto;
+    margin-top: 0;
+    overflow: visible;
+  }
+}
+
+/* Same tightening as "Short windows" above, for a tall window with a large interface. */
+@container dfu-root (max-height: 52em) {
+  .dfu-title-inner {
+    row-gap: 1em;
+    padding-top: 1.2em;
+    padding-bottom: 1em;
+  }
+
+  .dfu-wordmark {
+    font-size: 3.9em;
+  }
+
+  .dfu-title-card {
+    gap: 0.8em;
+    padding: 1.15em 1.3em;
+  }
+
+  .dfu-choice {
+    padding: 0.55em 1em;
+  }
+
+  .dfu-signaling {
+    padding-top: 0.7em;
+  }
+}
+
+/* 1280x720 at the largest interface size: closer still, so the card and the footer line fit. */
+@container dfu-root (max-height: 43em) {
+  .dfu-title-inner {
+    row-gap: 0.55em;
+    padding-top: 0.7em;
+    padding-bottom: 0.6em;
+  }
+
+  .dfu-wordmark {
+    font-size: 3.1em;
+  }
+
+  .dfu-title-card {
+    gap: 0.55em;
+    padding: 0.8em 1.3em;
+  }
+
+  .dfu-title-body {
+    gap: 0.45em;
+  }
+
+  .dfu-choice {
+    padding: 0.4em 1em;
+  }
+
+  .dfu-signaling {
+    gap: 0.35em;
+    padding-top: 0.5em;
   }
 }
 

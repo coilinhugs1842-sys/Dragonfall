@@ -335,7 +335,8 @@
 }
 
 .dfr-row-marks {
-  flex: 0 1 auto;
+  /* Gives way long before the name does: the award cards say the same in full. */
+  flex: 0 20 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--dfu-edge);
@@ -456,4 +457,20 @@
   opacity: 1;
   visibility: visible;
   transform: none;
+}
+
+/*
+ * 1280x720 at the largest interface size (T-6.6; the container is the UI root, ui.css): the
+ * table's foot reached the award cards. Closer rows keep them apart.
+ */
+@container dfu-root (max-height: 43em) {
+  .dfr-team th,
+  .dfr-team td {
+    padding-top: 0.06em;
+    padding-bottom: 0.06em;
+  }
+
+  .dfr-team + .dfr-team {
+    margin-top: 0.3em;
+  }
 }

@@ -75,6 +75,13 @@ export interface WorldLighting {
   setBlobCasters(dragons: readonly DragonView[], count: number, near: Vec3): void;
   /** Shadow mode and map size, shaft count; retargets every `useWorldLight` material. */
   setQuality(preset: QualityPreset): void;
+  /**
+   * Another map's light (a match on a map other than the one the scene was built with):
+   * recolours and turns the scene's lights, rewrites the shared sun / hemisphere / fog uniforms
+   * and the post pass's sun direction, and moves the light shafts to `shafts` (null = this map
+   * has none). Not per frame.
+   */
+  setSky(sky: SkySetup, cloudSeaY: number, shafts: Omit<LightShaftField, 'bottomY'> | null): void;
   dispose(): void;
 }
 
@@ -96,18 +103,25 @@ export function createWorldLighting(options: WorldLightingOptions): WorldLightin
       : null;
   if (shafts !== null) object.add(shafts.object);
 
-  // --- Shared uniforms: constant for the life of this lighting ---------------------------------
+  // --- Shared uniforms: constant between two `setSky` calls --------------------------------------
   const u = WORLD_LIGHT;
-  u.uWlSunDir.value.copy(sunDir);
-  u.uWlSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);
-  u.uWlHemiSky.value.copy(hemisphere.color).multiplyScalar(hemisphere.intensity);
-  u.uWlHemiGround.value.copy(hemisphere.groundColor).multiplyScalar(hemisphere.intensity);
-  fogSceneColor(sky, u.uWlFogColor.value);
-  glowSceneColor(sky, u.uWlGlowColor.value);
-  fogParamsOf(sky, options.cloudSeaY, u.uWlFogParams.value);
+  /** Writes the shared sun, hemisphere and fog values from the lights and a sky. Load-time. */
+  function writeShared(of: SkySetup, cloudSeaY: number): void {
+    sunDirectionOf(of, sunDir);
+    u.uWlSunDir.value.copy(sunDir);
+    u.uWlSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);
+    u.uWlHemiSky.value.copy(hemisphere.color).multiplyScalar(hemisphere.intensity);
+    u.uWlHemiGround.value.copy(hemisphere.groundColor).multiplyScalar(hemisphere.intensity);
+    fogSceneColor(of, u.uWlFogColor.value);
+    glowSceneColor(of, u.uWlGlowColor.value);
+    fogParamsOf(of, cloudSeaY, u.uWlFogParams.value);
+    POST_SETTINGS.sunDirection.copy(sunDir);
+  }
+  writeShared(sky, options.cloudSeaY);
   u.uWlShadowParams.value.z = 0;
   for (const blob of u.uWlBlobs.value) blob.set(0, 0, 0, 0);
-  POST_SETTINGS.sunDirection.copy(sunDir);
+  /** False on a map whose look has no light shafts. */
+  let shaftsShown = true;
 
   let plan: ShadowPlan = { mode: 'none', mapSize: 0, range: 0, focusDistance: 0 };
   const focus = new Vector3();
@@ -167,7 +181,7 @@ export function createWorldLighting(options: WorldLightingOptions): WorldLightin
       return plan;
     },
     get shaftCount(): number {
-      return shafts === null ? 0 : shafts.activeCount;
+      return shafts === null || !shaftsShown ? 0 : shafts.activeCount;
     },
 
     update(camera: Camera, timeS: number): void {
@@ -239,6 +253,20 @@ export function createWorldLighting(options: WorldLightingOptions): WorldLightin
       plan = shadowPlanFor(preset);
       applyPlan();
       shafts?.setQuality(preset);
+      if (shafts !== null && !shaftsShown) shafts.object.visible = false;
+    },
+
+    setSky(next: SkySetup, cloudSeaY: number, field: Omit<LightShaftField, 'bottomY'> | null): void {
+      options.lights.setSky(next);
+      writeShared(next, cloudSeaY);
+      if (shafts === null) return;
+      shaftsShown = field !== null;
+      if (field !== null) {
+        shafts.setField({ ...field, bottomY: cloudSeaY }, next);
+        shafts.object.visible = shafts.activeCount > 0;
+      } else {
+        shafts.object.visible = false;
+      }
     },
 
     dispose(): void {

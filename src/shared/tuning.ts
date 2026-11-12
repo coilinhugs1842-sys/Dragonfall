@@ -287,3 +287,38 @@ export const MATCH_TUNING: MatchTuning = {
   stormDamagePerS: 10, // PLACEHOLDER (T-3.x)
   stormPushAccel: 30, // PLACEHOLDER (T-3.x)
 };
+
+// --- Heat vents (T-6.4: read every tick by `applyHeatVents`, src/sim/flight.ts) --------------------
+//
+// Where each vent is, how wide and tall, and its own `lift` and `boost` are map data
+// (`MapManifest.vents`). These are the numbers every vent shares. How strongly a point feels a
+// vent ("strength", 0..1) is `heatVentStrength` in src/shared/maps/vents.ts.
+
+export interface VentTuning {
+  /**
+   * Multiplier on a vent's `lift` (m/s² upward). The push goes into the burst velocity like a
+   * flap's kick, so it fades at `FLIGHT_TUNING.burstDamping`: a dragon held on the axis rises
+   * at `lift * liftScale / burstDamping` m/s on top of its own flight path.
+   */
+  liftScale: number;
+  /** Multiplier on a vent's `boost` (m/s² along the nose): the free speed. */
+  boostScale: number;
+  /**
+   * Stamina (0..1) regained per second at full strength, on top of the normal regeneration and
+   * without its delay. At 0.25 a boost on the axis costs nothing.
+   */
+  staminaPerS: number;
+  /**
+   * The effect has full strength from the mouth up to this fraction of the column's height and
+   * fades to nothing from there to the top, so a dragon is let go gently, not dropped.
+   */
+  fullHeightFraction: number;
+}
+
+/** First-pass feel values (T-6.4), tuned by playtest. */
+export const VENT_TUNING: VentTuning = {
+  liftScale: 4,
+  boostScale: 2,
+  staminaPerS: 0.25,
+  fullHeightFraction: 0.6,
+};

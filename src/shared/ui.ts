@@ -7,7 +7,7 @@
 
 import type { AbilitySlot, DragonClassId } from './classes';
 import type { LobbySide, PlayerId, TeamId } from './constants';
-import type { DamageSource } from './events';
+import type { DamageSource, ObjectiveKind } from './events';
 import type {
   HostSettings,
   LobbyBotIntent,
@@ -76,6 +76,23 @@ export interface SettingsState {
   readonly showNetChip?: boolean;
   /** Rider name ('' = the fallback name). */
   readonly playerName?: string;
+  /**
+   * What the automatic quality pick (T-6.2) chose for this computer; null = not tested yet. Used
+   * while `quality` is `auto`. Written by the test, never by a menu control.
+   */
+  readonly autoQuality?: QualityPresetId | null;
+
+  // --- Gamepad (T-6.6). Optional and additive, like the block above. ---------------------------
+  /** Multiplier on the left stick's reach (SETTINGS_LIMITS.gamepadSensitivity). */
+  readonly gamepadSensitivity?: number;
+  /** true: pushing a stick forward lowers the nose. Both sticks. */
+  readonly gamepadInvertY?: boolean;
+  /** Fraction of a stick's travel round its centre that gives nothing. */
+  readonly gamepadDeadZone?: number;
+  /** Left stick response curve: 1 = linear, above 1 = finer control near the centre. */
+  readonly gamepadCurve?: number;
+  /** Shake the pad on a hit taken and on a takedown, where the browser and the pad can. */
+  readonly gamepadRumble?: boolean;
 }
 
 export const DEFAULT_SETTINGS: SettingsState = {
@@ -110,6 +127,12 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   colorBlindMarkers: false,
   showNetChip: true,
   playerName: '',
+  autoQuality: null,
+  gamepadSensitivity: 1,
+  gamepadInvertY: false,
+  gamepadDeadZone: 0.15,
+  gamepadCurve: 1.6,
+  gamepadRumble: false,
 };
 
 export interface NumberLimit {
@@ -127,6 +150,9 @@ export const SETTINGS_LIMITS = {
   mouseSensitivity: { min: 0.1, max: 5, step: 0.05 },
   volume: { min: 0, max: 1, step: 0.01 },
   uiScale: { min: 0.8, max: 1.3, step: 0.05 },
+  gamepadSensitivity: { min: 0.5, max: 2, step: 0.05 },
+  gamepadDeadZone: { min: 0.05, max: 0.4, step: 0.01 },
+  gamepadCurve: { min: 1, max: 3, step: 0.1 },
 } as const satisfies Record<string, NumberLimit>;
 
 /** In menu order: off first. */
@@ -142,9 +168,15 @@ export function resolveSettings(settings: SettingsState): GameSettings {
   return { ...DEFAULT_GAME_SETTINGS, ...settings };
 }
 
-/** The preset a quality choice means right now. `auto` is Medium until the test flight (T-6.2). */
-export function effectiveQuality(choice: QualityChoice): QualityPresetId {
-  return choice === 'auto' ? DEFAULT_QUALITY : choice;
+/**
+ * The preset a quality choice means right now. `auto` is what the automatic pick chose
+ * (`SettingsState.autoQuality`), and the default preset until it has run.
+ */
+export function effectiveQuality(
+  choice: QualityChoice,
+  autoQuality: QualityPresetId | null = null,
+): QualityPresetId {
+  return choice === 'auto' ? (autoQuality ?? DEFAULT_QUALITY) : choice;
 }
 
 /** The render scale a cap fraction stands for under `presetId`, e.g. Medium at 1 = 0.85. */
@@ -187,6 +219,47 @@ export interface ControlsUiState {
   /** Key slots per action (primary + alternative). */
   readonly slotsPerAction: number;
 }
+
+/** Which of the two rebind tables an intent edits. Absent on an intent = the keyboard's. */
+export type BindingDevice = 'keyboard' | 'gamepad';
+
+/**
+ * The gamepad as the Controls tab sees it (T-6.6). `src/game` keeps one object and rewrites its
+ * fields in place: the UI compares the values, it does not keep the object.
+ */
+export interface GamepadUiState {
+  /**
+   * This browser lets this page read gamepads at all. False without the Gamepad API, which
+   * some browsers only give to a secure page (see `secure`), and when a policy forbids it.
+   */
+  readonly supported: boolean;
+  /**
+   * The page is a secure context: `localhost` or HTTPS. A plain http address on the local
+   * network is not, and there a browser may hide gamepads.
+   */
+  readonly secure: boolean;
+  /** A pad is being read. Browsers only reveal a pad after a button on it was pressed. */
+  readonly connected: boolean;
+  /** `Gamepad.id` (vendor / product text); '' without a pad. */
+  readonly name: string;
+  /** The browser knows the pad's layout. False: buttons may be mixed up until they are rebound. */
+  readonly standard: boolean;
+  /** The pad's own rebind table (`Pad0`..`Pad16`, `PadFlickLeft` / `PadFlickRight`). */
+  readonly controls: ControlsUiState;
+  /**
+   * The code of the pad button pressed last while the settings panel was open, and a counter
+   * that goes up with every such press: the panel binds `pressCode` when the counter moves
+   * while it is listening. '' / 0 before the first press.
+   */
+  readonly pressCode: string;
+  readonly pressSeq: number;
+}
+
+/**
+ * A menu step asked for by a device that sends no key events (the gamepad): move the focus one
+ * control in a direction, press the focused control, or step back (what Esc does).
+ */
+export type UiNavCommand = 'up' | 'down' | 'left' | 'right' | 'accept' | 'back';
 
 // --- State --------------------------------------------------------------------------------------
 
@@ -264,6 +337,12 @@ export interface KillfeedEntry {
   /** What dealt the final blow and the killer's class: picks the row's glyph. Absent = plain. */
   readonly source?: DamageSource;
   readonly killerClassId?: DragonClassId | null;
+  /**
+   * Set on an Ember Relay line (a shard was picked up, dropped, returned or captured) instead
+   * of a takedown: `killer*` is then the rider who did it (NO_PLAYER when nobody did) and
+   * `victimTeam` the team whose SHARD it is. `victimId` / `victimName` are unused.
+   */
+  readonly objective?: ObjectiveKind | null;
 }
 
 export interface ScoreboardRow {
@@ -278,6 +357,8 @@ export interface ScoreboardRow {
   readonly alive: boolean;
   /** Absent = 0. */
   readonly assists?: number;
+  /** Shards brought home in Ember Relay. Absent = 0. */
+  readonly captures?: number;
 }
 
 /** The local rider's own gauges. */
@@ -346,12 +427,16 @@ export interface HudDamageArc {
   readonly ageS: number;
 }
 
-export type HudCompassKind = 'ally' | 'objective';
+/**
+ * `shard` and `brazier` are Ember Relay's: a team's sky-shard wherever it is (on its stand,
+ * carried, dropped) and the local team's own brazier.
+ */
+export type HudCompassKind = 'ally' | 'objective' | 'shard' | 'brazier';
 
 /** A marker on the top strip. */
 export interface HudCompassMarker {
   readonly kind: HudCompassKind;
-  /** Team colour and shape; null for a neutral objective. */
+  /** Team colour and shape (for a shard or brazier: its owner); null for a neutral objective. */
   readonly team: TeamId | null;
   /** Screen angle like `HudDamageArc.angle`: 0 = dead ahead, positive = to the right. */
   readonly angle: number;
@@ -360,11 +445,37 @@ export interface HudCompassMarker {
   readonly alive: boolean;
 }
 
+/** One team's sky-shard as the HUD shows it (Ember Relay). */
+export interface HudShardState {
+  /** SHARD_HOME, SHARD_CARRIED or SHARD_DROPPED (`world-view.ts`). */
+  readonly status: number;
+  /** Who carries it; '' unless carried. */
+  readonly carrierName: string;
+  /** Dropped: seconds until it goes home by itself. Otherwise 0. */
+  readonly returnInS: number;
+}
+
+/** Ember Relay's objective state for the HUD. `src/game` mutates one object in place. */
+export interface HudRelayState {
+  /** Index = the TeamId that OWNS the shard. */
+  readonly shards: readonly [ember: HudShardState, frost: HudShardState];
+  /** The local rider carries the enemy shard: the HUD says so in large. */
+  readonly carrying: boolean;
+  /** Metres from the local rider to its own brazier (printed while carrying). */
+  readonly brazierDistanceM: number;
+  /** The latest shard event, announced for a few seconds; null = none yet. */
+  readonly noticeKind: ObjectiveKind | null;
+  /** The team whose SHARD the notice is about. */
+  readonly noticeTeam: TeamId;
+  /** Seconds since the notice; the HUD drops it after a few. */
+  readonly noticeAgeS: number;
+}
+
 export interface HudState {
   readonly mode: ModeId;
   readonly phase: MatchPhase;
   readonly round: number;
-  /** Indexed by TeamId. Round wins in Duel, takedowns in Skirmish. */
+  /** Indexed by TeamId. Round wins in Duel, takedowns in Skirmish, captures in Ember Relay. */
   readonly scores: readonly [ember: number, frost: number];
   readonly scoreLimit: number;
   /** Seconds, or Infinity with no time limit. */
@@ -408,6 +519,8 @@ export interface HudState {
   readonly keyLabels?: readonly string[];
   /** Match intro (T-5.4): the map / mode title card. Absent or null = no card. */
   readonly introCard?: IntroCardState | null;
+  /** Ember Relay (T-6.3): both shards and the carry call-out. Absent or null in other modes. */
+  readonly relay?: HudRelayState | null;
 }
 
 /** The title card of the match intro flyby. `src/game` may mutate one object in place. */
@@ -438,7 +551,8 @@ export interface LobbyPlate {
 /** Pool sizes the HUD draws; `src/game` sizes its arrays to match. */
 export const HUD_DAMAGE_ARCS = 4;
 export const HUD_KILLFEED_ROWS = 5;
-export const HUD_COMPASS_MARKERS = 6;
+/** Four team mates plus Ember Relay's two shards and own brazier, with one to spare. */
+export const HUD_COMPASS_MARKERS = 8;
 
 /** TBD in T-5.x (results podium): awards beyond the three named in GAME_DESIGN.md. */
 export interface ResultsState {
@@ -448,6 +562,10 @@ export interface ResultsState {
   readonly mostTakedownsId: PlayerId;
   readonly mostDamageId: PlayerId;
   readonly scoreboard: readonly ScoreboardRow[];
+  /** The mode that was played: says what `scores` count. Absent = takedowns / rounds. */
+  readonly mode?: ModeId;
+  /** Ember Relay: who brought the most shards home, or NO_PLAYER. Absent in other modes. */
+  readonly mostCapturesId?: PlayerId;
 }
 
 export interface UiState {
@@ -479,6 +597,8 @@ export interface UiState {
   readonly settingsTab?: SettingsTab;
   /** Key bindings for the Controls tab. Absent = the tab shows no rebind list. */
   readonly controls?: ControlsUiState;
+  /** The gamepad for the Controls tab. Absent = the tab shows no gamepad section. */
+  readonly gamepad?: GamepadUiState;
 
   // --- Cinematics (Phase 5). All optional and additive. ------------------------------------------
   /**
@@ -559,7 +679,8 @@ export type UiIntent =
   | { readonly type: 'settings.close' }
   /**
    * Bind `code` to slot `slot` of `action`. The code is taken from any action that had it; with
-   * `swap` that action gets the code this slot held before (when it held one).
+   * `swap` that action gets the code this slot held before (when it held one). `device` picks
+   * the table on this and the next two intents: absent = the keyboard's.
    */
   | {
       readonly type: 'settings.rebind';
@@ -567,12 +688,24 @@ export type UiIntent =
       readonly slot: number;
       readonly code: string;
       readonly swap: boolean;
+      readonly device?: BindingDevice;
     }
-  | { readonly type: 'settings.unbind'; readonly action: string; readonly slot: number }
+  | {
+      readonly type: 'settings.unbind';
+      readonly action: string;
+      readonly slot: number;
+      readonly device?: BindingDevice;
+    }
   /** One action back to its default keys, or all of them with `action: null`. */
-  | { readonly type: 'settings.resetBindings'; readonly action: string | null }
+  | {
+      readonly type: 'settings.resetBindings';
+      readonly action: string | null;
+      readonly device?: BindingDevice;
+    }
   /** Restart the dynamic-resolution scaler so it measures the display again (DECISIONS 16). */
-  | { readonly type: 'settings.redetectDisplay' };
+  | { readonly type: 'settings.redetectDisplay' }
+  /** "Test again": run the automatic quality pick again and use what it finds (T-6.2). */
+  | { readonly type: 'settings.retestQuality' };
 
 export type UiIntentType = UiIntent['type'];
 export type UiIntentOf<T extends UiIntentType> = Extract<UiIntent, { type: T }>;

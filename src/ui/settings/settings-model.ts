@@ -55,7 +55,10 @@ export type RangeField =
   | 'sfxVolume'
   | 'musicVolume'
   | 'uiVolume'
-  | 'uiScale';
+  | 'uiScale'
+  | 'gamepadSensitivity'
+  | 'gamepadDeadZone'
+  | 'gamepadCurve';
 
 export const RANGE_FIELDS: readonly RangeField[] = [
   'renderScaleCap',
@@ -67,7 +70,13 @@ export const RANGE_FIELDS: readonly RangeField[] = [
   'musicVolume',
   'uiVolume',
   'uiScale',
+  'gamepadSensitivity',
+  'gamepadDeadZone',
+  'gamepadCurve',
 ];
+
+/** The curve slider counts in tenths (1.0 .. 3.0), every other fraction in hundredths. */
+const CURVE_UNITS = 10;
 
 /** A slider's position and caption, in the slider's own whole-number units. */
 export interface RangeView {
@@ -98,7 +107,7 @@ export function rangeView(field: RangeField, settings: GameSettings, out: RangeV
   switch (field) {
     case 'renderScaleCap': {
       // The slider shows the real render scale between the preset's own bounds.
-      const presetId = effectiveQuality(settings.quality);
+      const presetId = effectiveQuality(settings.quality, settings.autoQuality);
       const preset = QUALITY_PRESETS[presetId];
       out.min = Math.round(preset.renderScaleMin * 100);
       out.max = Math.round(preset.renderScaleMax * 100);
@@ -129,6 +138,24 @@ export function rangeView(field: RangeField, settings: GameSettings, out: RangeV
       out.value = snap(settings.uiScale * 100, out);
       out.text = `${out.value} %`;
       return out;
+    case 'gamepadSensitivity':
+      percentRange(out, SETTINGS_LIMITS.gamepadSensitivity);
+      out.value = snap(settings.gamepadSensitivity * 100, out);
+      out.text = `${(out.value / 100).toFixed(2)}×`;
+      return out;
+    case 'gamepadDeadZone':
+      percentRange(out, SETTINGS_LIMITS.gamepadDeadZone);
+      out.value = snap(settings.gamepadDeadZone * 100, out);
+      out.text = `${out.value} %`;
+      return out;
+    case 'gamepadCurve':
+      out.min = Math.round(SETTINGS_LIMITS.gamepadCurve.min * CURVE_UNITS);
+      out.max = Math.round(SETTINGS_LIMITS.gamepadCurve.max * CURVE_UNITS);
+      out.step = 1;
+      out.value = snap(settings.gamepadCurve * CURVE_UNITS, out);
+      // 1.0 is a straight line: said in words, since "1.0" alone means little.
+      out.text = out.value === out.min ? 'Linear' : (out.value / CURVE_UNITS).toFixed(1);
+      return out;
     default:
       percentRange(out, SETTINGS_LIMITS.volume);
       out.value = snap(settings[field] * 100, out);
@@ -151,11 +178,17 @@ export function rangeSetting(field: RangeField, raw: number, settings: GameSetti
   switch (field) {
     case 'renderScaleCap':
       return (
-        Math.round(renderScaleCapFraction(effectiveQuality(settings.quality), value / 100) * 100) /
-        100
+        Math.round(
+          renderScaleCapFraction(
+            effectiveQuality(settings.quality, settings.autoQuality),
+            value / 100,
+          ) * 100,
+        ) / 100
       );
     case 'fovDeg':
       return value;
+    case 'gamepadCurve':
+      return value / CURVE_UNITS;
     default:
       return value / 100;
   }
@@ -177,7 +210,9 @@ export type ToggleField =
   | 'invertY'
   | 'boostToggle'
   | 'colorBlindMarkers'
-  | 'showNetChip';
+  | 'showNetChip'
+  | 'gamepadInvertY'
+  | 'gamepadRumble';
 
 export const TOGGLE_FIELDS: readonly ToggleField[] = [
   'dynamicResolution',
@@ -186,6 +221,8 @@ export const TOGGLE_FIELDS: readonly ToggleField[] = [
   'boostToggle',
   'colorBlindMarkers',
   'showNetChip',
+  'gamepadInvertY',
+  'gamepadRumble',
 ];
 
 export function toggleIntent(field: ToggleField, on: boolean): UiIntent {
@@ -236,14 +273,90 @@ export function selectIntent(field: SelectField, value: string): UiIntent | null
   }
 }
 
-/** What "Automatic" resolves to, for the hint under the preset. */
+/**
+ * What "Automatic" resolves to, for the hint under the preset. Once the automatic pick (T-6.2)
+ * has measured this computer the hint says the preset was chosen by it, not by the player.
+ */
 export function qualityHint(settings: GameSettings): string {
-  const preset = QUALITY_PRESETS[effectiveQuality(settings.quality)];
-  return settings.quality === 'auto'
-    ? `Automatic is using ${preset.label}.`
-    : `${preset.label}: resolution ${Math.round(preset.renderScaleMin * 100)}–${Math.round(
-        preset.renderScaleMax * 100,
-      )} %.`;
+  const preset = QUALITY_PRESETS[effectiveQuality(settings.quality, settings.autoQuality)];
+  if (settings.quality === 'auto') {
+    return settings.autoQuality === null
+      ? `Automatic is using ${preset.label}.`
+      : `Chosen automatically for this computer: ${preset.label}.`;
+  }
+  return `${preset.label}: resolution ${Math.round(preset.renderScaleMin * 100)}–${Math.round(
+    preset.renderScaleMax * 100,
+  )} %.`;
+}
+
+// --- Gamepad ------------------------------------------------------------------------------------
+
+/** Longest pad name shown; `Gamepad.id` can be a whole sentence of vendor text. */
+export const MAX_GAMEPAD_NAME_LENGTH = 48;
+
+/**
+ * A pad's name without the browser's bookkeeping: Chromium appends "(STANDARD GAMEPAD Vendor:
+ * 054c Product: 09cc)", Firefox puts "054c-09cc-" in front. Empty or all bookkeeping = "Gamepad".
+ */
+export function gamepadDisplayName(id: string): string {
+  const head = id.length > 256 ? id.slice(0, 256) : id;
+  const name = head
+    .replace(/\((?:[^()]*\b(?:vendor|product|standard gamepad|xinput)\b[^()]*)\)/gi, ' ')
+    .replace(/^\s*[0-9a-f]{3,4}-[0-9a-f]{3,4}-/i, '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (name === '') return 'Gamepad';
+  return name.length <= MAX_GAMEPAD_NAME_LENGTH
+    ? name
+    : `${name.slice(0, MAX_GAMEPAD_NAME_LENGTH - 1).trimEnd()}…`;
+}
+
+export interface GamepadStatus {
+  /** The headline: the pad's name, or that there is none. */
+  readonly title: string;
+  /** What to do about it; '' when there is nothing to say. */
+  readonly note: string;
+  /** A pad is there, for the row's connected mark (a shape and a word, not a colour). */
+  readonly connected: boolean;
+}
+
+const NOTE_PRESS =
+  'Plug it in or switch it on, then press any button on it: browsers only show a gamepad to a page after a button press.';
+const NOTE_SECURE =
+  'Gamepads also need a secure page: localhost or HTTPS, not a plain http address on the local network.';
+const NOTE_INSECURE =
+  'This page is on a plain http address, where a browser may hide gamepads. They need a secure page: localhost or HTTPS.';
+
+/** The words of the gamepad row from what `UiState.gamepad` says. */
+export function gamepadStatus(
+  supported: boolean,
+  secure: boolean,
+  connected: boolean,
+  id: string,
+  standard: boolean,
+): GamepadStatus {
+  if (connected) {
+    return {
+      title: gamepadDisplayName(id),
+      note: standard
+        ? 'Left stick steers, right stick trims pitch and yaw. Menu (Start) opens the flight menu.'
+        : 'The browser does not know this gamepad’s layout, so buttons may be mixed up: set them below.',
+      connected: true,
+    };
+  }
+  if (!supported) {
+    return {
+      title: 'Gamepads are not available here',
+      note: secure ? 'This browser gives the game no access to gamepads.' : NOTE_INSECURE,
+      connected: false,
+    };
+  }
+  return {
+    title: 'No gamepad detected',
+    note: `${NOTE_PRESS} ${secure ? NOTE_SECURE : NOTE_INSECURE}`,
+    connected: false,
+  };
 }
 
 // --- Text ---------------------------------------------------------------------------------------

@@ -21,24 +21,30 @@ import {
   MATCH_TUNING,
   MAX_PLAYERS,
   NO_PLAYER,
+  SHARD_CARRIED,
+  SHARD_HOME,
   TEAM_EMBER,
   TEAM_FROST,
   findDragonView,
 } from '../shared';
 import type {
   DragonClassId,
+  DragonView,
   GameEventSource,
   HitEvent,
+  HudCompassKind,
   LobbyState,
   MatchPlayerStats,
   MatchWinner,
   ModeId,
+  ObjectiveEvent,
   PlayerId,
   ResultsState,
   ScoreboardRow,
   TakedownEvent,
   TeamId,
   Unsubscribe,
+  Vec3,
   WorldView,
 } from '../shared';
 import {
@@ -46,6 +52,7 @@ import {
   createHudState,
   pushDamageArc,
   pushKillfeed,
+  pushShardEvent,
   resetHudState,
   screenAngle,
   writeHudClock,
@@ -60,6 +67,22 @@ const DAMAGE_ARC_FULL_HP = 40;
 const UNKNOWN_NAME = 'Rider';
 /** Captions of the four ability slots under the default bindings. */
 const DEFAULT_KEY_LABELS: readonly string[] = ['LMB', 'RMB', 'F', 'R'];
+
+/**
+ * What one shard brought home weighs in the MVP score. A takedown is worth 100 plus the damage
+ * that went into it (a few hundred HP), so this is about two takedowns: the rider who carried
+ * the shards home leads unless somebody else carried the fight alone.
+ */
+const MVP_CAPTURE_POINTS = 1000;
+
+/**
+ * Shards a rider brought home (Ember Relay). The stats rows of the host's director and of a
+ * client's scoreboard both carry it; a row without it (another mode's table, a test) counts 0.
+ */
+function capturesOf(row: Readonly<MatchPlayerStats>): number {
+  const captures = (row as { readonly captures?: unknown }).captures;
+  return typeof captures === 'number' ? captures : 0;
+}
 
 /** The pooled HUD state plus the key captions (`HudState.keyLabels`). */
 export type GameHudState = MutableHudState & { keyLabels: string[] };
@@ -214,6 +237,55 @@ export function createHudBuilder(view: WorldView): HudBuilder {
     }
   }
 
+  /** Ember Relay: a line in the feed and the announcement for what happened to a shard. */
+  function onObjective(event: ObjectiveEvent): void {
+    if (event.kind === 'zoneTaken') return;
+    // `event.team` is who it is good for: taking and capturing is done to the OTHER team's shard.
+    const byEnemy = event.kind === 'pickedUp' || event.kind === 'captured';
+    const shardTeam = !byEnemy ? event.team : event.team === TEAM_EMBER ? TEAM_FROST : TEAM_EMBER;
+    const actor = event.dragonId;
+    pushShardEvent(
+      hud,
+      event.kind,
+      shardTeam,
+      actor,
+      nameOf(actor),
+      actor === NO_PLAYER ? null : teamOf(actor),
+    );
+  }
+
+  /** Both shards and the carry call-out, from the frame's WorldView. */
+  function writeRelay(local: Readonly<DragonView> | undefined): void {
+    const source = view.relay;
+    if (!source.active) {
+      hud.relay = null;
+      return;
+    }
+    const relay = hud.relayPool;
+    let carrying = false;
+    for (let team = 0; team < relay.shards.length; team++) {
+      const shard = source.shards[team];
+      const out = relay.shards[team];
+      if (shard === undefined || out === undefined) continue;
+      const carried = shard.status === SHARD_CARRIED;
+      out.status = shard.status;
+      out.carrierName = carried ? nameOf(shard.carrierId) : '';
+      out.returnInS = shard.returnInS;
+      if (carried && local !== undefined && shard.carrierId === local.id) carrying = true;
+    }
+    relay.carrying = carrying;
+    const brazier = local !== undefined ? source.braziers[local.team] : undefined;
+    if (local !== undefined && brazier !== undefined) {
+      const dx = brazier.x - local.position.x;
+      const dy = brazier.y - local.position.y;
+      const dz = brazier.z - local.position.z;
+      relay.brazierDistanceM = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    } else {
+      relay.brazierDistanceM = 0;
+    }
+    hud.relay = relay;
+  }
+
   function statsOf(
     stats: readonly Readonly<MatchPlayerStats>[],
     count: number,
@@ -245,6 +317,7 @@ export function createHudBuilder(view: WorldView): HudBuilder {
       row.deaths = totals !== undefined ? totals.deaths : 0;
       row.assists = totals !== undefined ? totals.assists : 0;
       row.damage = totals !== undefined ? totals.damage : 0;
+      row.captures = totals !== undefined ? capturesOf(totals) : 0;
       row.pingMs = input.pings[id] ?? -1;
       // A dragon the snapshots leave out (an enemy under its veil) is still alive.
       row.alive = dragon === undefined || (dragon.flags & DRAGON_FLAG_ALIVE) !== 0;
@@ -253,10 +326,55 @@ export function createHudBuilder(view: WorldView): HudBuilder {
     hud.scoreboardCount = count;
   }
 
+  /** Fills compass marker `index` to point from `me` at `target`. Returns the next free index. */
+  function writeMarker(
+    index: number,
+    kind: HudCompassKind,
+    team: TeamId,
+    me: Readonly<DragonView>,
+    target: Vec3,
+  ): number {
+    const marker = hud.compass[index];
+    if (marker === undefined) return index;
+    const dx = target.x - me.position.x;
+    const dy = target.y - me.position.y;
+    const dz = target.z - me.position.z;
+    marker.kind = kind;
+    marker.team = team;
+    marker.angle = screenAngle(dx, dz, cameraYaw);
+    marker.distanceM = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    marker.alive = true;
+    return index + 1;
+  }
+
+  /**
+   * Ember Relay's markers, before the team mates so they are never the ones left out: the enemy
+   * shard wherever it is (unless it is in the local rider's own claws), the own shard once it
+   * is off its stand (home it sits by the brazier), and the own brazier.
+   */
+  function writeRelayMarkers(me: Readonly<DragonView>, localTeam: TeamId): number {
+    const relay = view.relay;
+    if (!relay.active) return 0;
+    let count = 0;
+    const enemyTeam = localTeam === TEAM_EMBER ? TEAM_FROST : TEAM_EMBER;
+    const theirs = relay.shards[enemyTeam];
+    if (theirs !== undefined && !(theirs.status === SHARD_CARRIED && theirs.carrierId === me.id)) {
+      count = writeMarker(count, 'shard', enemyTeam, me, theirs.position);
+    }
+    const ours = relay.shards[localTeam];
+    if (ours !== undefined && ours.status !== SHARD_HOME) {
+      count = writeMarker(count, 'shard', localTeam, me, ours.position);
+    }
+    const brazier = relay.braziers[localTeam];
+    if (brazier !== undefined) count = writeMarker(count, 'brazier', localTeam, me, brazier);
+    return count;
+  }
+
   function writeCompass(localTeam: TeamId | null, localId: PlayerId): void {
     let count = 0;
     const me = findDragonView(view, localId);
     if (me !== undefined && localTeam !== null) {
+      count = writeRelayMarkers(me, localTeam);
       for (let i = 0; i < view.dragonCount && count < HUD_COMPASS_MARKERS; i++) {
         const other = view.dragons[i];
         if (other === undefined || other.id === localId || other.team !== localTeam) continue;
@@ -295,9 +413,11 @@ export function createHudBuilder(view: WorldView): HudBuilder {
     connect(source: GameEventSource): Unsubscribe {
       const offHit = source.on('hit', onHit);
       const offTakedown = source.on('takedown', onTakedown);
+      const offObjective = source.on('objective', onObjective);
       return (): void => {
         offHit();
         offTakedown();
+        offObjective();
       };
     },
 
@@ -338,6 +458,7 @@ export function createHudBuilder(view: WorldView): HudBuilder {
 
       writeScoreboard(input);
       writeCompass(local !== undefined ? local.team : null, localId);
+      writeRelay(local);
     },
 
     setKeyLabels(labels: readonly string[]): void {
@@ -368,16 +489,27 @@ export function createHudBuilder(view: WorldView): HudBuilder {
         return id;
       };
       // Simple for now (the podium and its awards are T-5.5): the MVP is the winning team's
-      // best all-round rider.
+      // best all-round rider. A shard brought home outweighs two takedowns (0 outside Ember
+      // Relay, so other modes rank as before).
       const mvpTeam = winner === 'draw' ? null : winner;
-      return {
+      const results: ResultsState = {
         winner,
         scores: [hud.scores[0], hud.scores[1]],
-        mvpId: best((row) => row.takedowns * 100 + (row.assists ?? 0) * 40 + row.damage, mvpTeam),
+        mvpId: best(
+          (row) =>
+            (row.captures ?? 0) * MVP_CAPTURE_POINTS +
+            row.takedowns * 100 +
+            (row.assists ?? 0) * 40 +
+            row.damage,
+          mvpTeam,
+        ),
         mostTakedownsId: best((row) => row.takedowns, null),
         mostDamageId: best((row) => row.damage, null),
         scoreboard,
+        mode: hud.mode,
       };
+      if (hud.mode !== 'emberRelay') return results;
+      return { ...results, mostCapturesId: best((row) => row.captures ?? 0, null) };
     },
   };
 }

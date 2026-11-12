@@ -4,8 +4,12 @@
  */
 import type { MapSky, Vec3 } from '../../shared';
 
-/** What the sky, lights, fog and clouds need from a map: `MapManifest.sky` fits as it is. */
-export type SkySetup = Pick<MapSky, 'sunDirection' | 'sunColor' | 'fogColor' | 'fogDensity'>;
+/**
+ * What the sky, lights, fog and clouds need from a map: `MapManifest.sky` fits as it is. The
+ * sun and the fog are required; the map's own colours are optional and default to the golden
+ * hour (`skyLookOf`, ./sky-look.ts).
+ */
+export type SkySetup = Omit<MapSky, 'panorama'>;
 
 // --- Palette (docs/ART_DIRECTION.md "Sky, clouds": cream -> peach -> dusk violet), sRGB hex -------
 export const SKY_CREAM = 0xf4e6cc;

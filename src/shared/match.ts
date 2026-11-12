@@ -25,7 +25,7 @@ export const MODES: Readonly<Record<ModeId, ModeInfo>> = {
     name: 'Ember Relay',
     minTeamSize: 2,
     maxTeamSize: 5,
-    available: false,
+    available: true,
   },
   // Stretch goal.
   skyCrown: { id: 'skyCrown', name: 'Sky Crown', minTeamSize: 2, maxTeamSize: 5, available: false },
@@ -42,7 +42,7 @@ export interface MapInfo {
 
 export const MAPS: Readonly<Record<MapId, MapInfo>> = {
   'shattered-spires': { id: 'shattered-spires', name: 'Shattered Spires', available: true },
-  'emberfall-caldera': { id: 'emberfall-caldera', name: 'Emberfall Caldera', available: false },
+  'emberfall-caldera': { id: 'emberfall-caldera', name: 'Emberfall Caldera', available: true },
 };
 
 /**
@@ -111,6 +111,50 @@ export interface DuelTuning {
   healthTieEpsilon: number;
 }
 
+/**
+ * Ember Relay (T-6.3): each team keeps a sky-shard on a stand at its base and a brazier beside
+ * it. Fly through the enemy's shard to take it, carry it into your own brazier to score. The
+ * rules are in `src/sim/match/relay.ts`; where the stands and braziers go is derived from the
+ * spawn gates and the map centre in `src/sim/match/relay-sites.ts`.
+ */
+export interface EmberRelayTuning {
+  /** Captures that win, as the lobby sets it when the mode is picked, and the most it allows. */
+  defaultCaptures: number;
+  maxCaptures: number;
+  /**
+   * Seconds of sudden death when the time limit ends on equal captures: the next capture wins.
+   * Still level when it runs out = a draw. 0 = a level match is a draw at once.
+   */
+  overtimeS: number;
+  /** A dragon this close to a shard (centre to centre, metres) touches it. */
+  pickupRadiusM: number;
+  /** A carrier this close to its own brazier scores. */
+  captureRadiusM: number;
+  /** The carrier's cruise and top speed are multiplied by this (the price of carrying). */
+  carrierSpeedScale: number;
+  /** Seconds a dropped shard lies where it fell before it goes home by itself. */
+  dropReturnS: number;
+  /**
+   * True: a capture only counts while the team's own shard is on its stand. False (the
+   * default): it always counts, so two carriers cannot hold the match up.
+   */
+  captureNeedsShardHome: boolean;
+  /** The stand: metres from the team's gate toward the map centre, and to the gate's right. */
+  standForwardM: number;
+  standSideM: number;
+  /** The brazier, likewise (a negative side = to the gate's left). */
+  brazierForwardM: number;
+  brazierSideM: number;
+  /** Open air kept around a stand or a brazier, and around a dropped shard. */
+  siteClearanceM: number;
+  dropClearanceM: number;
+  /** Stands, braziers and dropped shards stay this far above the map floor (the cloud sea)... */
+  minAltitudeM: number;
+  /** ...this far under the ceiling, and this far inside the storm wall. */
+  ceilingMarginM: number;
+  stormMarginM: number;
+}
+
 export interface ModeTuning {
   /** Seconds of `roundEnd`: the beat between a round's last takedown and what follows. */
   roundEndS: number;
@@ -124,6 +168,7 @@ export interface ModeTuning {
   forfeitGraceS: number;
   skirmish: SkirmishTuning;
   duel: DuelTuning;
+  emberRelay: EmberRelayTuning;
 }
 
 /** First-pass numbers (T-3.4); tuned by playtest. */
@@ -144,6 +189,26 @@ export const MODE_TUNING: ModeTuning = {
     stormMinRadiusM: 120,
     stormGateMarginM: 60,
     healthTieEpsilon: 0.01,
+  },
+  // First-pass numbers (T-6.3); tuned by playtest.
+  emberRelay: {
+    defaultCaptures: 3,
+    maxCaptures: 10,
+    overtimeS: 60,
+    pickupRadiusM: 14,
+    captureRadiusM: 24,
+    carrierSpeedScale: 0.85,
+    dropReturnS: 20,
+    captureNeedsShardHome: false,
+    standForwardM: 180,
+    standSideM: 40,
+    brazierForwardM: 100,
+    brazierSideM: -40,
+    siteClearanceM: 30,
+    dropClearanceM: 10,
+    minAltitudeM: 80,
+    ceilingMarginM: 80,
+    stormMarginM: 120,
   },
 };
 
@@ -175,5 +240,7 @@ export function isOvertime(
   mode: ModeId,
   timeLimitS: number,
 ): boolean {
-  return mode === 'skirmish' && phase === 'playing' && timeLimitS > 0 && phaseTimeS > timeLimitS;
+  // Ember Relay ends level games the same way: the next capture wins.
+  const hasSuddenDeath = mode === 'skirmish' || mode === 'emberRelay';
+  return hasSuddenDeath && phase === 'playing' && timeLimitS > 0 && phaseTimeS > timeLimitS;
 }

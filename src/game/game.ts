@@ -85,6 +85,9 @@ import {
   QUALITY_PRESETS,
   TICK_DT_S,
   TICK_HZ,
+  DEFAULT_HOST_SETTINGS,
+  DEFAULT_MAP_ID,
+  matchSeedOfMap,
   copyInputFrame,
   createGameEventBus,
   createInputFrame,
@@ -97,6 +100,7 @@ import {
 import type {
   DragonClassId,
   GameEventBus,
+  GameSettings,
   InputFrame,
   LobbyState,
   MatchPhase,
@@ -141,11 +145,12 @@ import type { CameraDirector, Stage } from './stage';
 import {
   FrameCap,
   bindSettingsTargets,
+  createGamepadLink,
   createSettingsNameStore,
   createSettingsStore,
   handleSettingsIntent,
 } from './settings';
-import type { SettingsStore } from './settings';
+import type { GamepadLink, SettingsStore } from './settings';
 import { createStorageTokenStore, loadClientId, readRejoin, writeRejoin } from './storage';
 import {
   applySessionFacts,
@@ -236,6 +241,8 @@ export interface GameOptions {
   readonly now: () => number;
   /** Resolves with the netsim (or null) before the first transport is made. */
   readonly shaper?: Promise<TransportShaper | null>;
+  /** Settings > "Test again": run the automatic quality pick again (T-6.2, ./auto-quality-run.ts). */
+  readonly onRetestQuality?: () => void;
 }
 
 /** What `Game.report` returns: a plain copy for the test driver and the devtools console. */
@@ -417,6 +424,13 @@ export interface Game {
   getSimMs(): number;
   /** A match is on screen (its views are loaded and a picture was built this frame). */
   readonly inMatch: boolean;
+  /**
+   * The title screen is showing and nothing else is going on: no room, no solo flight, no host
+   * or join attempt under way. The automatic quality pick (T-6.2) only measures while this holds.
+   */
+  readonly titleIdle: boolean;
+  /** The player's settings as they stand (the store's own object: read it, do not keep it). */
+  readonly settings: GameSettings;
   /** The middle of the arena at fight height: what a fly-round camera circles. */
   readonly arenaFocus: Readonly<Vec3>;
   /** Most particles alive and most voices playing in one frame so far (needs `flags.measure`). */
@@ -600,7 +614,17 @@ export function createGame(options: GameOptions): Game {
     const me = uiState.connection.localPlayerId;
     if (me === NO_PLAYER) return;
     if (event.attackerId === me && event.targetId !== me) localHits++;
-    if (event.targetId === me) localHitsTaken++;
+    if (event.targetId === me) {
+      localHitsTaken++;
+      // Does nothing unless the rumble setting is on and the player flies with a gamepad.
+      if (event.damage > 0) input.rumble(0.5, 120);
+    }
+  });
+  bus.on('takedown', (event) => {
+    const me = uiState.connection.localPlayerId;
+    if (me === NO_PLAYER) return;
+    if (event.victimId === me) input.rumble(1, 320);
+    else if (event.killerId === me) input.rumble(0.7, 200);
   });
   bus.on('abilityCast', (event) => {
     // A client counts its casts when its prediction fires them (`showLocalCasts`).
@@ -632,6 +656,8 @@ export function createGame(options: GameOptions): Game {
   let aimY = 0;
   let wasLocked = false;
   let inputActive = false;
+  /** True while an intent raised by a gamepad button is being handled (see `frame`). */
+  let padActing = false;
   let isRider = false;
   let matchAssets: MatchAssets | null = null;
 
@@ -761,6 +787,20 @@ export function createGame(options: GameOptions): Game {
     });
   }
 
+  // The gamepad's settings, menu steps and HUD captions (made before the targets below, whose
+  // first run hands it the keyboard's captions).
+  const padLink: GamepadLink = createGamepadLink({
+    input,
+    store,
+    setKeyLabels: (labels) => hudBuilder.setKeyLabels(labels),
+    onPresence: (connected) => {
+      // For the "click to fly" prompt's style sheet: with a pad it also says "or press a button".
+      document.documentElement.dataset['dfPad'] = connected ? 'connected' : 'none';
+    },
+  });
+  // What the Controls tab shows of the pad: one object the link rewrites in place, so it is
+  // handed over once. (`MutableUiState` in ui-model.ts has no such field yet.)
+  (uiState as { gamepad?: GamepadLink['ui'] }).gamepad = padLink.ui;
   const unbindSettings = bindSettingsTargets(store, {
     setQuality(preset): void {
       // `?quality=` pins the preset for this page load, whatever is saved.
@@ -802,7 +842,8 @@ export function createGame(options: GameOptions): Game {
         // The short caption: the slots were laid out for "LMB", not "Left mouse".
         labels.push(code === undefined ? '' : codeShortLabel(code));
       }
-      hudBuilder.setKeyLabels(labels);
+      // Through the gamepad link: it shows these or the pad's, whichever device is in use.
+      padLink.setKeyboardLabels(labels);
       scoreboardCodes = bindings.scoreboard;
       scoreboardKeyHeld = false;
     },
@@ -933,7 +974,14 @@ export function createGame(options: GameOptions): Game {
       events: bus,
       localBot: flags.autopilotBot === true,
       lagCompensation: flags.lagCompensation !== false,
-      autoSettings: kind === 'host' ? (flags.autoSettings ?? null) : null,
+      // A solo flight takes only the map of the dev flags (`?solo&map=`); the team size is
+      // named so the rule "auto-start = seats for the host and its bots" does not shrink it.
+      autoSettings:
+        kind === 'host'
+          ? (flags.autoSettings ?? null)
+          : flags.autoSettings?.map !== undefined
+            ? { map: flags.autoSettings.map, teamSize: DEFAULT_HOST_SETTINGS.teamSize }
+            : null,
       autopilot: flags.autopilot && flags.autopilotBot !== true ? course : null,
       spawnWorker: !flags.noWorker && hostWorkerSupported() ? spawnHostWorker : null,
       cinematics: flags.cinematics !== false,
@@ -1045,6 +1093,9 @@ export function createGame(options: GameOptions): Game {
     redetectDisplay(): void {
       renderer.resolution.reset();
     },
+    retestQuality(): void {
+      options.onRetestQuality?.();
+    },
   };
 
   function handleIntent(intent: UiIntent): void {
@@ -1086,10 +1137,11 @@ export function createGame(options: GameOptions): Game {
         return;
       case 'match.resume':
         pauseOpen = false;
-        // The click on Resume is the user gesture pointer lock needs.
+        // The click on Resume is the user gesture pointer lock needs. A gamepad button is not
+        // one (the browser would refuse), and a pad flies without the lock anyway.
         if (isRider && !flags.autopilot) {
           setInputActive(true);
-          input.requestLock();
+          if (!padActing) input.requestLock();
         }
         return;
       case 'lobby.focusPlayer':
@@ -1176,6 +1228,7 @@ export function createGame(options: GameOptions): Game {
 
     let inMatch = false;
     let seed = -1;
+    let mapId = DEFAULT_MAP_ID;
     let rider = false;
     if (current !== null) {
       if (current.kind === 'client') {
@@ -1185,13 +1238,17 @@ export function createGame(options: GameOptions): Game {
         facts.reconnecting = session.status === 'reconnecting';
         inMatch = session.inMatch;
         seed = session.matchSeed;
+        mapId = session.matchMap;
         rider = session.isRider;
       } else {
         const session = current.session;
         facts.lobby = session.state === 'open' ? session.lobby : null;
         facts.connecting = session.state !== 'open';
         inMatch = session.inMatch;
-        seed = assets.defaultMap.seed;
+        // The same rule the host session sends in MATCH_START (it cannot change mid-match:
+        // the lobby is locked while one runs).
+        mapId = session.lobby?.settings.map ?? DEFAULT_MAP_ID;
+        seed = matchSeedOfMap(mapId, assets.defaultMap.seed);
         rider = inMatch && session.localIsRider;
       }
     }
@@ -1202,8 +1259,9 @@ export function createGame(options: GameOptions): Game {
     const keepMatch = current !== null && stage.matchLoaded && lobbyPhase !== 'lobby';
     const wantMatch = inMatch || keepMatch || (facts.reconnecting && stage.matchLoaded);
 
-    if (inMatch && (!stage.matchLoaded || stage.matchSeed !== seed >>> 0)) {
-      matchAssets = assets.get(seed);
+    const otherWorld = stage.matchSeed !== seed >>> 0 || matchAssets?.mapId !== mapId;
+    if (inMatch && (!stage.matchLoaded || otherWorld)) {
+      matchAssets = assets.get(seed, mapId);
       // One rig per rider is built now, so the warm-up compiles them with the map.
       riderClasses.length = 0;
       if (facts.lobby !== null) {
@@ -1359,7 +1417,7 @@ export function createGame(options: GameOptions): Game {
     if (
       local === undefined ||
       flags.autopilot ||
-      !input.locked ||
+      !input.flying ||
       viewportHeight <= 0 ||
       (local.flags & DRAGON_FLAG_ALIVE) === 0
     ) {
@@ -1406,7 +1464,8 @@ export function createGame(options: GameOptions): Game {
     info.showReticle = isRider && !flags.autopilot && !pauseOpen && !settingsOpen;
     info.reticleX = input.state.reticleX;
     info.reticleY = input.state.reticleY;
-    info.pointerLocked = input.locked;
+    // "Has control", by pointer lock or by gamepad: what hides the "click to fly" prompt.
+    info.pointerLocked = input.flying;
     info.watchedId = stage.watchedId;
     info.canSkipIntro = current.kind !== 'client' && current.session.canSkipIntro;
     let phase: MatchPhase;
@@ -1437,7 +1496,10 @@ export function createGame(options: GameOptions): Game {
     hudBuilder.hud.scoreboardOpen =
       !pauseOpen &&
       !settingsOpen &&
-      (scoreboardKeyHeld || (input.locked && isActionActive(input.state, 'scoreboard')));
+      (scoreboardKeyHeld ||
+        (input.flying && isActionActive(input.state, 'scoreboard')) ||
+        // The pad's button also counts with no control: a spectator, a rider who is down.
+        input.isGamepadActionHeld('scoreboard'));
     // The results panel is the headline of a finished match: no second banner behind it.
     if (phase === 'results') hudBuilder.hud.winner = null;
     // The intro's title card: the map and the mode, at the opacity the cinematic gives it.
@@ -1505,11 +1567,35 @@ export function createGame(options: GameOptions): Game {
     current.session.fixedStep();
   }
 
+  /** This frame's gamepad buttons that are not flight: Menu (Start) and the menu steps. */
+  function readGamepad(nowMs: number): void {
+    // Polls the pad once per frame; without one this is two comparisons.
+    padLink.frame(nowMs, !inputActive, settingsOpen);
+    if (padLink.pausePressed && stage.matchLoaded && !settingsOpen) {
+      // Menu opens the flight menu and closes it again, as Esc does.
+      padActing = true;
+      handleIntent({ type: pauseOpen ? 'match.resume' : 'match.pause' });
+      padActing = false;
+      ui.markPadUsed();
+    }
+    const step = padLink.nav;
+    if (step === null) return;
+    if (step === 'accept' && stage.matchLoaded && !isRider && !pauseOpen && !settingsOpen) {
+      // A spectator's A is the click on the picture: follow the next rider.
+      stage.cycleSpectateTarget();
+      return;
+    }
+    padActing = true;
+    ui.navigate(step);
+    padActing = false;
+  }
+
   function frame(alpha: number, frameMs: number): void {
     const nowMs = now();
     const elapsedS = lastFrameNowMs < 0 ? 0 : (nowMs - lastFrameNowMs) / 1000;
     lastFrameNowMs = nowMs;
     const dtS = frameMs / 1000;
+    readGamepad(nowMs);
     // Frames stopped for a while (a hidden tab, a long stall) but a host worker's or a client's
     // messages kept arriving: what happened meanwhile is not shown all at once on the first
     // frame back. The state (score, health, who is where) comes from the view, not from events.
@@ -1768,6 +1854,14 @@ export function createGame(options: GameOptions): Game {
       return matchOnScreen;
     },
 
+    get titleIdle() {
+      return run === null && pendingKind === 'none' && !stage.matchLoaded;
+    },
+
+    get settings() {
+      return store.settings;
+    },
+
     arenaFocus,
 
     getPeaks() {
@@ -1942,6 +2036,7 @@ export function createGame(options: GameOptions): Game {
       window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('keydown', unlockAudio);
       unbindSettings();
+      padLink.dispose();
       unsubscribeShown();
       store.dispose();
       settingsPanel?.dispose();

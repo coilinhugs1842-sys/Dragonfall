@@ -53,6 +53,7 @@ import {
   DECODE_WRONG_TYPE,
   GAME_EVENT_TYPES,
   HEADER_BYTES,
+  MAP_IDS,
   MATCH_PHASE_BYTES,
   MATCH_START_BYTES,
   MAX_EVENTS_PER_BATCH,
@@ -536,13 +537,55 @@ describe('MATCH_START and MATCH_PHASE', () => {
   it('round-trips a match start', () => {
     const w = new Writer(CTRL_MAX_BYTES);
     const r = new Reader();
-    const msg = { tick: 100, startTick: 70_000, seed: 0xdeadbeef };
+    const msg = { tick: 100, startTick: 70_000, seed: 0xdeadbeef, map: 'shattered-spires' as const };
     const length = encodeMatchStart(w, msg);
     expect(length).toBe(MATCH_START_BYTES);
     const out = createMatchStartMessage();
     expect(decodeMatchStart(r.reset(viewOf(w, length)), out)).toBe(true);
     expect(r.peekType()).toBe(MSG_MATCH_START);
     expect(out).toEqual(msg);
+  });
+
+  it('carries the map id next to the seed, for every map', () => {
+    const w = new Writer(CTRL_MAX_BYTES);
+    const r = new Reader();
+    expect(MATCH_START_BYTES).toBe(HEADER_BYTES + 4 + 4 + 1);
+    // A fresh message names the first map, so a decode failure can never leave a stale id.
+    expect(createMatchStartMessage().map).toBe('shattered-spires');
+    for (const map of MAP_IDS) {
+      const msg = { tick: 7, startTick: 1234, seed: 0xe3be7fa1, map };
+      const length = encodeMatchStart(w, msg);
+      expect(length).toBe(MATCH_START_BYTES);
+      // The last byte is the index into MAP_IDS.
+      expect(w.view.getUint8(length - 1)).toBe(MAP_IDS.indexOf(map));
+      const out = createMatchStartMessage();
+      expect(decodeMatchStart(r.reset(viewOf(w, length)), out)).toBe(true);
+      expect(out).toEqual(msg);
+    }
+  });
+
+  it('refuses a match start with an unknown map, a short or a long body', () => {
+    const w = new Writer(CTRL_MAX_BYTES);
+    const r = new Reader();
+    const length = encodeMatchStart(w, {
+      tick: 1,
+      startTick: 50,
+      seed: 9,
+      map: 'emberfall-caldera',
+    });
+    const out = createMatchStartMessage();
+    out.seed = 77;
+    w.view.setUint8(length - 1, MAP_IDS.length); // one past the table
+    expect(decodeMatchStart(r.reset(viewOf(w, length)), out)).toBe(false);
+    // Nothing of a refused message is kept.
+    expect(out).toEqual({ tick: 0, startTick: 0, seed: 77, map: 'shattered-spires' });
+    w.view.setUint8(length - 1, 1);
+    expect(decodeMatchStart(r.reset(viewOf(w, length - 1)), out)).toBe(false);
+    expect(r.error).toBe(DECODE_TRUNCATED);
+    expect(decodeMatchStart(r.reset(viewOf(w, length + 1)), out)).toBe(false);
+    expect(r.error).toBe(DECODE_OVERSIZED);
+    // A map id that is not in the wire table cannot be sent at all.
+    expect(encodeMatchStart(w, { tick: 1, startTick: 50, seed: 9, map: 'atlantis' as never })).toBe(0);
   });
 
   it('round-trips every phase and winner', () => {

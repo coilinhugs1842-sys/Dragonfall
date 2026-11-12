@@ -101,6 +101,27 @@
   color: var(--dfh-frost);
 }
 
+/*
+ * Stronger team markers (the colour-blind setting; T-6.6). The setting marks <html>
+ * (`data-df-markers`, applyPageSettings); until now only the lobby and the results read it, so
+ * in a match it changed nothing. Team triangles and diamonds get a size up and a parchment
+ * edge: the outline alone tells them apart on any sky, and the team colour stays inside.
+ * Shards and the brazier keep their own marks (their shape is cut into the crystal).
+ */
+[data-df-markers='strong'] .dfh-side > .dfh-shape,
+[data-df-markers='strong'] .dfh-mark:not([data-kind='shard'], [data-kind='brazier']) .dfh-shape,
+[data-df-markers='strong'] .dfh-feed-who > .dfh-shape,
+[data-df-markers='strong'] .dfh-vitals-head > .dfh-shape,
+[data-df-markers='strong'] .dfh-killer > .dfh-shape,
+[data-df-markers='strong'] .dfh-team-head > .dfh-shape {
+  overflow: visible;
+  stroke: var(--dfh-text);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  paint-order: stroke;
+  transform: scale(1.25);
+}
+
 /* --- Full-screen veils -------------------------------------------------------------------------- */
 
 .dfh-lowhp,
@@ -1514,4 +1535,216 @@
 
 [data-df-motion='reduced'] .dfh-hit[data-pulse='down-b'] {
   animation-name: dfh-hit-b;
+}
+
+/* --- Ember Relay (T-6.3): shard strip, announcement, carry call-out ----------------------------- */
+
+/*
+ * Under the score, each team's shard on its own side. The state is the WORD (Home / Taken /
+ * Dropped) and whose shard it is the shape cut into the crystal; colour repeats both.
+ */
+.dfh-relay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.3em;
+  font-size: 0.74em;
+  text-shadow: var(--dfh-shadow);
+}
+
+.dfh-relay-gap {
+  flex: none;
+  /* The clock's width in this row's smaller font (7.4em / 0.74). */
+  width: 10em;
+}
+
+.dfh-shard {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 0.5em;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.dfh-shard-ember {
+  flex-direction: row-reverse;
+}
+
+.dfh-shard > .dfh-shape {
+  width: 1.3em;
+  height: 1.3em;
+}
+
+.dfh-shard-word {
+  color: var(--dfh-muted);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.dfh-shard[data-status='carried'] > .dfh-shard-word,
+.dfh-shard[data-status='dropped'] > .dfh-shard-word {
+  color: var(--dfh-text);
+  font-weight: 600;
+}
+
+/* Off its stand: the mark is drawn open-handed (dim) so "not home" shows without reading. */
+.dfh-shard[data-status='dropped'] > .dfh-shape {
+  opacity: 0.55;
+}
+
+.dfh-shard-who {
+  max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dfh-shard-secs::after {
+  content: ' s';
+}
+
+/* Compass: shards and the brazier are a size up from team mates, and keep their own marks. */
+.dfh-mark[data-kind='shard'] .dfh-shape,
+.dfh-mark[data-kind='brazier'] .dfh-shape {
+  width: 1.3em;
+  height: 1.3em;
+}
+
+.dfh-mark[data-kind='shard'] .dfh-mark-in,
+.dfh-mark[data-kind='brazier'] .dfh-mark-in {
+  margin-top: 0.12em;
+}
+
+/* Room for the longest shard line ("Ember shard captured") in the feed's second column. */
+.dfh-feed-name {
+  max-width: 11.5em;
+}
+
+/* In this mode the distances that matter are to the shards. Team mates and the brazier keep
+   their shape but lose their figure: escorts fly beside the carrier and a dropped shard often
+   lies on the way home, and two figures printed over each other could not be read. The
+   carrier's call-out gives the distance to the brazier when it matters. */
+.dfh-relay:not([hidden]) ~ .dfh-compass .dfh-mark:not([data-kind='shard']) .dfh-mark-dist {
+  display: none;
+}
+
+.dfh-relay-calls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45em;
+  margin-top: 0.7em;
+}
+
+.dfh-notice {
+  padding: 0.26em 1.1em 0.3em;
+  border-left: 2px solid var(--dfh-line-strong);
+  border-right: 2px solid var(--dfh-line-strong);
+  background: var(--dfh-panel-soft);
+  font-size: 0.86em;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.dfh-notice[data-tone='good'] {
+  border-color: var(--dfh-text);
+}
+
+.dfh-notice[data-tone='bad'] {
+  border-color: var(--dfh-harm);
+}
+
+/* You have it: stays up for as long as the shard is in hand. */
+.dfh-carry {
+  display: flex;
+  align-items: center;
+  gap: 0.9em;
+  padding: 0.5em 1.4em 0.55em 1.1em;
+  border-top: 1px solid var(--dfh-text);
+  border-bottom: 1px solid var(--dfh-line-strong);
+  background: var(--dfh-panel);
+  white-space: nowrap;
+}
+
+.dfh-carry-mark {
+  width: 2.1em;
+  height: 2.1em;
+}
+
+.dfh-carry[data-team='ember'] > .dfh-carry-mark {
+  color: var(--dfh-ember);
+}
+
+.dfh-carry[data-team='frost'] > .dfh-carry-mark {
+  color: var(--dfh-frost);
+}
+
+.dfh-carry-title {
+  font-family: var(--dfh-serif);
+  font-size: 1.2em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.dfh-carry-goal {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  color: var(--dfh-muted);
+  font-size: 0.8em;
+  letter-spacing: 0.06em;
+}
+
+.dfh-carry-brazier {
+  width: 1.05em;
+  height: 1.05em;
+  color: var(--dfh-own);
+}
+
+.dfh-carry-dist {
+  color: var(--dfh-text);
+}
+
+.dfh-carry-dist::after {
+  content: ' m';
+}
+
+/* Scoreboard: captures get their own column, first among the numbers, in Ember Relay only. */
+.dfh-cell-cap {
+  display: none;
+}
+
+.dfh-board[data-mode='relay'] .dfh-cell-cap {
+  display: block;
+}
+
+.dfh-board[data-mode='relay'] .dfh-row {
+  grid-template-columns: minmax(0, 1fr) 4.6em 2.4em 2.4em 2.4em 2.4em 3.4em 2.6em;
+}
+
+/* There the captures are the number that matters; takedowns step back. */
+.dfh-board[data-mode='relay'] .dfh-cell-key:not(.dfh-cell-cap) {
+  font-weight: 400;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dfh-carry-mark {
+    animation: dfh-carry 0.9s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes dfh-carry {
+  from {
+    opacity: 0.6;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+.df-reduce-motion .dfh-carry-mark,
+[data-df-motion='reduced'] .dfh-carry-mark {
+  animation: none;
 }

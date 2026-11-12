@@ -344,7 +344,7 @@ describe('results', () => {
     const view = computeResultsView(createResultsView(), state, 1);
     expect(view.awards.map((award) => award.name)).toEqual(['Kestrel', 'Kestrel', 'Kestrel']);
     expect(view.awards.every((award) => award.shown)).toBe(true);
-    expect(awardMarks(state, 2)).toBe('MVP · Takedowns · Damage');
+    expect(awardMarks(state, 2)).toBe('MVP · TKD · DMG');
     expect(awardMarks(state, 1)).toBe('');
   });
 
@@ -356,7 +356,7 @@ describe('results', () => {
     // A rider who is not in the table (left before the end) gets no card either.
     expect(view.awards[AWARD_DAMAGE]?.shown).toBe(false);
     expect(awardMarks(state, NO_PLAYER)).toBe('');
-    expect(awardMarks(state, 2)).toBe('Takedowns');
+    expect(awardMarks(state, 2)).toBe('TKD');
   });
 
   it('forgets the previous match when the view is refilled', () => {

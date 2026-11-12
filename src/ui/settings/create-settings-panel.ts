@@ -10,31 +10,35 @@
  * Keyboard: Tab stays inside the dialog, Left / Right move between tabs, Escape closes (or
  * cancels a key capture). While the panel is open it takes key and mouse events in the capture
  * phase, so the game's own Escape and click handling never see them.
+ *
+ * Gamepad: the Controls tab shows the connected pad, its options and its own button table
+ * (./binding-list.ts, used twice). The panel cannot read a pad itself (src/ui has no input
+ * module): a button press arrives in `UiState.gamepad.pressCode`, and stepping through the
+ * panel with the pad is the shell's work (../pad-nav.ts), which stands back while
+ * `data-capturing` says a slot is listening.
  */
 
 import '../ui.css';
 import './settings.css';
 import { resolveSettings, SETTINGS_TABS } from '../../shared/ui';
 import type {
-  ControlsUiState,
   GameSettings,
+  GamepadUiState,
   SettingsState,
   SettingsTab,
   UiIntentHandler,
   UiState,
 } from '../../shared/ui';
 import { append, button, el } from '../dom';
+import { GAMEPAD_LIST_WORDS, KEYBOARD_LIST_WORDS, createBindingList } from './binding-list';
+import type { BindingList } from './binding-list';
 import {
-  actionLabel,
   beginCapture,
-  canSwap,
   cancelCapture,
   captureCode,
-  codeLabel,
-  createRebindModel,
+  captureGamepadCode,
   mouseCode,
-  rebindPrompt,
-  reconcileRebind,
+  resetBindingsIntent,
   resolveConflict,
 } from './rebind-model';
 import {
@@ -42,6 +46,7 @@ import {
   SELECT_OPTIONS,
   SETTINGS_TAB_LABELS,
   createRangeView,
+  gamepadStatus,
   isSettingsTab,
   neighbourTab,
   qualityHint,
@@ -91,13 +96,6 @@ interface SelectDom {
   readonly node: HTMLSelectElement;
 }
 
-interface KeyRowDom {
-  readonly action: string;
-  readonly row: HTMLElement;
-  readonly slots: HTMLButtonElement[];
-  readonly reset: HTMLButtonElement;
-}
-
 function group(title: string, ...rows: readonly HTMLElement[]): HTMLElement {
   const node = el('section', 'dfs-group');
   append(node, el('h3', 'dfu-overline dfs-group-title', title), ...rows);
@@ -121,15 +119,24 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
   const ranges: RangeDom[] = [];
   const toggles: ToggleDom[] = [];
   const selects: SelectDom[] = [];
-  const keyRows: KeyRowDom[] = [];
   const view = createRangeView();
-  const rebind = createRebindModel();
+  const keyList = createBindingList('keyboard', KEYBOARD_LIST_WORDS);
+  const padList = createBindingList('gamepad', GAMEPAD_LIST_WORDS);
+  const lists: readonly BindingList[] = [keyList, padList];
 
   let settings: GameSettings | null = null;
   let shownSettings: SettingsState | null = null;
-  let controls: ControlsUiState | undefined;
-  let shownControls: ControlsUiState | undefined;
-  let shownRebindRevision = -1;
+  // What the gamepad row was last drawn from.
+  let shownPadSupported = false;
+  let shownPadSecure = true;
+  let shownPadConnected = false;
+  let shownPadName = '';
+  let shownPadStandard = false;
+  let shownHasPad = true;
+  let shownPressSeq = -1;
+  // A pad press only binds once the list has been listening for a whole frame: the press of A
+  // that chose the slot (through pad navigation) arrives in the same frame and is not the answer.
+  let padArmed = false;
   let shownOpenFlag: boolean | undefined;
   let open = false;
   let disposed = false;
@@ -263,11 +270,20 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
   const redetect = button('dfu-btn dfu-btn-small', 'Re-detect display', 'redetect');
   const redetectControl = el('div', 'dfs-control');
   redetectControl.appendChild(redetect);
+  // The automatic quality pick (T-6.2): runs it again and sets the preset to Automatic.
+  const retest = button('dfu-btn dfu-btn-small', 'Test again', 'retestQuality');
+  const retestControl = el('div', 'dfs-control');
+  retestControl.appendChild(retest);
   append(
     tabPanels.get('video') as HTMLElement,
     group(
       'Quality',
       selectRow('quality', 'Quality preset', qualityNote),
+      row(
+        'Automatic preset',
+        'Measures this computer for a few seconds on the title screen, then picks the preset.',
+        retestControl,
+      ),
       toggleRow(
         'dynamicResolution',
         'Dynamic resolution',
@@ -309,27 +325,36 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
 
   // --- Controls ---------------------------------------------------------------------------------
 
-  const prompt = el('div', 'dfs-prompt');
-  prompt.setAttribute('role', 'status');
-  prompt.setAttribute('aria-live', 'polite');
-  prompt.hidden = true;
-  const promptText = el('p', 'dfs-prompt-text', '');
-  const swapButton = button('dfu-btn dfu-btn-small dfu-btn-primary', 'Swap', 'conflictSwap');
-  const cancelButton = button('dfu-btn dfu-btn-small', 'Cancel', 'conflictCancel');
-  const promptActions = el('div', 'dfs-prompt-actions');
-  append(promptActions, swapButton, cancelButton);
-  append(prompt, promptText, promptActions);
-
-  const keyList = el('div', 'dfs-keys');
-  const keyEmpty = el('p', 'dfu-hint', 'Key bindings are not available here.');
-  const resetKeys = button('dfu-btn dfu-btn-small', 'Reset keys to defaults', 'resetKeys');
-  const keysFoot = el('div', 'dfs-keys-foot');
-  append(
-    keysFoot,
-    el('p', 'dfu-hint', 'Select a key, then press the new one. Mouse buttons work too.'),
-    resetKeys,
+  // The gamepad row says which pad is there in words and with a mark, never by colour alone.
+  const padStatus = el('div', 'dfs-pad');
+  padStatus.setAttribute('role', 'status');
+  padStatus.dataset['connected'] = 'false';
+  const padName = el('p', 'dfs-pad-name', 'No gamepad detected');
+  const padNote = el('p', 'dfu-hint dfs-pad-note', '');
+  append(padStatus, padName, padNote);
+  const padButtonsGroup = group('Gamepad buttons', ...padList.nodes);
+  const padGroup = group(
+    'Gamepad',
+    padStatus,
+    rangeRow('gamepadSensitivity', 'Stick sensitivity', 'How far a full push turns the dragon.'),
+    toggleRow(
+      'gamepadInvertY',
+      'Invert vertical stick',
+      'Push forward to dive, like a flight stick.',
+    ),
+    rangeRow(
+      'gamepadDeadZone',
+      'Stick dead zone',
+      'How far a stick moves before it counts. Raise it if the dragon drifts on its own.',
+    ),
+    rangeRow(
+      'gamepadCurve',
+      'Stick response',
+      'Higher is finer near the centre and faster at the edge.',
+    ),
+    toggleRow('gamepadRumble', 'Rumble', 'A short shake when you are hit and on a takedown.'),
   );
-  const keysGroup = group('Keys', prompt, keyList, keyEmpty, keysFoot);
+
   append(
     tabPanels.get('controls') as HTMLElement,
     group(
@@ -348,7 +373,9 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
         'Hold',
       ),
     ),
-    keysGroup,
+    group('Keys', ...keyList.nodes),
+    padGroup,
+    padButtonsGroup,
   );
 
   // --- Audio ------------------------------------------------------------------------------------
@@ -461,7 +488,9 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
       if (selected && focus) tabButton.focus();
     }
     body.scrollTop = 0;
-    if (cancelCapture(rebind)) drawRebind();
+    let cancelled = false;
+    for (const list of lists) if (cancelCapture(list.model)) cancelled = true;
+    if (cancelled) drawLists();
     setConfirmingReset(false);
   };
 
@@ -528,114 +557,71 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
     }
   };
 
-  const buildKeyRows = (current: ControlsUiState): void => {
-    keyList.textContent = '';
-    keyRows.length = 0;
-    for (const action of current.actions) {
-      const label = actionLabel(action);
-      const keyRow = el('div', 'dfs-key-row');
-      keyRow.setAttribute('role', 'group');
-      keyRow.setAttribute('aria-label', label);
-      const slots: HTMLButtonElement[] = [];
-      const slotBox = el('div', 'dfs-key-slots');
-      for (let slot = 0; slot < current.slotsPerAction; slot++) {
-        const slotButton = button('dfs-key', '', 'bind');
-        slotButton.dataset['action'] = action;
-        slotButton.dataset['slot'] = String(slot);
-        slots.push(slotButton);
-        slotBox.appendChild(slotButton);
-      }
-      const reset = button('dfs-key-reset', 'Reset', 'resetKey');
-      reset.dataset['action'] = action;
-      reset.setAttribute('aria-label', `Reset ${label} to its default keys`);
-      append(keyRow, el('span', 'dfs-key-name', label), slotBox, reset);
-      keyRows.push({ action, row: keyRow, slots, reset });
-      keyList.appendChild(keyRow);
+  /** Both tables, and the panel's "a slot is listening" flag that pad navigation stands back for. */
+  const drawLists = (): void => {
+    let capturing = false;
+    for (const list of lists) {
+      list.draw();
+      if (list.model.phase === 'listening') capturing = true;
     }
+    panel.dataset['capturing'] = capturing ? 'true' : 'false';
   };
 
-  const sameCodes = (a: readonly string[], b: readonly string[]): boolean => {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-    return true;
+  const drawPad = (): void => {
+    const status = gamepadStatus(
+      shownPadSupported,
+      shownPadSecure,
+      shownPadConnected,
+      shownPadName,
+      shownPadStandard,
+    );
+    padStatus.dataset['connected'] = status.connected ? 'true' : 'false';
+    if (padName.textContent !== status.title) padName.textContent = status.title;
+    if (padNote.textContent !== status.note) padNote.textContent = status.note;
+    padNote.hidden = status.note === '';
   };
 
-  const drawKeys = (): void => {
-    const current = controls;
-    const has = current !== undefined && current.actions.length > 0;
-    keyEmpty.hidden = has;
-    keysFoot.hidden = !has;
-    keyList.hidden = !has;
-    if (current === undefined) return;
+  const updatePad = (pad: GamepadUiState | undefined): void => {
+    // A host page that says nothing about gamepads (a tool, an old build) gets no gamepad section.
+    const has = pad !== undefined;
+    if (has !== shownHasPad) {
+      shownHasPad = has;
+      padGroup.hidden = !has;
+      padButtonsGroup.hidden = !has;
+    }
+    // The game hands over one object and rewrites it in place, so its fields are compared.
+    const supported = pad?.supported ?? false;
+    const secure = pad?.secure ?? true;
+    const connected = pad?.connected ?? false;
+    const name = pad?.name ?? '';
+    const standard = pad?.standard ?? false;
     if (
-      keyRows.length !== current.actions.length ||
-      keyRows.some(
-        (entry, index) =>
-          entry.action !== current.actions[index] || entry.slots.length !== current.slotsPerAction,
-      )
+      supported !== shownPadSupported ||
+      secure !== shownPadSecure ||
+      connected !== shownPadConnected ||
+      name !== shownPadName ||
+      standard !== shownPadStandard
     ) {
-      buildKeyRows(current);
+      shownPadSupported = supported;
+      shownPadSecure = secure;
+      shownPadConnected = connected;
+      shownPadName = name;
+      shownPadStandard = standard;
+      if (open) drawPad();
     }
-    let allDefault = true;
-    for (const entry of keyRows) {
-      const codes = current.bindings[entry.action] ?? [];
-      const isDefault = sameCodes(codes, current.defaults[entry.action] ?? []);
-      if (!isDefault) allDefault = false;
-      entry.reset.disabled = isDefault;
-      entry.row.dataset['unbound'] = codes.length === 0 ? 'true' : 'false';
-      const label = actionLabel(entry.action);
-      for (let slot = 0; slot < entry.slots.length; slot++) {
-        const slotButton = entry.slots[slot];
-        if (slotButton === undefined) continue;
-        const code = codes[slot];
-        const listening =
-          rebind.phase !== 'idle' && rebind.action === entry.action && rebind.slot === slot;
-        const clash =
-          rebind.phase === 'conflict' &&
-          rebind.holder === entry.action &&
-          rebind.holderSlot === slot;
-        const text = listening
-          ? rebind.phase === 'conflict'
-            ? codeLabel(rebind.code)
-            : 'Press a key…'
-          : code === undefined
-            ? slot === 0
-              ? 'Not set'
-              : 'Add'
-            : codeLabel(code);
-        if (slotButton.textContent !== text) slotButton.textContent = text;
-        slotButton.dataset['state'] = listening
-          ? 'listening'
-          : clash
-            ? 'clash'
-            : code === undefined
-              ? 'empty'
-              : 'set';
-        slotButton.setAttribute(
-          'aria-label',
-          code === undefined
-            ? `${label}, ${slot === 0 ? 'first' : 'second'} key: not set. Press to choose a key.`
-            : `${label}, ${slot === 0 ? 'first' : 'second'} key: ${codeLabel(code)}. Press to change.`,
-        );
+    if (pad === undefined) return;
+    if (pad.pressSeq !== shownPressSeq) {
+      shownPressSeq = pad.pressSeq;
+      const table = padList.controls;
+      if (open && padArmed && padList.model.phase === 'listening' && table !== undefined) {
+        const action = padList.model.action;
+        const slot = padList.model.slot;
+        const intent = captureGamepadCode(padList.model, table, pad.pressCode);
+        if (intent !== null) raise(intent);
+        finishCapture(padList, action, slot);
       }
     }
-    resetKeys.disabled = allDefault;
-  };
-
-  const drawRebind = (): void => {
-    shownRebindRevision = rebind.revision;
-    const text = rebindPrompt(rebind);
-    prompt.hidden = text === '';
-    prompt.dataset['phase'] = rebind.phase;
-    if (promptText.textContent !== text) promptText.textContent = text;
-    const conflict = rebind.phase === 'conflict';
-    promptActions.hidden = !conflict;
-    if (conflict && controls !== undefined) {
-      swapButton.textContent = canSwap(rebind, controls) ? 'Swap the two' : 'Move it here';
-    }
-    panel.dataset['capturing'] = rebind.phase === 'listening' ? 'true' : 'false';
-    drawKeys();
-    if (conflict) swapButton.focus();
+    padArmed = padList.model.phase === 'listening';
   };
 
   function update(state: UiState): void {
@@ -646,19 +632,15 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
       if (flag === true) openPanel(state.settingsTab);
       else if (flag === false) closePanel();
     }
-    controls = state.controls;
     if (state.settings !== shownSettings) {
       shownSettings = state.settings;
       settings = resolveSettings(state.settings);
       if (open) drawSettings(settings);
     }
-    if (controls !== shownControls) {
-      shownControls = controls;
-      reconcileRebind(rebind, controls);
-      if (open) drawRebind();
-    } else if (open && rebind.revision !== shownRebindRevision) {
-      drawRebind();
-    }
+    const keysChanged = keyList.setControls(state.controls);
+    const padChanged = padList.setControls(state.gamepad?.controls);
+    updatePad(state.gamepad);
+    if (open && (keysChanged || padChanged || keyList.stale || padList.stale)) drawLists();
   }
 
   // --- Events -----------------------------------------------------------------------------------
@@ -667,14 +649,18 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
     onIntent(intent);
   };
 
-  const focusSlot = (action: string, slot: number): void => {
-    const entry = keyRows.find((candidate) => candidate.action === action);
-    (entry?.slots[slot] ?? entry?.slots[0])?.focus();
+  const finishCapture = (list: BindingList, action: string, slot: number): void => {
+    drawLists();
+    if (list.model.phase === 'idle') list.focusSlot(action, slot);
   };
 
-  const finishCapture = (action: string, slot: number): void => {
-    drawRebind();
-    if (rebind.phase === 'idle') focusSlot(action, slot);
+  const listOf = (node: HTMLElement): BindingList =>
+    node.dataset['device'] === 'gamepad' ? padList : keyList;
+
+  /** The list that is waiting for a key or button, if one is. */
+  const listeningList = (): BindingList | null => {
+    for (const list of lists) if (list.model.phase === 'listening') return list;
+    return null;
   };
 
   const applyTurn = (): void => {
@@ -742,31 +728,48 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
       case 'redetect':
         raise({ type: 'settings.redetectDisplay' });
         break;
+      case 'retestQuality':
+        raise({ type: 'settings.retestQuality' });
+        break;
       case 'bind': {
+        const list = listOf(hit);
+        const table = list.controls;
         const action = hit.dataset['action'] ?? '';
         const slot = Number(hit.dataset['slot']);
-        if (controls !== undefined && beginCapture(rebind, controls, action, slot)) drawRebind();
+        // One slot listens at a time, across both tables.
+        for (const other of lists) if (other !== list) cancelCapture(other.model);
+        if (table !== undefined && beginCapture(list.model, table, action, slot)) {
+          if (list === padList) padArmed = false;
+        }
+        drawLists();
         break;
       }
-      case 'resetKey':
-        cancelCapture(rebind);
-        raise({ type: 'settings.resetBindings', action: hit.dataset['action'] ?? '' });
-        focusSlot(hit.dataset['action'] ?? '', 0);
+      case 'resetKey': {
+        const list = listOf(hit);
+        cancelCapture(list.model);
+        raise(resetBindingsIntent(list.model, hit.dataset['action'] ?? ''));
+        drawLists();
+        list.focusSlot(hit.dataset['action'] ?? '', 0);
         break;
-      case 'resetKeys':
-        cancelCapture(rebind);
-        raise({ type: 'settings.resetBindings', action: null });
+      }
+      case 'resetKeys': {
+        const list = listOf(hit);
+        cancelCapture(list.model);
+        raise(resetBindingsIntent(list.model, null));
+        drawLists();
         break;
+      }
       case 'conflictSwap':
       case 'conflictCancel': {
-        const action = rebind.action;
-        const slot = rebind.slot;
+        const list = listOf(hit);
+        const action = list.model.action;
+        const slot = list.model.slot;
         const intent = resolveConflict(
-          rebind,
+          list.model,
           hit.dataset['act'] === 'conflictSwap' ? 'swap' : 'cancel',
         );
         if (intent !== null) raise(intent);
-        finishCapture(action, slot);
+        finishCapture(list, action, slot);
         break;
       }
       case 'revealSecret': {
@@ -815,24 +818,29 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
 
   /** Capture phase on the document, only while open: the panel sees keys before the game does. */
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (rebind.phase === 'listening' && controls !== undefined) {
+    const listening = listeningList();
+    const table = listening?.controls;
+    if (listening !== null && table !== undefined) {
       swallow(event);
       if (event.repeat) return;
-      const action = rebind.action;
-      const slot = rebind.slot;
-      const intent = captureCode(rebind, controls, event.code);
+      // The pad's table takes pad buttons only; from the keyboard just Esc and Backspace reach it.
+      if (listening === padList && event.code !== 'Escape' && event.code !== 'Backspace') return;
+      const action = listening.model.action;
+      const slot = listening.model.slot;
+      const intent = captureCode(listening.model, table, event.code);
       if (intent !== null) raise(intent);
-      finishCapture(action, slot);
+      finishCapture(listening, action, slot);
       return;
     }
     if (event.key === 'Escape') {
       swallow(event);
       if (event.repeat) return;
-      if (rebind.phase === 'conflict') {
-        const action = rebind.action;
-        const slot = rebind.slot;
-        resolveConflict(rebind, 'cancel');
-        finishCapture(action, slot);
+      const clashing = lists.find((list) => list.model.phase === 'conflict');
+      if (clashing !== undefined) {
+        const action = clashing.model.action;
+        const slot = clashing.model.slot;
+        resolveConflict(clashing.model, 'cancel');
+        finishCapture(clashing, action, slot);
       } else if (confirmingReset) {
         setConfirmingReset(false);
         resetAll.focus();
@@ -876,16 +884,19 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
   };
 
   const onMouseDown = (event: MouseEvent): void => {
-    if (rebind.phase !== 'listening' || controls === undefined) return;
+    // Only the keyboard's table binds mouse buttons; while the pad's listens the mouse stays a
+    // mouse (a click elsewhere chooses another slot or closes the panel).
+    const table = keyList.controls;
+    if (keyList.model.phase !== 'listening' || table === undefined) return;
     const code = mouseCode(event.button);
     if (code === null) return;
     swallow(event);
     swallowClicksUntil = performance.now() + CLICK_SWALLOW_MS;
-    const action = rebind.action;
-    const slot = rebind.slot;
-    const intent = captureCode(rebind, controls, code);
+    const action = keyList.model.action;
+    const slot = keyList.model.slot;
+    const intent = captureCode(keyList.model, table, code);
     if (intent !== null) raise(intent);
-    finishCapture(action, slot);
+    finishCapture(keyList, action, slot);
   };
 
   /** The click, auxclick or context menu that follows a captured mouse button does nothing. */
@@ -905,7 +916,8 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
     returnFocus = document.activeElement;
     container.hidden = false;
     if (settings !== null) drawSettings(settings);
-    drawRebind();
+    drawPad();
+    drawLists();
     showTab(next ?? tab, true);
     document.addEventListener('keydown', onKeyDown, CAPTURE);
     document.addEventListener('keyup', onKeyUp, CAPTURE);
@@ -921,7 +933,8 @@ export function createSettingsPanel(root: HTMLElement, onIntent: UiIntentHandler
     // A field still being edited is committed first (its `change` has not fired yet).
     const active = document.activeElement;
     if (active instanceof HTMLElement && panel.contains(active)) active.blur();
-    cancelCapture(rebind);
+    for (const list of lists) cancelCapture(list.model);
+    panel.dataset['capturing'] = 'false';
     setConfirmingReset(false);
     container.hidden = true;
     document.removeEventListener('keydown', onKeyDown, CAPTURE);

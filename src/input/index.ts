@@ -47,7 +47,14 @@ export {
   parseGamepadBindings,
   resetGamepadBindings,
 } from './gamepad-bindings';
-export { createGamepadSource, pollGamepadSource, rumbleGamepad } from './gamepad-source';
+export { createGamepadMenuState, pollGamepadMenu } from './gamepad-menu';
+export type { GamepadMenuCommand, GamepadMenuState } from './gamepad-menu';
+export {
+  createGamepadSource,
+  gamepadSourceSupported,
+  pollGamepadSource,
+  rumbleGamepad,
+} from './gamepad-source';
 export type { GamepadProvider, GamepadSource } from './gamepad-source';
 export {
   DEFAULT_GAMEPAD_OPTIONS,

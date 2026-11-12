@@ -57,6 +57,7 @@ import {
 import { createSeededRandom } from '../../shared/maps/seeded-random';
 import type { MapId, ModeId } from '../../shared/match';
 import { MAPS, MODES } from '../../shared/match';
+import { resolveScoreLimit, scoreLimitRule } from '../match/mode-config';
 import { dedupePlayerName, sanitizePlayerName } from './names';
 import type { StartBlocker, StartOptions } from './start';
 import { buildMatchRoster, canStart } from './start';
@@ -354,7 +355,6 @@ function sanitizeSettings(settings: HostSettings | undefined): HostSettings {
   const classes = Array.isArray(source.allowedClasses)
     ? DRAGON_CLASS_IDS.filter((id) => source.allowedClasses.includes(id))
     : [];
-  const limits = HOST_SETTING_LIMITS;
   return {
     mode: safeMode,
     map: map ? source.map : DEFAULT_HOST_SETTINGS.map,
@@ -362,9 +362,10 @@ function sanitizeSettings(settings: HostSettings | undefined): HostSettings {
       ? clampInt(source.teamSize, range.min, range.max)
       : range.max,
     unevenTeams: source.unevenTeams === true,
+    // The mode's own range: Ember Relay counts captures, a handful of them (`scoreLimitRule`).
     scoreLimit: isRealNumber(source.scoreLimit)
-      ? clampInt(source.scoreLimit, limits.scoreLimitMin, limits.scoreLimitMax)
-      : DEFAULT_HOST_SETTINGS.scoreLimit,
+      ? resolveScoreLimit(safeMode, source.scoreLimit)
+      : scoreLimitRule(safeMode).initial,
     timeLimitS: isRealNumber(source.timeLimitS)
       ? clampTimeLimit(source.timeLimitS)
       : DEFAULT_HOST_SETTINGS.timeLimitS,
@@ -883,7 +884,9 @@ function setFlag(
 
 /**
  * Host picks the mode. Unknown modes are invalid, unshipped ones unavailable. The team size is
- * pulled into the new mode's range (Duel caps it at 2), with the usual overflow to spectators.
+ * pulled into the new mode's range (Duel caps it at 2, Ember Relay needs 2), with the usual
+ * overflow to spectators. The score limit starts again on the new mode's own value when the two
+ * modes count different things (30 takedowns in Skirmish, 3 captures in Ember Relay).
  */
 export function setMode(lobby: HostLobby, actorId: PlayerId, mode: ModeId): LobbyResult {
   const refusal = hostPanelRefusal(lobby, actorId);
@@ -892,10 +895,14 @@ export function setMode(lobby: HostLobby, actorId: PlayerId, mode: ModeId): Lobb
     return refuse(lobby, 'invalidValue');
   }
   if (!MODES[mode].available) return refuse(lobby, 'unavailable');
-  if (mode === lobby.state.settings.mode) return done(lobby, lobby);
+  const settings = lobby.state.settings;
+  if (mode === settings.mode) return done(lobby, lobby);
   const range = teamSizeRange(mode);
-  const size = clampInt(lobby.state.settings.teamSize, range.min, range.max);
-  return resizeTeams(lobby, size, { mode });
+  const size = clampInt(settings.teamSize, range.min, range.max);
+  const rule = scoreLimitRule(mode);
+  const before = scoreLimitRule(settings.mode);
+  const sameScale = rule.max === before.max && rule.initial === before.initial;
+  return resizeTeams(lobby, size, sameScale ? { mode } : { mode, scoreLimit: rule.initial });
 }
 
 export function setMap(lobby: HostLobby, actorId: PlayerId, map: MapId): LobbyResult {
@@ -907,7 +914,10 @@ export function setMap(lobby: HostLobby, actorId: PlayerId, map: MapId): LobbyRe
   return applySettings(lobby, { map });
 }
 
-/** Rounded and clamped to HOST_SETTING_LIMITS. */
+/**
+ * Rounded and clamped to what the mode allows: HOST_SETTING_LIMITS, and in Ember Relay at most
+ * `MODE_TUNING.emberRelay.maxCaptures`.
+ */
 export function setScoreLimit(
   lobby: HostLobby,
   actorId: PlayerId,
@@ -916,8 +926,8 @@ export function setScoreLimit(
   const refusal = hostPanelRefusal(lobby, actorId);
   if (refusal !== null) return refuse(lobby, refusal);
   if (!isRealNumber(scoreLimit)) return refuse(lobby, 'invalidValue');
-  const limits = HOST_SETTING_LIMITS;
-  const value = clampInt(scoreLimit, limits.scoreLimitMin, limits.scoreLimitMax);
+  const limits = scoreLimitRule(lobby.state.settings.mode);
+  const value = clampInt(scoreLimit, limits.min, limits.max);
   if (value === lobby.state.settings.scoreLimit) return done(lobby, lobby);
   return applySettings(lobby, { scoreLimit: value });
 }

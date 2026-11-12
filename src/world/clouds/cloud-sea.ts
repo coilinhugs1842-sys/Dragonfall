@@ -43,18 +43,11 @@ import {
 import type { QualityPreset, QualityPresetId, Vec3 } from '../../shared';
 import { WORLD_LIGHT_FOG_PARS_FRAGMENT } from '../light/light-glsl';
 import { setPaintedColor } from '../light/light-math';
-import { createHazeUniforms } from '../light/light-setup';
+import { createHazeUniforms, writeHazeUniforms } from '../light/light-setup';
+import { skyLookOf } from '../sky/sky-look';
 import { GOLDEN_HOUR_SKY } from '../sky/sky-math';
 import type { SkySetup } from '../sky/sky-math';
-import {
-  CLOUD_CREST_COLOR,
-  CLOUD_LIT_COLOR,
-  CLOUD_SEA_DEEP_COLOR,
-  CLOUD_SEA_SHADOW_COLOR,
-  cloudSeaHalfExtent,
-  snapToGrid,
-  wrapScroll,
-} from './cloud-math';
+import { cloudSeaHalfExtent, snapToGrid, wrapScroll } from './cloud-math';
 import { generateCloudSeaNoise } from './cloud-noise';
 
 /** After the terrain (default 0) so its pixels are depth-rejected, before the sky (1000). */
@@ -81,6 +74,8 @@ const BILLOW_DEPTH = 85;
  * as the sky's horizon band, and the quad is sized for this density.
  */
 export const SEA_FOG_DENSITY_SCALE = 0.5;
+/** A sea's glow from below is this many times its palette colour (it is a light source). */
+const SEA_GLOW_GAIN = 2.4;
 /** How far toward the sun (metres) the shadow fetches look. */
 const SHADOW_STEP_NEAR = 60;
 const SHADOW_STEP_FAR = 150;
@@ -129,6 +124,7 @@ uniform vec3 uDeep;
 uniform vec3 uShadow;
 uniform vec3 uLit;
 uniform vec3 uCrest;
+uniform vec3 uGlow;         // light from below showing in the troughs (lava); zero = none
 uniform float uBump;
 uniform vec4 uShape;        // x: billow depth (m), y: near shadow step (m), z: far step, w: rise per metre / depth
 varying vec2 vUvA;
@@ -188,6 +184,15 @@ void main() {
   col = mix(col, uLit, sunlit * sunlit * (3.0 - 2.0 * sunlit));
   col = mix(col, uCrest, smoothstep(0.55, 1.0, sunlit) * smoothstep(0.4, 0.9, height));
 
+  // Light from below (a map with lava under its ash): the troughs glow, their deepest lines
+  // run hot, and the billows above stay dark against it. Black on a map without it.
+  // Blended in, not added: added on pale ash it washes out to pink, which on that map is the
+  // colour of "fly here", and lava has to stay crimson.
+  float trough = 1.0 - smoothstep(0.28, 0.68, height);
+  float hot = 1.0 - smoothstep(0.18, 0.48, height);
+  float glowOn = step(0.0001, max(uGlow.r, max(uGlow.g, uGlow.b)));
+  col = mix(col, uGlow * (0.55 + 0.45 * hot), glowOn * trough * trough * (0.35 + 0.65 * hot));
+
   #ifdef SEA_RIM
     // Crests seen against the sun light up along their edge, and the whole sea warms toward it.
     float against = max(dot(-view, uWlSunDir), 0.0);
@@ -219,36 +224,21 @@ export interface CloudSea {
   update(cameraPosition: Vec3, timeS: number): void;
   /** Picks the `CLOUD_SEA_QUALITY` variant. Recompiles the shader: not per frame. */
   setQuality(preset: QualityPreset): void;
+  /**
+   * Another map's sea: its level, sun, fog and colours (and its glow from below, if it has
+   * one). Uniform and vertex writes only, no recompile. Not per frame.
+   */
+  setSky(sky: SkySetup, cloudSeaY: number): void;
   dispose(): void;
 }
 
 export function createCloudSea(options: CloudSeaOptions): CloudSea {
-  const sky = options.sky ?? GOLDEN_HOUR_SKY;
-  const seaFogDensity = sky.fogDensity * SEA_FOG_DENSITY_SCALE;
-  const halfExtent = cloudSeaHalfExtent(seaFogDensity, CLOUD_SEA_SNAP_STEP);
+  const firstSky = options.sky ?? GOLDEN_HOUR_SKY;
 
-  // A square in the XZ plane, facing +Y.
+  // A square in the XZ plane, facing +Y. `applySky` sizes it from the fog.
   const geometry = new BufferGeometry();
-  geometry.setAttribute(
-    'position',
-    new BufferAttribute(
-      new Float32Array([
-        -halfExtent,
-        0,
-        -halfExtent,
-        -halfExtent,
-        0,
-        halfExtent,
-        halfExtent,
-        0,
-        halfExtent,
-        halfExtent,
-        0,
-        -halfExtent,
-      ]),
-      3,
-    ),
-  );
+  const corners = new BufferAttribute(new Float32Array(12), 3);
+  geometry.setAttribute('position', corners);
   geometry.setIndex([0, 1, 2, 0, 2, 3]);
 
   const noise = new DataTexture(
@@ -265,32 +255,35 @@ export function createCloudSea(options: CloudSeaOptions): CloudSea {
   noise.generateMipmaps = true;
   noise.needsUpdate = true;
 
-  // Height the sun ray gains per metre travelled toward it, in units of the billow depth.
-  const flat = Math.hypot(sky.sunDirection.x, sky.sunDirection.z);
-  const risePerMetre = flat > 1e-6 ? sky.sunDirection.y / flat / BILLOW_DEPTH : 1;
-
   const scroll = new Vector4(0, 0, 0, 0);
   const bump = { value: CLOUD_SEA_QUALITY.medium.bump };
+  // No sea haze on the sea itself (it IS the haze layer): distance fog only, and thinner than
+  // the scene's (see SEA_FOG_DENSITY_SCALE).
+  const haze = createHazeUniforms(firstSky);
+  const sunGlow = new Color();
+  const deep = new Color();
+  const shadow = new Color();
+  const lit = new Color();
+  const crest = new Color();
+  const glow = new Color();
+  const shape = new Vector4(BILLOW_DEPTH, SHADOW_STEP_NEAR, SHADOW_STEP_FAR, 1);
   const material = new ShaderMaterial({
     name: 'CloudSea',
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     uniforms: {
-      // No sea haze on the sea itself (it IS the haze layer): distance fog only, and thinner
-      // than the scene's (see SEA_FOG_DENSITY_SCALE).
-      ...createHazeUniforms({ ...sky, fogDensity: seaFogDensity }),
+      ...haze,
       uNoise: { value: noise },
       uInvTile: { value: new Vector2(1 / TILE_A, 1 / TILE_B) },
       uScroll: { value: scroll },
-      uSunGlow: { value: new Color(sky.sunColor) },
-      uDeep: { value: setPaintedColor(new Color(), CLOUD_SEA_DEEP_COLOR) },
-      uShadow: { value: setPaintedColor(new Color(), CLOUD_SEA_SHADOW_COLOR) },
-      uLit: { value: setPaintedColor(new Color(), CLOUD_LIT_COLOR) },
-      uCrest: { value: setPaintedColor(new Color(), CLOUD_CREST_COLOR) },
+      uSunGlow: { value: sunGlow },
+      uDeep: { value: deep },
+      uShadow: { value: shadow },
+      uLit: { value: lit },
+      uCrest: { value: crest },
+      uGlow: { value: glow },
       uBump: bump,
-      uShape: {
-        value: new Vector4(BILLOW_DEPTH, SHADOW_STEP_NEAR, SHADOW_STEP_FAR, risePerMetre),
-      },
+      uShape: { value: shape },
     },
     defines: { SEA_OCTAVES: 2, SEA_PARALLAX: 2, SEA_SHADOW_TAPS: 1, SEA_RIM: '' },
     fog: false,
@@ -301,10 +294,35 @@ export function createCloudSea(options: CloudSeaOptions): CloudSea {
 
   const object = new Mesh(geometry, material);
   object.name = 'CloudSea';
-  object.position.y = options.cloudSeaY;
   // It is centred on the camera: always in view, so the culling test would be wasted work.
   object.frustumCulled = false;
   object.renderOrder = CLOUD_SEA_RENDER_ORDER;
+
+  /** Everything that comes from the map: where the surface is, its size, sun, fog, colours. */
+  function applySky(sky: SkySetup, cloudSeaY: number): void {
+    object.position.y = cloudSeaY;
+    const seaFogDensity = sky.fogDensity * SEA_FOG_DENSITY_SCALE;
+    const halfExtent = cloudSeaHalfExtent(seaFogDensity, CLOUD_SEA_SNAP_STEP);
+    corners.setXYZ(0, -halfExtent, 0, -halfExtent);
+    corners.setXYZ(1, -halfExtent, 0, halfExtent);
+    corners.setXYZ(2, halfExtent, 0, halfExtent);
+    corners.setXYZ(3, halfExtent, 0, -halfExtent);
+    corners.needsUpdate = true;
+    writeHazeUniforms(haze, { ...sky, fogDensity: seaFogDensity });
+    // Height the sun ray gains per metre travelled toward it, in units of the billow depth.
+    const flat = Math.hypot(sky.sunDirection.x, sky.sunDirection.z);
+    shape.w = flat > 1e-6 ? sky.sunDirection.y / flat / BILLOW_DEPTH : 1;
+    const look = skyLookOf(sky);
+    sunGlow.setHex(sky.sunColor);
+    setPaintedColor(deep, look.seaDeep);
+    setPaintedColor(shadow, look.seaShadow);
+    setPaintedColor(lit, look.seaLit);
+    setPaintedColor(crest, look.seaCrest);
+    // Brighter than the palette value where it shows: it is a light, and High blooms it.
+    if (look.seaGlow !== 0) setPaintedColor(glow, look.seaGlow, SEA_GLOW_GAIN);
+    else glow.setRGB(0, 0, 0);
+  }
+  applySky(firstSky, options.cloudSeaY);
 
   let current: CloudSeaQuality = CLOUD_SEA_QUALITY.medium;
 
@@ -333,6 +351,7 @@ export function createCloudSea(options: CloudSeaOptions): CloudSea {
       // New defines mean a new program: compile it on the loading screen, not mid-match.
       material.needsUpdate = true;
     },
+    setSky: applySky,
     dispose(): void {
       geometry.dispose();
       material.dispose();

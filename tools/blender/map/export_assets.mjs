@@ -63,6 +63,13 @@ function optimizeAll() {
 function convertTextures() {
   mkdirSync(TEX_OUT, { recursive: true });
   const means = JSON.parse(readFileSync(join(TEX_SRC, 'means.json'), 'utf8'));
+  // The list is shared by every map: the entries other exporters added (Emberfall Caldera's
+  // basalt, columnar, ash: export_caldera_assets.mjs) are kept, after this map's own.
+  const listPath = join(TEX_OUT, 'textures.json');
+  const own = new Set(TEXTURES.map((texture) => texture.name));
+  const others = existsSync(listPath)
+    ? JSON.parse(readFileSync(listPath, 'utf8')).textures.filter((entry) => !own.has(entry.id))
+    : [];
   const entries = [];
   for (const texture of TEXTURES) {
     const output = join(TEX_OUT, `${texture.name}.ktx2`);
@@ -82,8 +89,8 @@ function convertTextures() {
     console.log(`textures/${texture.name}.ktx2 ${(statSync(output).size / 1024).toFixed(1)} KB`);
   }
   writeFileSync(
-    join(TEX_OUT, 'textures.json'),
-    `${JSON.stringify({ version: 1, source: 'tools/textures/make_textures.py', textures: entries }, null, 2)}\n`,
+    listPath,
+    `${JSON.stringify({ version: 1, source: 'tools/textures/make_textures.py', textures: [...entries, ...others] }, null, 2)}\n`,
   );
 }
 

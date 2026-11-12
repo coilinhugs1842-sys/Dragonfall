@@ -54,8 +54,15 @@ import {
 } from './prop-lod';
 import type { PropLodSettings, TierFades } from './prop-lod';
 import { fitTextureToLimit } from './texture-mips';
-import { TINT_NEUTRAL_INDEX, createWorldMaterials, srgbHexToLinear } from './world-material';
-import type { WorldMaterials } from './world-material';
+import {
+  GLOW_MODE_FLAME,
+  GLOW_MODE_MARKER,
+  GLOW_MODE_STEADY,
+  TINT_NEUTRAL_INDEX,
+  createWorldMaterials,
+  srgbHexToLinear,
+} from './world-material';
+import type { WorldMaterials, WorldPalette } from './world-material';
 
 /** Edge of a far-mesh cluster, metres. */
 export const FAR_CLUSTER_SIZE = 500;
@@ -312,6 +319,13 @@ function fitTextures(bundle: MapAssetBundle, preset: QualityPreset): void {
   }
 }
 
+/** How an asset type's glowing parts behave (world-material.ts): flame, marker, or steady. */
+export function glowModeOf(typeId: string): number {
+  if (typeId.startsWith('brazier')) return GLOW_MODE_FLAME;
+  if (typeId.startsWith('vent-marker')) return GLOW_MODE_MARKER;
+  return GLOW_MODE_STEADY;
+}
+
 /**
  * Builds the meshes for `placements` from a loaded bundle. Throws when the bundle lacks a type
  * the map places (the caller keeps its stand-in), leaving nothing allocated. Load-time:
@@ -321,6 +335,7 @@ export function createPropField(
   placements: readonly MapPlacement[],
   bundle: MapAssetBundle,
   preset: QualityPreset,
+  palette?: WorldPalette,
 ): PropField {
   const stone = bundle.textures.get('stone');
   const masonry = bundle.textures.get('masonry') ?? stone;
@@ -354,6 +369,7 @@ export function createPropField(
     { stone, masonry, moss, cliff, brush },
     farState,
     preset,
+    palette,
   );
   const teamLinear: readonly (readonly number[])[] = [
     srgbHexToLinear(TEAMS[TEAM_EMBER].color),
@@ -494,7 +510,7 @@ export function createPropField(
         buckets,
         isRock,
         cullable: type.kind === 'prop' && type.radius < CULLABLE_PROP_RADIUS,
-        glowMode: type.id.startsWith('brazier') ? 1 : 0,
+        glowMode: glowModeOf(type.id),
         clusters,
         farTriangles: farLod.triangles,
       });

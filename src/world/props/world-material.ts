@@ -39,22 +39,30 @@ import {
   setPaintedColor,
   useWorldLight,
 } from '../light';
+import { GOLDEN_HOUR_LOOK } from '../sky/sky-look';
+import type { SkyLook } from '../sky/sky-look';
 import type { LoadedMapTexture } from './prop-loader';
 
 /** Team index of a neutral instance in `uTeam` (after Ember 0 and Frost 1). */
 export const TINT_NEUTRAL_INDEX = 2;
 /** sRGB hex of neutral cloth: a faded dusk violet. */
 const NEUTRAL_TINT = 0x8f7fb0;
-/** Palette moss (docs/ART_DIRECTION.md), for the procedural fringe. */
-const MOSS_COLOR = 0x3f8f7a;
-/** Palette slate: what shows through thin moss and replaces far-away chamfer highlights. */
-const STONE_COLOR = 0x4e6a86;
-/** Lit-edge cream. */
-const EDGE_COLOR = 0xc9b79a;
-
-/** Aerial perspective: what far rock fades toward away from / toward the sun (display sRGB). */
-const AIR_COOL = 0x6a6896;
-const AIR_WARM = 0xbd8684;
+/**
+ * Glow modes (`aInst.z`): 0 a crystal or rune (slow pulse), 1 a flame (flickers and licks
+ * sideways), 2 a marker that says "fly here" (steady, keeps its colour: no white-hot core, so
+ * the palette's magenta reads as magenta and not as pale pink).
+ */
+export const GLOW_MODE_STEADY = 0;
+export const GLOW_MODE_FLAME = 1;
+export const GLOW_MODE_MARKER = 2;
+/** The palette's magenta for hazards, pickups and objectives (docs/ART_DIRECTION.md). */
+const MARKER_COLOR = 0xff3fa4;
+/** Emissive gain of a marker (a crystal's is 1.9): under the tone curve's shoulder. */
+const MARKER_GAIN = 1.18;
+/** Metres above the sea over which the glow from below (lava) fades to 37 %. */
+const BOUNCE_HEIGHT = 110;
+/** Strength of that glow on rock that faces down, and on rock that faces up. */
+const BOUNCE_GAIN = 1.0;
 /** Metres over which the aerial tint reaches 63 % of `AIR_STRENGTH`. */
 const AIR_DISTANCE = 450;
 const AIR_STRENGTH = 0.8;
@@ -107,7 +115,7 @@ void main() {
       p.x += cos(uTime * 1.3 + aInst.y * 9.0 - hang * 2.0) * hang * hang * uWind.z * 0.35;
     #endif
     // Flames (glow mode 1) lick sideways; everything else with a glow mask stays rigid.
-    float flame = step(0.5, aInst.z) * aMasks.a;
+    float flame = step(0.5, aInst.z) * (1.0 - step(1.5, aInst.z)) * aMasks.a;
     p.x += flame * 0.16 * sin(uTime * 9.0 + p.y * 2.3 + aInst.y * 40.0);
     p.z += flame * 0.16 * cos(uTime * 7.3 + p.y * 2.9 + aInst.y * 23.0);
     #ifdef USE_INSTANCING
@@ -138,6 +146,8 @@ uniform vec4 uGlow;             // x: emissive gain, y: pulse depth, z: sea fade
 uniform vec4 uAir;              // rgb: aerial-perspective tint away from the sun, a: 1 / distance
 uniform vec4 uAirWarm;          // rgb: the same toward the sun, a: strength 0..1
 uniform vec4 uGrade;            // x: stone saturation, y: stone gain, z: fog distance scale, w: bounce
+uniform vec4 uBounce;           // rgb: glow from below the sea (lava), a: 1 / fade height. rgb 0 = none
+uniform vec3 uMarkerColor;      // what glow mode 2 ("fly here") glows in
 #if WM_QUALITY >= 1
   uniform sampler2D uMoss;
   uniform vec4 uMossGain;       // rgb: 1 / mean colour, a: 1 / tile metres
@@ -227,6 +237,10 @@ void main() {
   irradiance += wlAmbient(N) * mix(0.45, 1.0, ao);
   // The lit cloud sea throws warm light back up onto undersides.
   irradiance += uWlFogColor * (max(-N.y, 0.0) * uGrade.w) * mix(0.6, 1.0, ao);
+  // A glowing sea (lava under ash) lights rock from below: strongest on undersides close to
+  // it, gone a hundred metres up. All zero on a map without one.
+  float lift = max(vWorldPos.y - uWlFogParams.y, 0.0);
+  irradiance += uBounce.rgb * (exp(-lift * uBounce.a) * (0.12 + 0.88 * max(-N.y, 0.0)) * mix(0.5, 1.0, ao));
   vec3 color = albedo * irradiance * 0.3183;
   color += wlRim(N, V) * albedo * (0.9 * visibility);
   color += uEdgeColor * edgeNear * max(nl, 0.0) * visibility * 0.2;
@@ -234,12 +248,19 @@ void main() {
   // --- Emissive ------------------------------------------------------------------------------------
   float slow = sin(uTime * 0.9 + vFx.y * 6.2832);
   float flicker = sin(uTime * 11.0 + vFx.y * 50.0) * sin(uTime * 7.3 + vFx.y * 31.0);
-  float pulse = 1.0 + uGlow.y * mix(slow, flicker, step(0.5, vFx.z));
+  float marker = step(1.5, vFx.z);
+  float pulse = 1.0 + uGlow.y * mix(slow, flicker, step(0.5, vFx.z) * (1.0 - marker));
   // Facets stay readable (a little of the lighting survives) and the ones facing the eye run hot.
   float facing = max(dot(N, V), 0.0);
   vec3 glowColor = mix(vColor, vColor * vColor * 1.5, 0.7);
-  vec3 ember = glowColor * (uGlow.x * pulse) * (0.6 + 0.4 * facing)
-             + vec3(1.0, 0.9, 0.85) * (facing * facing * facing * uGlow.x * 0.3 * pulse);
+  // A marker is the palette's magenta at the painted brightness (the art pipeline lifts glow
+  // colours toward white, which reads as pale pink), with less gain and no white-hot core.
+  glowColor = mix(glowColor, uMarkerColor * max(vColor.r, max(vColor.g, vColor.b)), marker);
+  float gain = mix(uGlow.x, ${MARKER_GAIN.toFixed(3)}, marker) * pulse;
+  // The white-hot core is what the gain has above 1 (0.3 of the gain at the first map's 1.9).
+  float hot = max(uGlow.x - 1.0, 0.0) * 0.6333 * pulse * (1.0 - marker);
+  vec3 ember = glowColor * gain * (0.6 + 0.4 * facing)
+             + vec3(1.0, 0.9, 0.85) * (facing * facing * facing * hot);
   color = mix(color, ember + color * 0.25, glow);
 
   // --- Atmosphere --------------------------------------------------------------------------------
@@ -331,10 +352,18 @@ function linear(hex: number): Color {
   return new Color().setHex(hex);
 }
 
+/** The colours of a look the world material paints with (a `SkyLook` has them all). */
+export type WorldPalette = Pick<
+  SkyLook,
+  'stone' | 'moss' | 'edge' | 'air' | 'airWarm' | 'bounce' | 'stoneSaturation' | 'glowGain'
+>;
+
+/** `palette` left out = the first map's (slate, moss, cream edges, no glow from below). */
 export function createWorldMaterials(
   textures: WorldMaterialTextures,
   farState: Texture,
   preset: QualityPreset,
+  palette: WorldPalette = GOLDEN_HOUR_LOOK,
 ): WorldMaterials {
   const shared: WorldMaterialUniforms = {
     uTime: { value: 0 },
@@ -343,10 +372,13 @@ export function createWorldMaterials(
     },
   };
   // Display-referred palette colours: stored as the scene-linear values the post pass shows as these.
-  const airCool = setPaintedColor(new Color(), AIR_COOL);
-  const airSun = setPaintedColor(new Color(), AIR_WARM);
+  const airCool = setPaintedColor(new Color(), palette.air);
+  const airSun = setPaintedColor(new Color(), palette.airWarm);
   const air = new Vector4(airCool.r, airCool.g, airCool.b, 1 / AIR_DISTANCE);
   const airWarm = new Vector4(airSun.r, airSun.g, airSun.b, AIR_STRENGTH);
+  // Light, not paint: scene-linear, and shared by every material of the field.
+  const glowBelow = linear(palette.bounce).multiplyScalar(palette.bounce === 0 ? 0 : BOUNCE_GAIN);
+  const bounce = new Vector4(glowBelow.r, glowBelow.g, glowBelow.b, 1 / BOUNCE_HEIGHT);
   const all: ShaderMaterial[] = [];
   let level = QUALITY_LEVEL[preset.id];
 
@@ -363,13 +395,15 @@ export function createWorldMaterials(
       uTeam: shared.uTeam,
       uDetail: { value: options.detail.texture },
       uDetailGain: { value: inverseMean(options.detail, options.detailStrength) },
-      uMossColor: { value: linear(MOSS_COLOR) },
-      uEdgeColor: { value: linear(EDGE_COLOR) },
-      uStoneColor: { value: linear(STONE_COLOR) },
-      uGlow: { value: new Vector4(1.9, 0.22, 40, 0.85) },
+      uMossColor: { value: linear(palette.moss) },
+      uEdgeColor: { value: linear(palette.edge) },
+      uStoneColor: { value: linear(palette.stone) },
+      uBounce: { value: bounce },
+      uMarkerColor: { value: linear(MARKER_COLOR) },
+      uGlow: { value: new Vector4(palette.glowGain, 0.22, 40, 0.85) },
       uAir: { value: air },
       uAirWarm: { value: airWarm },
-      uGrade: { value: new Vector4(1.3, 0.8, 0.5, 0.2) },
+      uGrade: { value: new Vector4(palette.stoneSaturation, 0.8, 0.5, 0.2) },
       uMoss: { value: textures.moss.texture },
       uMossGain: { value: moss },
       uCliff: { value: textures.cliff.texture },

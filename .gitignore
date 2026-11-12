@@ -32,3 +32,6 @@ node_modules/.vite-capture/
 
 # Generated from node_modules by vite.config.ts (KTX2/Basis transcoder)
 public/vendor/
+
+# Trailer work in progress: only the final cut is tracked
+art-source/trailer/*-rough.*

@@ -12,7 +12,7 @@
  * bit-identical to the sim (the equivalence test relies on it). 10 dragons cost 2.3 KB a tick,
  * which is transferred, not copied.
  *
- *   state record := info (64 bytes), simState(prev), simState(current)
+ *   state record := info (64 bytes), simState(prev), simState(current), relay(current)
  *   simState     := i32 tick, f64 timeS, u8 dragonCount, f32 stormRadius, u8 projectileCount,
  *                   u8 zoneCount, dragon*, projectile*, zone*
  *   dragon       := u8 slot, u8 id, u8 team, u8 class, u8 anim, u16 flags, 13 x f64, combat
@@ -21,6 +21,9 @@
  *                   u16 blind                                                    (34 bytes)
  *   projectile   := u16 id, u8 kind, u8 owner, u8 team, 6 x f32                  (29 bytes)
  *   zone         := u8 id, u8 kind, u8 owner, u8 team, 4 x f32, u16 ticksLeft    (22 bytes)
+ *   relay        := u8 active, u32 revision, and only when active: 4 x (3 x f64) sites, then
+ *                   per shard u8 status, u8 carrier, 3 x f64 position, i32 returnTick
+ *                                                                               (5 or 161 bytes)
  *
  * Projectiles and zones are `f32`: only the views read them. `appendHostEffects` turns them,
  * and the local dragon's combat fields, into the WorldView's projectiles, zones and `local`.
@@ -55,6 +58,8 @@ import type {
   PlayerId,
   TeamId,
 } from '../../shared';
+import { createRelayState } from '../../sim';
+import type { RelayState } from '../../sim';
 
 /** What the views read of one dragon. `DragonState` fits. */
 export interface HostViewDragon {
@@ -118,6 +123,8 @@ export interface HostViewState {
   zones: HostViewZone[];
   /** Storm wall radius a mode set, or negative for the map's own. */
   stormRadius: number;
+  /** Ember Relay's shards and sites (`relay.active` false in every other mode). */
+  relay: RelayState;
 }
 
 /** The per-tick facts that travel with the state. */
@@ -159,14 +166,18 @@ const DRAGON_COMBAT_BYTES = 34;
 const DRAGON_BYTES = 7 + 13 * 8 + DRAGON_COMBAT_BYTES;
 const PROJECTILE_BYTES = 29;
 const ZONE_BYTES = 22;
-/** Largest state record: both states with every slot live. */
+const RELAY_IDLE_BYTES = 1 + 4;
+const RELAY_SHARD_BYTES = 2 + 24 + 4;
+const RELAY_ACTIVE_BYTES = RELAY_IDLE_BYTES + 4 * 24 + 2 * RELAY_SHARD_BYTES;
+/** Largest state record: both states with every slot live, in an Ember Relay match. */
 export const STATE_RECORD_MAX_BYTES =
   STATE_INFO_BYTES +
   2 *
     (SIM_STATE_FIXED_BYTES +
       MAX_PLAYERS * DRAGON_BYTES +
       MAX_PROJECTILES * PROJECTILE_BYTES +
-      MAX_ZONES * ZONE_BYTES);
+      MAX_ZONES * ZONE_BYTES) +
+  RELAY_ACTIVE_BYTES;
 
 const INFO_FLAG_RIDER = 1;
 const WINNER_NONE = 0;
@@ -245,7 +256,15 @@ export function createHostViewState(): HostViewState {
       ticksLeft: 0,
     });
   }
-  return { tick: -1, timeS: 0, dragons, projectiles, zones, stormRadius: -1 };
+  return {
+    tick: -1,
+    timeS: 0,
+    dragons,
+    projectiles,
+    zones,
+    stormRadius: -1,
+    relay: createRelayState(),
+  };
 }
 
 export function createHostTickInfo(): HostTickInfo {
@@ -295,8 +314,71 @@ export function hostStateBytes(
     (countLive(prev.projectiles, MAX_PROJECTILES) +
       countLive(current.projectiles, MAX_PROJECTILES)) *
       PROJECTILE_BYTES +
-    (countLive(prev.zones, MAX_ZONES) + countLive(current.zones, MAX_ZONES)) * ZONE_BYTES
+    (countLive(prev.zones, MAX_ZONES) + countLive(current.zones, MAX_ZONES)) * ZONE_BYTES +
+    (current.relay.active ? RELAY_ACTIVE_BYTES : RELAY_IDLE_BYTES)
   );
+}
+
+function writeVec3(view: DataView, at: number, v: Readonly<MutableVec3> | undefined): void {
+  view.setFloat64(at, v === undefined ? 0 : v.x, true);
+  view.setFloat64(at + 8, v === undefined ? 0 : v.y, true);
+  view.setFloat64(at + 16, v === undefined ? 0 : v.z, true);
+}
+
+function readVec3(view: DataView, at: number, out: MutableVec3 | undefined): void {
+  if (out === undefined) return;
+  out.x = view.getFloat64(at, true);
+  out.y = view.getFloat64(at + 8, true);
+  out.z = view.getFloat64(at + 16, true);
+}
+
+function writeRelay(view: DataView, at: number, relay: Readonly<RelayState>): number {
+  view.setUint8(at, relay.active ? 1 : 0);
+  view.setUint32(at + 1, relay.revision >>> 0, true);
+  if (!relay.active) return at + RELAY_IDLE_BYTES;
+  let o = at + RELAY_IDLE_BYTES;
+  writeVec3(view, o, relay.stands[0]);
+  writeVec3(view, o + 24, relay.stands[1]);
+  writeVec3(view, o + 48, relay.braziers[0]);
+  writeVec3(view, o + 72, relay.braziers[1]);
+  o += 96;
+  for (let team = 0; team < 2; team++) {
+    const shard = relay.shards[team];
+    view.setUint8(o, shard === undefined ? 0 : shard.status);
+    view.setUint8(o + 1, shard === undefined ? NO_PLAYER : shard.carrierId);
+    writeVec3(view, o + 2, shard?.position);
+    view.setInt32(o + 26, shard === undefined ? -1 : shard.returnTick, true);
+    o += RELAY_SHARD_BYTES;
+  }
+  return o;
+}
+
+/** Returns the offset after the block, or -1 when the record is cut short or malformed. */
+function readRelay(view: DataView, at: number, end: number, out: RelayState): number {
+  if (at + RELAY_IDLE_BYTES > end) return -1;
+  const active = view.getUint8(at) !== 0;
+  out.active = active;
+  out.revision = view.getUint32(at + 1, true);
+  // Off (any other mode): the rest of the mirror is not read by anybody.
+  if (!active) return at + RELAY_IDLE_BYTES;
+  if (at + RELAY_ACTIVE_BYTES > end) return -1;
+  let o = at + RELAY_IDLE_BYTES;
+  readVec3(view, o, out.stands[0]);
+  readVec3(view, o + 24, out.stands[1]);
+  readVec3(view, o + 48, out.braziers[0]);
+  readVec3(view, o + 72, out.braziers[1]);
+  o += 96;
+  for (let team = 0; team < 2; team++) {
+    const shard = out.shards[team];
+    if (shard !== undefined) {
+      shard.status = view.getUint8(o);
+      shard.carrierId = view.getUint8(o + 1);
+      readVec3(view, o + 2, shard.position);
+      shard.returnTick = view.getInt32(o + 26, true);
+    }
+    o += RELAY_SHARD_BYTES;
+  }
+  return o;
 }
 
 function countLive(pool: readonly { active: boolean }[], limit: number): number {
@@ -626,6 +708,7 @@ export function encodeHostState(
   view.setUint32(at + 60, 0, true);
   let o = writeSimState(view, at + STATE_INFO_BYTES, prev);
   o = writeSimState(view, o, current);
+  o = writeRelay(view, o, current.relay);
   return o - at;
 }
 
@@ -639,7 +722,12 @@ export function decodeHostState(
   current: HostViewState,
 ): boolean {
   const end = at + length;
-  if (length < STATE_INFO_BYTES + 2 * SIM_STATE_FIXED_BYTES || end > view.byteLength) return false;
+  if (
+    length < STATE_INFO_BYTES + 2 * SIM_STATE_FIXED_BYTES + RELAY_IDLE_BYTES ||
+    end > view.byteLength
+  ) {
+    return false;
+  }
   info.hostTick = view.getUint32(at, true);
   info.tickAtMs = view.getFloat64(at + 4, true);
   info.phaseTimeS = view.getFloat64(at + 12, true);
@@ -657,7 +745,9 @@ export function decodeHostState(
   info.timeRemainingS = view.getFloat32(at + 52, true);
   info.scoreEmber = view.getUint16(at + 56, true);
   info.scoreFrost = view.getUint16(at + 58, true);
-  const o = readSimState(view, at + STATE_INFO_BYTES, end, prev);
+  let o = readSimState(view, at + STATE_INFO_BYTES, end, prev);
   if (o < 0) return false;
-  return readSimState(view, o, end, current) === end;
+  o = readSimState(view, o, end, current);
+  if (o < 0) return false;
+  return readRelay(view, o, end, current.relay) === end;
 }

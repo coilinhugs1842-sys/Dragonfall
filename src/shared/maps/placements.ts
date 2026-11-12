@@ -21,6 +21,7 @@
 
 import type { TeamId } from '../constants';
 import type { Vec3 } from '../math-types';
+import { CALDERA_ASSET_TYPES, CALDERA_HULL_QUANTUM } from './generated/emberfall-caldera-hulls';
 import { SPIRES_ASSET_TYPES, SPIRES_HULL_QUANTUM } from './generated/shattered-spires-hulls';
 import type { GeneratedMapAssetType } from './generated/shattered-spires-hulls';
 
@@ -96,14 +97,14 @@ function decodeBase64(text: string): Uint8Array {
   return out;
 }
 
-function decodeType(source: GeneratedMapAssetType): MapAssetType {
+function decodeType(source: GeneratedMapAssetType, quantum: number): MapAssetType {
   const vertBytes = decodeBase64(source.verts);
   const triBytes = decodeBase64(source.tris);
   const vertView = new DataView(vertBytes.buffer, vertBytes.byteOffset, vertBytes.byteLength);
   const triView = new DataView(triBytes.buffer, triBytes.byteOffset, triBytes.byteLength);
   const hullPositions = new Float32Array(vertBytes.byteLength >> 1);
   for (let i = 0; i < hullPositions.length; i++) {
-    hullPositions[i] = vertView.getInt16(i * 2, true) * SPIRES_HULL_QUANTUM;
+    hullPositions[i] = vertView.getInt16(i * 2, true) * quantum;
   }
   const hullIndices = new Uint16Array(triBytes.byteLength >> 1);
   for (let i = 0; i < hullIndices.length; i++) hullIndices[i] = triView.getUint16(i * 2, true);
@@ -127,11 +128,21 @@ function decodeType(source: GeneratedMapAssetType): MapAssetType {
 
 let decoded: ReadonlyMap<MapAssetTypeId, MapAssetType> | null = null;
 
-/** Every asset type of the shipped maps, decoded once per realm (page, worker, test). */
+/**
+ * Every asset type of the shipped maps, decoded once per realm (page, worker, test). One
+ * registry for all maps: Emberfall Caldera reuses a few of the first map's pieces (banners,
+ * chains, the sky-well crystal), and type ids never repeat between the two lists.
+ */
 export function mapAssetTypes(): ReadonlyMap<MapAssetTypeId, MapAssetType> {
   if (decoded === null) {
     const map = new Map<MapAssetTypeId, MapAssetType>();
-    for (const source of SPIRES_ASSET_TYPES) map.set(source.id, decodeType(source));
+    for (const source of SPIRES_ASSET_TYPES) {
+      map.set(source.id, decodeType(source, SPIRES_HULL_QUANTUM));
+    }
+    for (const source of CALDERA_ASSET_TYPES) {
+      // A clash would silently swap one map's rock for the other's: the first map's type stays.
+      if (!map.has(source.id)) map.set(source.id, decodeType(source, CALDERA_HULL_QUANTUM));
+    }
     decoded = map;
   }
   return decoded;

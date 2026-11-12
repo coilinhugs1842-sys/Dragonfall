@@ -36,6 +36,7 @@ import {
   TICK_HZ,
   TICK_MS,
   createInputFrame,
+  writeRelayView,
 } from '../../shared';
 import type {
   ConnectFailureReason,
@@ -43,6 +44,7 @@ import type {
   GameEventSink,
   InputFrame,
   LobbyState,
+  MapId,
   MatchPhase,
   MatchWinner,
   MutableWorldView,
@@ -51,6 +53,8 @@ import type {
   UiError,
   UiIntent,
 } from '../../shared';
+import { createRelayState, resetRelayState } from '../../sim';
+import type { RelayState } from '../../sim';
 import { buildMatchRoster } from '../../sim/lobby';
 import { ClockSync } from '../clock/clock-sync';
 import {
@@ -85,6 +89,7 @@ import {
   MSG_MATCH_START,
   MSG_PLAYER_PINGS,
   MSG_PONG,
+  MSG_RELAY,
   MSG_SCOREBOARD,
   MSG_REJECT,
   MSG_SNAPSHOT,
@@ -127,6 +132,7 @@ import { greyboxMatchWorldFactory } from './match-world';
 import type { MatchWorld, MatchWorldFactory } from './match-world';
 import { NetRate } from './net-rate';
 import { applyPlayerPings, createPlayerPingsMessage, decodePlayerPings } from './pings';
+import { decodeRelay } from './relay';
 import { createScoreTable, decodeScoreboard } from './scores';
 import type { ScoreTable } from './scores';
 import { ViewCache, createMemoryTokenStore, rttToWire } from './wire';
@@ -203,6 +209,8 @@ export interface ClientInputSampler {
 
 export interface ClientMatchInfo {
   readonly seed: number;
+  /** The map the match is flown on, as MATCH_START said. */
+  readonly map: MapId;
   /** First host tick the sim steps (the countdown ends). */
   readonly startTick: number;
   /** Null when this session does not predict (net-bots). */
@@ -342,6 +350,12 @@ export class ClientSession {
    */
   readonly scores: ScoreTable = createScoreTable();
   /**
+   * Ember Relay's sites and shards as the host last sent them (RELAY); `relay.active` is false
+   * in every other mode and outside a match. Rewritten in place.
+   */
+  readonly relay: RelayState = createRelayState();
+  private readonly relaySpare: RelayState = createRelayState();
+  /**
    * Seconds a dead dragon waits to respawn, for `view.local.respawnInS`. `src/game` sets it to
    * Infinity while the mode has respawns off (Duel).
    */
@@ -397,11 +411,13 @@ export class ClientSession {
   private matchRoundNow = 1;
   private matchWinnerNow: MatchWinner | null = null;
   private matchSeedNow = 0;
+  private matchMapNow: MapId = 'shattered-spires';
   private matchStartTickNow = -1;
   /** First host tick of the current phase, from the reliable MATCH_PHASE. */
   private phaseStartTickNow = 0;
   private world: MatchWorld | null = null;
   private worldSeed = -1;
+  private worldMap: MapId | null = null;
   private rider = false;
   /** The prediction clock has been set from clock sync. */
   private started = false;
@@ -520,6 +536,11 @@ export class ClientSession {
 
   get matchSeed(): number {
     return this.matchSeedNow;
+  }
+
+  /** The map of the current (or last) match, from MATCH_START. */
+  get matchMap(): MapId {
+    return this.matchMapNow;
   }
 
   /** First tick of play of the current round (a later round's countdown moves it). */
@@ -879,6 +900,11 @@ export class ClientSession {
       const elapsed = this.sample.playTick - this.phaseStartTickNow + 1;
       view.clock.phaseTimeS = elapsed > 0 ? elapsed * TICK_DT_S : 0;
     }
+    // Ember Relay: the shards and braziers, on the same playback clock as the dragons.
+    if (this.matchActive && this.relay.active) {
+      // `clock.tick` is the whole playback tick `buildClientWorldView` just wrote.
+      writeRelayView(view, this.relay, view.clock.tick);
+    }
     const bolts = this.bolts;
     if (bolts.count > 0) {
       bolts.update(
@@ -1029,6 +1055,10 @@ export class ClientSession {
       case MSG_SCOREBOARD:
         if (!decodeScoreboard(reader, this.scores)) this.drop();
         return;
+      case MSG_RELAY:
+        // Read into a spare first: one that arrives with no match running must change nothing.
+        if (!decodeRelay(reader, this.matchActive ? this.relay : this.relaySpare)) this.drop();
+        return;
       case MSG_GAME_EVENTS:
         if (!decodeGameEvents(reader, this.eventTap)) this.drop();
         return;
@@ -1148,6 +1178,7 @@ export class ClientSession {
     const me = matchRoster.riders.find((entry) => entry.playerId === this.playerId);
 
     this.matchSeedNow = message.seed;
+    this.matchMapNow = message.map;
     this.matchStartTickNow = message.startTick;
     // Until the MATCH_PHASE that follows on the same channel says which (`intro`, or any phase
     // for a late joiner). Either way the dragons are held until `startTick`.
@@ -1156,6 +1187,8 @@ export class ClientSession {
     this.matchRoundNow = 1;
     this.matchWinnerNow = null;
     this.scores.count = 0;
+    // An Ember Relay match says so in the RELAY that follows on the same channel.
+    resetRelayState(this.relay);
     this.localCasts = 0;
     this.matchActive = true;
     this.rider = me !== undefined;
@@ -1170,9 +1203,13 @@ export class ClientSession {
     this.bolts.reset();
 
     if (this.predict) {
-      if (this.world === null || this.worldSeed !== message.seed) {
-        this.world = this.createMatchWorld(lobby.settings, message.seed);
+      if (this.world === null || this.worldSeed !== message.seed || this.worldMap !== message.map) {
+        // The map comes from MATCH_START itself, not from whichever lobby state arrived last.
+        const settings =
+          lobby.settings.map === message.map ? lobby.settings : { ...lobby.settings, map: message.map };
+        this.world = this.createMatchWorld(settings, message.seed);
         this.worldSeed = message.seed;
+        this.worldMap = message.map;
       }
       this.predictor.setCollisionWorld(this.world.collisionWorld);
     }
@@ -1182,6 +1219,7 @@ export class ClientSession {
 
     this.listener.onMatchStart?.({
       seed: message.seed,
+      map: message.map,
       startTick: message.startTick,
       world: this.predict ? this.world : null,
       isRider: this.rider,
@@ -1248,6 +1286,7 @@ export class ClientSession {
     this.buffer.reset();
     this.timing.reset();
     this.roster.clear();
+    resetRelayState(this.relay);
     if (notify) this.listener.onMatchEnd?.();
   }
 

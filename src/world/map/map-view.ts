@@ -32,9 +32,11 @@ import { BufferAttribute, BufferGeometry, Group, Mesh, MeshLambertMaterial, Sphe
 import type { Camera, WebGLRenderer } from 'three';
 import { buildMapTriangles, sliceMapChunk } from '../../shared';
 import type { MapManifest, QualityPreset, Vec3 } from '../../shared';
+import { createAshFall, createVentColumns } from '../air';
 import { useWorldLight } from '../light';
 import { createPropField, loadMapAssets, loadedMapAssets } from '../props';
 import type { MapAssetBundle, PropField, PropFieldStats } from '../props';
+import { skyLookOf } from '../sky/sky-look';
 import { createMapCollisionOverlay } from './map-collision-overlay';
 import type { MapCollisionOverlay } from './map-collision-overlay';
 import { createMapDebugMarkers } from './map-debug-markers';
@@ -124,6 +126,11 @@ export interface MapViewStats {
   readonly props: PropFieldStats | null;
   /** Milliseconds the asset load took (0 from the cache), -1 before it finished. */
   readonly loadMs: number;
+  /**
+   * Vent streaks + ash flakes drawn at the current preset (two draw calls; 0 on a map with
+   * neither). They count against the particle budget next to the effects' own particles.
+   */
+  readonly airParticles: number;
 }
 
 export interface MapView {
@@ -165,6 +172,7 @@ interface MutableStats {
   drawDistance: number;
   props: PropFieldStats | null;
   loadMs: number;
+  airParticles: number;
 }
 
 /**
@@ -303,6 +311,7 @@ export function createMapView(
     drawDistance: mapDrawDistance(fogDensity),
     props: null,
     loadMs: -1,
+    airParticles: 0,
   };
 
   /** The stand-in leaves, the real assets are drawn from this frame on. */
@@ -327,7 +336,7 @@ export function createMapView(
   function showAssets(bundle: MapAssetBundle, loadMs: number, late: boolean): boolean {
     let built: PropField;
     try {
-      built = createPropField(map.placements ?? [], bundle, preset);
+      built = createPropField(map.placements ?? [], bundle, preset, skyLookOf(map.sky));
     } catch (error) {
       console.warn('[map] the loaded assets do not match the map; keeping the hull stand-in.', error);
       return false;
@@ -405,14 +414,30 @@ export function createMapView(
     object.add(collision.object);
   }
 
+  // --- The map's air: vent streaks and ash. Need no assets, so they are there from the start. ---
+  const seaY = map.colliders.cloudSeaY ?? map.colliders.floorY;
+  const vents =
+    map.vents !== undefined && map.vents.length > 0
+      ? createVentColumns({ vents: map.vents, sky: map.sky, cloudSeaY: seaY }, preset)
+      : null;
+  const ash = map.sky.ashFall === true ? createAshFall({ sky: map.sky, cloudSeaY: seaY }, preset) : null;
+  if (vents !== null) object.add(vents.object);
+  if (ash !== null) object.add(ash.object);
+  stats.airParticles = (vents?.activeCount ?? 0) + (ash?.activeCount ?? 0);
+
   function setQuality(next: QualityPreset): void {
     // Another preset is another shader variant of the world material: it compiles again.
     if (next.id !== preset.id) revision++;
     preset = next;
     applyQuality();
+    vents?.setQuality(next);
+    ash?.setQuality(next);
+    stats.airParticles = (vents?.activeCount ?? 0) + (ash?.activeCount ?? 0);
   }
 
   function update(cameraPosition: Vec3, camera: Camera | null = null, timeS = 0): void {
+    vents?.update(timeS);
+    ash?.update(timeS);
     if (pending !== null && --pendingUpdates <= 0) reveal(pending);
     if (field !== null) {
       field.update(cameraPosition, camera, timeS);
@@ -453,6 +478,8 @@ export function createMapView(
     pending = null;
     markers?.dispose();
     collision?.dispose();
+    vents?.dispose();
+    ash?.dispose();
     object.clear();
   }
 

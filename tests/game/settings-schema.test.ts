@@ -15,6 +15,7 @@ import {
 import { parseSettings } from '../../src/game/storage';
 import { readStoredQuality } from '../../src/game/stored-quality';
 import { DEFAULT_BINDINGS } from '../../src/input/bindings';
+import { DEFAULT_GAMEPAD_BINDINGS } from '../../src/input/gamepad-bindings';
 import {
   DEFAULT_GAME_SETTINGS,
   DEFAULT_SETTINGS,
@@ -110,6 +111,7 @@ describe('sanitizeSettings', () => {
   it('accepts every valid value', () => {
     const wanted: GameSettings = {
       quality: 'low',
+      autoQuality: 'medium',
       fpsCap: 45,
       dynamicResolution: false,
       renderScaleCap: 0.4,
@@ -130,6 +132,11 @@ describe('sanitizeSettings', () => {
       lanHost: '192.168.1.20',
       turn: { url: 'turns:relay.example.org:5349', username: 'u', credential: 'p w' },
       playerName: 'Ash Rider',
+      gamepadSensitivity: 1.5,
+      gamepadInvertY: true,
+      gamepadDeadZone: 0.25,
+      gamepadCurve: 2.4,
+      gamepadRumble: true,
     };
     expect(sanitizeSettings(wanted)).toEqual(wanted);
   });
@@ -230,6 +237,68 @@ describe('parseSettingsData', () => {
       const data = parseSettingsData(text);
       expect(data.settings).toEqual(DEFAULT_GAME_SETTINGS);
       expect(data.bindings).toEqual(DEFAULT_BINDINGS);
+      expect(data.gamepadBindings).toEqual(DEFAULT_GAMEPAD_BINDINGS);
+    }
+  });
+
+  it('loads a version 2 save (no gamepad fields) with the gamepad defaults', () => {
+    const v2 = JSON.stringify({
+      version: 2,
+      ...DEFAULT_GAME_SETTINGS,
+      gamepadSensitivity: undefined,
+      gamepadInvertY: undefined,
+      gamepadDeadZone: undefined,
+      gamepadCurve: undefined,
+      gamepadRumble: undefined,
+      fovDeg: 84,
+      playerName: 'Wren',
+      bindings: { ...DEFAULT_BINDINGS, utility: ['KeyG'] },
+    });
+    expect(v2).not.toContain('gamepad');
+    const data = parseSettingsData(v2);
+    expect(data.settings).toEqual({ ...DEFAULT_GAME_SETTINGS, fovDeg: 84, playerName: 'Wren' });
+    expect(data.settings.gamepadDeadZone).toBe(0.15);
+    expect(data.settings.gamepadCurve).toBe(1.6);
+    expect(data.settings.gamepadRumble).toBe(false);
+    expect(data.bindings.utility).toEqual(['KeyG']);
+    expect(data.gamepadBindings).toEqual(DEFAULT_GAMEPAD_BINDINGS);
+  });
+
+  it('clamps the gamepad numbers and drops junk from the stored gamepad table', () => {
+    const out = sanitizeSettings({
+      gamepadSensitivity: 40,
+      gamepadDeadZone: 0,
+      gamepadCurve: 0.2,
+      gamepadInvertY: 'yes',
+      gamepadRumble: 1,
+    });
+    expect(out.gamepadSensitivity).toBe(SETTINGS_LIMITS.gamepadSensitivity.max);
+    expect(out.gamepadDeadZone).toBe(SETTINGS_LIMITS.gamepadDeadZone.min);
+    expect(out.gamepadCurve).toBe(SETTINGS_LIMITS.gamepadCurve.min);
+    expect(out.gamepadInvertY).toBe(false);
+    expect(out.gamepadRumble).toBe(false);
+    expect(sanitizeSettings({ gamepadCurve: 2.449 }).gamepadCurve).toBe(2.4);
+    expect(sanitizeSettings({ gamepadDeadZone: 0.123 }).gamepadDeadZone).toBe(0.12);
+
+    const text = JSON.stringify({
+      version: SETTINGS_VERSION,
+      gamepadBindings: {
+        // Keyboard codes, the reserved Menu button and repeats have no place in the pad's table.
+        boost: ['KeyB', 'Pad9', 'Pad5', 'Pad5'],
+        flap: [],
+        dive: 'Pad1',
+        hack: ['Pad2'],
+      },
+    });
+    const { gamepadBindings, bindings } = parseSettingsData(text);
+    expect(gamepadBindings.boost).toEqual(['Pad5']);
+    expect(gamepadBindings.flap).toEqual([]);
+    expect(gamepadBindings.dive).toEqual(DEFAULT_GAMEPAD_BINDINGS.dive);
+    expect(Object.keys(gamepadBindings)).toEqual(Object.keys(DEFAULT_GAMEPAD_BINDINGS));
+    expect(bindings).toEqual(DEFAULT_BINDINGS);
+    for (const junk of ['"none"', '[["Pad0"]]', '7', 'null']) {
+      const data = parseSettingsData(`{"gamepadBindings":${junk}}`);
+      expect(data.gamepadBindings).toEqual(DEFAULT_GAMEPAD_BINDINGS);
     }
   });
 
@@ -267,11 +336,21 @@ describe('parseSettingsData', () => {
   it('round-trips, and old readers still understand the new save', () => {
     const settings = sanitizeSettings({ quality: 'low', fovDeg: 88, uiScale: 1.2, invertY: true });
     const bindings = applyRebind(DEFAULT_BINDINGS, 'utility', 0, 'KeyG', false);
-    const text = serializeSettingsData({ settings, bindings });
+    const gamepadBindings = applyRebind(
+      DEFAULT_GAMEPAD_BINDINGS,
+      'utility',
+      0,
+      'Pad5',
+      false,
+      'gamepad',
+    );
+    const text = serializeSettingsData({ settings, bindings, gamepadBindings });
     expect(text.startsWith(`{"version":${SETTINGS_VERSION},`)).toBe(true);
     const back = parseSettingsData(text);
     expect(back.settings).toEqual(settings);
     expect(back.bindings).toEqual(bindings);
+    expect(back.gamepadBindings).toEqual(gamepadBindings);
+    expect(back.gamepadBindings.utility).toEqual(['Pad5']);
     // stored-quality.ts (boot) and the Phase 2 reader in storage.ts.
     expect(readStoredQuality({ getItem: () => text })).toBe('low');
     expect(parseSettings(text)).toMatchObject({ quality: 'low', invertY: true });

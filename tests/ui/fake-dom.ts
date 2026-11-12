@@ -110,6 +110,11 @@ export class FakeElement {
   readonly offsetHeight = 0;
   readonly clientWidth = 0;
   readonly clientHeight = 0;
+  /**
+   * Where a test says this element is (pad navigation measures controls). Null = "not laid
+   * out": no client rects, and a zero rectangle.
+   */
+  rect: { left: number; top: number; right: number; bottom: number } | null = null;
 
   private readonly attributes = new Map<string, string>();
   private readonly listeners = new Map<string, Set<Listener>>();
@@ -212,7 +217,8 @@ export class FakeElement {
 
   readonly classList = {
     add: (...names: string[]): void => {
-      for (const name of names) if (!this.hasClass(name)) this.className = `${this.classes} ${name}`.trim();
+      for (const name of names)
+        if (!this.hasClass(name)) this.className = `${this.classes} ${name}`.trim();
     },
     remove: (...names: string[]): void => {
       for (const name of names) {
@@ -247,7 +253,22 @@ export class FakeElement {
     if (name === 'class') return this.classes;
     if (name === 'id') return this.currentId === '' ? null : this.currentId;
     if (name.startsWith('data-')) return this.dataset[camel(name.slice(5))] ?? null;
+    // The boolean attributes the UI sets as properties show up in selectors (`[hidden]`).
+    if (name === 'hidden') return this.isHidden ? '' : null;
+    if (name === 'inert') return this.isInert ? '' : null;
     return this.attributes.get(name) ?? null;
+  }
+
+  getBoundingClientRect(): { left: number; top: number; right: number; bottom: number } {
+    return this.rect ?? { left: 0, top: 0, right: 0, bottom: 0 };
+  }
+
+  getClientRects(): unknown[] {
+    return this.rect === null ? [] : [this.rect];
+  }
+
+  scrollIntoView(): void {
+    // Nothing scrolls here.
   }
 
   removeAttribute(name: string): void {
@@ -335,6 +356,8 @@ export class FakeElement {
   }
 
   matches(selector: string): boolean {
+    // A selector list: any one of its compound selectors.
+    if (selector.includes(',')) return selector.split(',').some((one) => this.matches(one));
     const part = parseSelector(selector);
     if (part.tag !== '' && part.tag !== this.tagName.toLowerCase()) return false;
     for (const name of part.classes) if (!this.hasClass(name)) return false;
@@ -386,6 +409,8 @@ export class FakeElement {
 
   /** Calls this element's listeners, then its ancestors' (every event here bubbles). */
   dispatchEvent(event: FakeEvent): void {
+    // An event made with `new KeyboardEvent(...)` gets its target here, as in a browser.
+    if (event.target === null) (event as { target: FakeElement | null }).target = this;
     for (let node: FakeElement | null = this; node !== null; node = node.parentElement) {
       const set = node.listeners.get(event.type);
       if (set !== undefined) for (const listener of [...set]) listener(event);
@@ -442,6 +467,30 @@ export function makeEvent(
     },
   };
   return event;
+}
+
+/** `new KeyboardEvent('keydown', { key, code })` / `new Event('change')`, as the UI makes them. */
+class FakeSyntheticEvent implements FakeEvent {
+  readonly type: string;
+  target: FakeElement | null = null;
+  readonly key?: string;
+  readonly code?: string;
+  readonly repeat = false;
+  defaultPrevented = false;
+
+  constructor(type: string, init?: { readonly key?: string; readonly code?: string }) {
+    this.type = type;
+    if (init?.key !== undefined) this.key = init.key;
+    if (init?.code !== undefined) this.code = init.code;
+  }
+
+  preventDefault(): void {
+    this.defaultPrevented = true;
+  }
+
+  stopPropagation(): void {
+    // Every listener here is called regardless; nothing in the tests depends on stopping.
+  }
 }
 
 class FakeDocument {
@@ -512,6 +561,8 @@ const GLOBAL_NAMES = [
   'HTMLInputElement',
   'HTMLSelectElement',
   'Node',
+  'KeyboardEvent',
+  'Event',
 ] as const;
 
 /**
@@ -539,6 +590,8 @@ export function installFakeDom(): () => void {
     HTMLInputElement: FakeInputElement,
     HTMLSelectElement: FakeSelectElement,
     Node: FakeElement,
+    KeyboardEvent: FakeSyntheticEvent,
+    Event: FakeSyntheticEvent,
   };
   const saved = new Map<string, PropertyDescriptor | undefined>();
   for (const name of GLOBAL_NAMES) {

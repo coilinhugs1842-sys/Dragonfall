@@ -6,7 +6,14 @@
  * allocating. Every field added here must also be copied in `copySimState`.
  */
 
-import { MAX_PLAYERS, MAX_PROJECTILES, MAX_ZONES, NO_PLAYER, TEAM_EMBER } from '../shared';
+import {
+  MAX_PLAYERS,
+  MAX_PROJECTILES,
+  MAX_ZONES,
+  NO_PLAYER,
+  SHARD_HOME,
+  TEAM_EMBER,
+} from '../shared';
 import type { MutableVec3, PlayerId, TeamId } from '../shared';
 import { copyDragonState, createDragonState, resetDragonState } from './dragon-state';
 import type { DragonState } from './dragon-state';
@@ -56,6 +63,34 @@ export interface ScoreState {
   damage: number;
 }
 
+/** One team's sky-shard in Ember Relay (T-6.3). The rules are in `match/relay.ts`. */
+export interface RelayShardState {
+  /** SHARD_HOME, SHARD_CARRIED or SHARD_DROPPED. */
+  status: number;
+  /** Who carries it, or NO_PLAYER. */
+  carrierId: PlayerId;
+  /** Its stand while home, the carrier's position while carried, where it lies while dropped. */
+  position: MutableVec3;
+  /** Dropped: the tick on which it goes home by itself. Otherwise -1. */
+  returnTick: number;
+}
+
+/**
+ * Ember Relay's objective state. Part of the sim state so the host's views, the host worker's
+ * view record and the bots all read it from the same place; clients get it in a RELAY message.
+ */
+export interface RelayState {
+  /** False in every other mode: the rest is then not read. */
+  active: boolean;
+  /** Goes up on every change of the fields below (the host sends the state when it moved). */
+  revision: number;
+  /** Index = owning TeamId. */
+  shards: RelayShardState[];
+  /** Where each team's shard rests, and where each team scores. Index = TeamId. */
+  stands: MutableVec3[];
+  braziers: MutableVec3[];
+}
+
 export interface SimState {
   /** Index of the last tick applied to this state; -1 before the first step. */
   tick: number;
@@ -86,6 +121,87 @@ export interface SimState {
   stormRadius: number;
   nextProjectileId: number;
   nextZoneId: number;
+  /** Ember Relay's shards and sites; `relay.active` is false in every other mode. */
+  relay: RelayState;
+}
+
+function createRelayShardState(): RelayShardState {
+  return {
+    status: SHARD_HOME,
+    carrierId: NO_PLAYER,
+    position: { x: 0, y: 0, z: 0 },
+    returnTick: -1,
+  };
+}
+
+export function createRelayState(): RelayState {
+  return {
+    active: false,
+    revision: 0,
+    shards: [createRelayShardState(), createRelayShardState()],
+    stands: [
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 0, z: 0 },
+    ],
+    braziers: [
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 0, z: 0 },
+    ],
+  };
+}
+
+function setVec(out: MutableVec3, x: number, y: number, z: number): void {
+  out.x = x;
+  out.y = y;
+  out.z = z;
+}
+
+/** Back to "not an Ember Relay match": everything zero, both shards home. */
+export function resetRelayState(relay: RelayState): RelayState {
+  relay.active = false;
+  relay.revision = 0;
+  for (let team = 0; team < 2; team++) {
+    const shard = relay.shards[team];
+    if (shard !== undefined) {
+      shard.status = SHARD_HOME;
+      shard.carrierId = NO_PLAYER;
+      setVec(shard.position, 0, 0, 0);
+      shard.returnTick = -1;
+    }
+    const stand = relay.stands[team];
+    if (stand !== undefined) setVec(stand, 0, 0, 0);
+    const brazier = relay.braziers[team];
+    if (brazier !== undefined) setVec(brazier, 0, 0, 0);
+  }
+  return relay;
+}
+
+export function copyRelayState(out: RelayState, from: Readonly<RelayState>): RelayState {
+  // Off on both sides is every match but an Ember Relay: nothing to do.
+  if (!from.active && !out.active && out.revision === from.revision) return out;
+  out.active = from.active;
+  out.revision = from.revision;
+  for (let team = 0; team < 2; team++) {
+    const shard = out.shards[team];
+    const fromShard = from.shards[team];
+    if (shard !== undefined && fromShard !== undefined) {
+      shard.status = fromShard.status;
+      shard.carrierId = fromShard.carrierId;
+      setVec(shard.position, fromShard.position.x, fromShard.position.y, fromShard.position.z);
+      shard.returnTick = fromShard.returnTick;
+    }
+    const stand = out.stands[team];
+    const fromStand = from.stands[team];
+    if (stand !== undefined && fromStand !== undefined) {
+      setVec(stand, fromStand.x, fromStand.y, fromStand.z);
+    }
+    const brazier = out.braziers[team];
+    const fromBrazier = from.braziers[team];
+    if (brazier !== undefined && fromBrazier !== undefined) {
+      setVec(brazier, fromBrazier.x, fromBrazier.y, fromBrazier.z);
+    }
+  }
+  return out;
 }
 
 export function createProjectileState(): ProjectileState {
@@ -185,6 +301,7 @@ export function createSimState(): SimState {
     stormRadius: -1,
     nextProjectileId: 0,
     nextZoneId: 0,
+    relay: createRelayState(),
   };
 }
 
@@ -244,6 +361,7 @@ export function resetSimState(state: SimState): SimState {
   state.stormRadius = -1;
   state.nextProjectileId = 0;
   state.nextZoneId = 0;
+  resetRelayState(state.relay);
   return state;
 }
 
@@ -286,6 +404,7 @@ export function copySimState(out: SimState, from: Readonly<SimState>): SimState 
   out.stormRadius = from.stormRadius;
   out.nextProjectileId = from.nextProjectileId;
   out.nextZoneId = from.nextZoneId;
+  copyRelayState(out.relay, from.relay);
   return out;
 }
 

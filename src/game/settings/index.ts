@@ -11,9 +11,12 @@ export {
   applyRebind,
   applyResetBindings,
   applyUnbind,
+  bindingDeviceOf,
   controlsUiStateFor,
   isInputAction,
 } from './bindings-bridge';
+export { createGamepadLink } from './gamepad-link';
+export type { GamepadLink, GamepadLinkInput, GamepadLinkOptions } from './gamepad-link';
 export { SYSTEM_TIMERS, createDebounce, debounceDueMs } from './debounce';
 export type { Debounce, DebounceOptions, DebounceTimers } from './debounce';
 export { FRAME_CAP_SLACK_MS, FrameCap } from './frame-cap';

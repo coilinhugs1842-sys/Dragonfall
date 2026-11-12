@@ -72,6 +72,7 @@ import {
   createInputFrame,
   createVec3,
   isLobbyBotIntent,
+  matchSeedOfMap,
 } from '../../shared';
 import type {
   DragonClassId,
@@ -118,9 +119,9 @@ import type {
   PlayerRemovalCause,
   StartBlocker,
 } from '../../sim/lobby';
-import { MatchDirector, createModeConfig } from '../../sim/match';
+import { MatchDirector, createModeConfig, relayTerrainOf } from '../../sim/match';
 import { HostBots } from '../bots/host-bots';
-import type { MatchArena, MatchDirectorListener, ModeConfig } from '../../sim/match';
+import type { MatchArena, MatchDirectorListener, ModeConfig, RelayArena } from '../../sim/match';
 import {
   decodeHello,
   decodeIntent,
@@ -185,6 +186,7 @@ import type { MatchWorld, MatchWorldFactory } from './match-world';
 import { NetRate } from './net-rate';
 import { addPlayerPing, createPlayerPingsMessage, encodePlayerPings } from './pings';
 import { encodeScoreboard } from './scores';
+import { encodeRelay } from './relay';
 import { steerToCourse } from './pilot';
 import type { PilotCourse } from './pilot';
 import { ViewCache, createReconnectToken, rttFromWire } from './wire';
@@ -459,6 +461,9 @@ export class HostSession {
   private readonly fixedLaunchTicks: number;
   private readonly localBot: boolean;
   private scoresDirty = false;
+  /** `SimState.relay.revision` as of the last RELAY message (Ember Relay). */
+  private relayRevisionSent = 0;
+  private readonly relayGates: MutableVec3[] = [createVec3(), createVec3()];
   private readonly simMatchTuning: MatchTuning;
   /** The sim's events leave through `emitEvent`, like the session's own. */
   private readonly simEvents: GameEventSink = {
@@ -980,7 +985,8 @@ export class HostSession {
   }
 
   private beginMatch(roster: MatchRoster): void {
-    const seed = this.mapSeed >>> 0;
+    // The map the lobby picked decides which layout seed is flown (the caldera has one layout).
+    const seed = matchSeedOfMap(roster.settings.map, this.mapSeed);
     const world = this.createMatchWorld(roster.settings, seed);
     let sim = this.simInstance;
     if (sim === null) {
@@ -1017,7 +1023,10 @@ export class HostSession {
       firstTick,
       countdownTicks,
       introTicks,
+      // Only Ember Relay reads it: where the stands and braziers go on this map.
+      roster.settings.mode === 'emberRelay' ? this.relayArenaOf(world) : null,
     );
+    this.relayRevisionSent = sim.current.relay.revision;
 
     const match: HostMatch = {
       roster,
@@ -1079,6 +1088,29 @@ export class HostSession {
     this.updateMatchClock(match, this.tickNow);
     this.listener.onMatchStart?.({ roster, world, seed, startTick: match.startTick });
     this.listener.onMatchPhase?.(match.phase);
+  }
+
+  /** What Ember Relay needs to know about the map: the two gates, the bounds and the rock. */
+  private relayArenaOf(world: MatchWorld): RelayArena {
+    const gates = this.relayGates;
+    for (let team = 0; team < gates.length; team++) {
+      const gate = gates[team];
+      const from = world.spawnGates[team];
+      if (gate === undefined) continue;
+      // A map without that gate: the map centre, mid height (the rules cope with it).
+      gate.x = from !== undefined ? from.position.x : world.centerX;
+      gate.y = from !== undefined ? from.position.y : (world.floorY + world.ceilingY) * 0.5;
+      gate.z = from !== undefined ? from.position.z : world.centerZ;
+    }
+    return {
+      gates,
+      centerX: world.centerX,
+      centerZ: world.centerZ,
+      radius: world.radius,
+      floorY: world.floorY,
+      ceilingY: world.ceilingY,
+      terrain: relayTerrainOf(world.collisionWorld),
+    };
   }
 
   /** The map numbers the Duel storm schedule needs. */
@@ -1204,6 +1236,12 @@ export class HostSession {
       this.afterStep(match, sim, tick);
       lagComp.record(sim.current);
       director.afterStep(tick, sim);
+      // Ember Relay: a shard changed hands this tick. Reliable, and only when it did.
+      const relay = sim.current.relay;
+      if (relay.revision !== this.relayRevisionSent) {
+        this.relayRevisionSent = relay.revision;
+        this.broadcastCtrl(encodeRelay(this.ctrlWriter, tick, relay));
+      }
     }
     this.updateMatchClock(match, tick);
     const t2 = clock !== null ? clock() : 0;
@@ -1359,6 +1397,7 @@ export class HostSession {
     start.tick = this.tickNow & 0xffff;
     start.startTick = match.startTick;
     start.seed = match.seed;
+    start.map = match.roster.settings.map;
     this.sendRaw(peer, 'ctrl', this.ctrlWriter, encodeMatchStart(this.ctrlWriter, start));
     const phase = this.matchPhaseOut;
     phase.tick = this.phaseHeaderTick(match, this.tickNow);
@@ -1379,6 +1418,11 @@ export class HostSession {
         this.director.statsCount,
       ),
     );
+    // Ember Relay: the sites and both shards as they are now (a late joiner missed the events).
+    const relay = this.simInstance?.current.relay;
+    if (relay !== undefined && relay.active) {
+      this.sendRaw(peer, 'ctrl', this.ctrlWriter, encodeRelay(this.ctrlWriter, this.tickNow, relay));
+    }
   }
 
   private removeRider(playerId: PlayerId): void {

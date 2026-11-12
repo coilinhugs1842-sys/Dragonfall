@@ -67,6 +67,7 @@ function testModeTuning(overrides: Partial<ModeTuning> = {}): ModeTuning {
       stormGateMarginM: 50,
       healthTieEpsilon: 0.01,
     },
+    emberRelay: MODE_TUNING.emberRelay,
     ...overrides,
   };
 }
@@ -268,7 +269,7 @@ describe('createModeConfig: lobby settings -> match rules', () => {
     const limits = HOST_SETTING_LIMITS;
     const broken = createModeConfig({
       ...DEFAULT_HOST_SETTINGS,
-      mode: 'emberRelay',
+      mode: 'skyCrown',
       teamSize: 99,
       scoreLimit: Number.NaN,
       timeLimitS: 5,

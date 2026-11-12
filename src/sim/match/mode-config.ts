@@ -18,7 +18,7 @@ import {
 import type { DragonClassId, HostSettings, MatchTuning, ModeId, ModeTuning } from '../../shared';
 
 /** The modes that have rules today. Anything else in the settings falls back to Skirmish. */
-export type PlayableModeId = 'skirmish' | 'duel';
+export type PlayableModeId = 'skirmish' | 'duel' | 'emberRelay';
 
 export interface ModeConfig {
   readonly mode: PlayableModeId;
@@ -29,11 +29,11 @@ export interface ModeConfig {
   readonly sandbox: boolean;
   /** Riders per side, inside the mode's own range. */
   readonly teamSize: number;
-  /** Points that win the match: takedowns in Skirmish, rounds in Duel. */
+  /** Points that win the match: takedowns in Skirmish, rounds in Duel, captures in Ember Relay. */
   readonly scoreLimit: number;
   /**
-   * Skirmish: seconds of play, 0 = no limit. Duel: the round length at match start, for
-   * display only (the director reads MODE_TUNING.duel.roundTimeS live).
+   * Skirmish and Ember Relay: seconds of play, 0 = no limit. Duel: the round length at match
+   * start, for display only (the director reads MODE_TUNING.duel.roundTimeS live).
    */
   readonly timeLimitS: number;
   /** Rounds played at most (1 in Skirmish). */
@@ -54,7 +54,61 @@ function clampInt(value: number, min: number, max: number, fallback: number): nu
 }
 
 function isPlayable(mode: ModeId): mode is PlayableModeId {
-  return (mode === 'skirmish' || mode === 'duel') && MODES[mode].available;
+  return (
+    (mode === 'skirmish' || mode === 'duel' || mode === 'emberRelay') && MODES[mode].available
+  );
+}
+
+/** The score limits the host panel may set in a mode, and what the mode starts on. */
+export interface ScoreLimitRule {
+  readonly min: number;
+  readonly max: number;
+  readonly initial: number;
+}
+
+/**
+ * Ember Relay counts captures (a handful win a match), everything else uses the lobby's wide
+ * range. Reads the tuning live, so it is built per call: lobby actions only, never per tick.
+ */
+export function scoreLimitRule(
+  mode: ModeId,
+  modeTuning: Readonly<ModeTuning> = MODE_TUNING,
+): ScoreLimitRule {
+  const limits = HOST_SETTING_LIMITS;
+  if (mode !== 'emberRelay') {
+    return {
+      min: limits.scoreLimitMin,
+      max: limits.scoreLimitMax,
+      initial: DEFAULT_HOST_SETTINGS.scoreLimit,
+    };
+  }
+  const relay = modeTuning.emberRelay;
+  const max = clampInt(relay.maxCaptures, limits.scoreLimitMin, limits.scoreLimitMax, 10);
+  return {
+    min: limits.scoreLimitMin,
+    max,
+    initial: clampInt(relay.defaultCaptures, limits.scoreLimitMin, max, 3),
+  };
+}
+
+/**
+ * A wanted score limit as the mode allows it: rounded and clamped into the mode's range. A
+ * value above a mode's own, narrower range was meant for another mode (30 takedowns is not 30
+ * captures), so it becomes the mode's starting value instead of its maximum.
+ */
+export function resolveScoreLimit(
+  mode: ModeId,
+  value: number,
+  modeTuning: Readonly<ModeTuning> = MODE_TUNING,
+): number {
+  const rule = scoreLimitRule(mode, modeTuning);
+  if (!Number.isFinite(value)) return rule.initial;
+  const whole = Math.round(value);
+  if (whole < rule.min) return rule.min;
+  if (whole > rule.max) {
+    return rule.max < HOST_SETTING_LIMITS.scoreLimitMax ? rule.initial : rule.max;
+  }
+  return whole;
 }
 
 /** Rounds a team must win in a best-of-`rounds` (3 of 5). */
@@ -99,12 +153,7 @@ export function createModeConfig(
     // Never fewer rounds than it takes to win, never more than the round counter's `u8`.
     maxRounds = clampInt(modeTuning.duel.maxRounds, scoreLimit, 255, scoreLimit * 2 - 1);
   } else {
-    scoreLimit = clampInt(
-      settings.scoreLimit,
-      limits.scoreLimitMin,
-      limits.scoreLimitMax,
-      DEFAULT_HOST_SETTINGS.scoreLimit,
-    );
+    scoreLimit = resolveScoreLimit(mode, settings.scoreLimit, modeTuning);
     timeLimitS =
       settings.timeLimitS === 0
         ? 0
@@ -124,7 +173,7 @@ export function createModeConfig(
     scoreLimit,
     timeLimitS,
     maxRounds,
-    respawns: mode === 'skirmish' || solo,
+    respawns: mode !== 'duel' || solo,
     stormShrinks: mode === 'duel' && !solo,
     friendlyFire: settings.friendlyFire === true,
     allowedClasses,

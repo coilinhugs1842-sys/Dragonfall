@@ -4,6 +4,7 @@
  *
  *   node tools/capture/bench.mjs [--base http://localhost:5173/] [--seconds 60]
  *        [--presets low,medium,high] [--size 1920x1080] [--shots art-source/_scratch/shots]
+ *        [--query "map=emberfall-caldera"]   (added to every URL: bench another map)
  *
  * The numbers are those of THIS machine's GPU (printed with the table), and a headless browser
  * does not wait for a display, so fps here is headroom, not the 60 a monitor would show. The
@@ -33,13 +34,15 @@ const base = args.base ?? 'http://localhost:5173/';
 const seconds = Number(args.seconds ?? 60);
 const presets = (args.presets ?? 'low,medium,high').split(',');
 const [width, height] = (args.size ?? '1920x1080').split('x').map(Number);
+// Extra URL parameters for every run, e.g. "map=emberfall-caldera" (a leading & or ? is fine).
+const query = args.query ? `&${args.query.replace(/^[?&]+/, '')}` : '';
 const shotDir = args.shots ? resolve(args.shots) : null;
 if (shotDir !== null) mkdirSync(shotDir, { recursive: true });
 const results = [];
 for (const preset of presets) {
   const session = await launch({ width, height });
   const problems = collectProblems(session);
-  const url = `${base}?bench=${seconds}&quality=${preset}`;
+  const url = `${base}?bench=${seconds}&quality=${preset}${query}`;
   let result = null;
   try {
     await session.send('Page.navigate', { url });

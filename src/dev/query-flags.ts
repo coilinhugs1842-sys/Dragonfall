@@ -1,7 +1,8 @@
 /**
  * Dev/test switches read from the page URL (`?perf`, `?debug`, `?bench`, `?autopilot`, `?skip=20`,
- * `?quality=low`, `?netsim=bad`, `?bots=8`, `?lan`, `?solo`, `?autostart`, `?noworker`, and the
- * match set-up switches `?mode=duel`, `?score=5`, `?time=0`, `?teamsize=2`, `?botlevel=hard`,
+ * `?quality=low`, `?autoquality`, `?netsim=bad`, `?bots=8`, `?lan`, `?solo`, `?autostart`, `?noworker`, and the
+ * match set-up switches `?mode=duel`, `?map=emberfall-caldera`, `?score=5`, `?time=0`,
+ * `?teamsize=2`, `?botlevel=hard`,
  * `?fill`, `?lagcomp=0`, `?join=CODE`, `?nocine`), and the dev viewers `?viewer=dragon:<class>`,
  * `?viewer=cine:<scene>` and `?viewer=ui:<screen>`.
  * This module is deliberately tiny and dependency-free (shared types and the pure netsim profile
@@ -11,8 +12,8 @@
 import { MAX_CLIENT_RIDERS } from '../shared/constants';
 import { isBotDifficulty } from '../shared/lobby';
 import type { BotDifficulty } from '../shared/lobby';
-import { MODES } from '../shared/match';
-import type { ModeId } from '../shared/match';
+import { MAPS, MODES } from '../shared/match';
+import type { MapId, ModeId } from '../shared/match';
 import { isQualityPresetId } from '../shared/quality';
 import type { QualityPresetId } from '../shared/quality';
 import { parseNetsimProfile } from './netsim/profile';
@@ -51,6 +52,12 @@ export interface QueryFlags {
   /** `?quality=low|medium|high`: force a preset, skipping the automatic pick. Null = not forced. */
   readonly quality: QualityPresetId | null;
   /**
+   * `?autoquality`: run the automatic quality pick on the title screen even when a choice is
+   * already saved (src/game/auto-quality-run.ts). `?quality=`, `?bench`, `?autopilot` and the
+   * viewers still win: with those the pick never runs.
+   */
+  readonly autoQuality: boolean;
+  /**
    * `?netsim=bad` or `?netsim=80,20,2` (one-way ms, ± ms, loss %): artificial network conditions
    * for this page's transport (docs/NETWORKING.md, "Testing multiplayer alone"). A bare `?netsim`
    * is the standard `bad` profile. Null = not in the URL, or not understood.
@@ -84,6 +91,11 @@ export interface QueryFlags {
   readonly noWorker: boolean;
   /** `?mode=skirmish|duel`: the host's room starts in this mode. Null = the lobby default. */
   readonly mode: ModeId | null;
+  /**
+   * `?map=emberfall-caldera`: the room this page hosts (also `?solo` and `?bench`) starts on
+   * this map. Null = the lobby default, or not a map id.
+   */
+  readonly map: MapId | null;
   /** `?score=N`: score limit of the host's room (clamped by the lobby). 0 = the default. */
   readonly scoreLimit: number;
   /** `?time=S`: time limit in seconds; `?time=0` = none. -1 = not in the URL. */
@@ -103,6 +115,11 @@ export interface QueryFlags {
    * no intro (load tests and scripted matches that should not wait twelve seconds).
    */
   readonly noCinematics: boolean;
+  /**
+   * `?record` (`?record=30`): the page is stepped frame by frame by the trailer recorder instead
+   * of running on real time (src/dev/record.ts, tools/capture/record.mjs).
+   */
+  readonly record: boolean;
   /**
    * `?viewer=dragon:<class>`, `?viewer=cine:<scene>`, `?viewer=ui:<screen>`: open a dev viewer
    * instead of the game (src/dev/dragon-viewer.ts, cine-viewer.ts, ui-preview.ts). Lower-cased;
@@ -171,6 +188,16 @@ function parseMode(value: string | null): ModeId | null {
   return null;
 }
 
+/** A map id as written in `MAPS`, in any letter case. The lobby still refuses an unshipped map. */
+function parseMap(value: string | null): MapId | null {
+  if (value === null) return null;
+  const lower = value.trim().toLowerCase();
+  for (const id of Object.keys(MAPS) as MapId[]) {
+    if (id === lower) return id;
+  }
+  return null;
+}
+
 /** Pure: takes `location.search` (with or without the leading `?`) so it is testable in node. */
 export function parseQueryFlags(search: string): QueryFlags {
   const params = new URLSearchParams(search);
@@ -186,6 +213,7 @@ export function parseQueryFlags(search: string): QueryFlags {
     autopilotBot,
     skipSeconds: parseSeconds(params.get('skip'), MAX_SKIP_SECONDS),
     quality: isQualityPresetId(quality) ? quality : null,
+    autoQuality: isOn(params, 'autoquality'),
     netsim: parseNetsimProfile(params.get('netsim')),
     bots: parseBots(params.get('bots')),
     lan: isOn(params, 'lan'),
@@ -193,6 +221,7 @@ export function parseQueryFlags(search: string): QueryFlags {
     autostart: isOn(params, 'autostart'),
     noWorker: isOn(params, 'noworker'),
     mode: parseMode(params.get('mode')),
+    map: parseMap(params.get('map')),
     scoreLimit: parseWhole(params.get('score'), 1, 1000, 0),
     timeLimitS: parseWhole(params.get('time'), 0, 24 * 3600, -1),
     teamSize: parseWhole(params.get('teamsize'), 1, 5, 0),
@@ -201,6 +230,7 @@ export function parseQueryFlags(search: string): QueryFlags {
     lagCompensation: params.get('lagcomp') === null || isOn(params, 'lagcomp'),
     joinCode: (params.get('join') ?? '').trim().toUpperCase().slice(0, 12),
     noCinematics: isOn(params, 'nocine'),
+    record: isOn(params, 'record'),
     viewer: (params.get('viewer') ?? '').trim().toLowerCase().slice(0, 32),
   };
 }

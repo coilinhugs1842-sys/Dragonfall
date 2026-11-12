@@ -6,7 +6,7 @@
  */
 
 import type { AbilitySlot, DragonClassId } from '../../shared/classes';
-import type { DamageSource } from '../../shared/events';
+import type { DamageSource, ObjectiveKind } from '../../shared/events';
 
 const SHIELD = 'M8 2 13 4V8C13 11 10.8 13 8 14 5.2 13 3 11 3 8V4Z';
 const CHEVRONS = 'M3 4 7 8 3 12M8 4 12 8 8 12';
@@ -81,6 +81,37 @@ export function takedownGlyph(
   }
   return ABILITY_GLYPHS[killerClassId][source];
 }
+
+// --- Ember Relay (T-6.3) ----------------------------------------------------------------------------
+
+/**
+ * A sky-shard as a FILLED mark (compass, shard strip): a tall six-sided crystal with its
+ * owner's team shape cut out of the middle (triangle = Ember, diamond = Frost), so whose shard
+ * it is never rests on colour alone. The hole is the inner outline drawn the other way round.
+ */
+export const SHARD_SHAPES: Readonly<Record<'ember' | 'frost' | 'none', string>> = {
+  ember: 'M8 0.6 14 4V12L8 15.4 2 12V4ZM8 4.4 4.7 10.6H11.3Z',
+  frost: 'M8 0.6 14 4V12L8 15.4 2 12V4ZM8 4 4.6 8 8 12 11.4 8Z',
+  none: 'M8 0.6 14 4V12L8 15.4 2 12V4Z',
+};
+
+/** The local team's brazier as a filled mark: a flame over a bowl. */
+export const BRAZIER_SHAPE =
+  'M8 0.8C10.4 3.4 11.2 5.4 10 7.6H6C4.8 5.4 5.6 3.4 8 0.8ZM1.8 9H14.2L11.6 14.6H4.4Z';
+
+/** Feed-line glyphs for what happened to a shard (line drawings, like the ability glyphs). */
+export const OBJECTIVE_GLYPHS: Readonly<Record<ObjectiveKind, string>> = {
+  // Lifted: a crystal under a rising chevron.
+  pickedUp: 'M8 6 11 7.8V11.6L8 13.4 5 11.6V7.8ZM5.2 4.4 8 2 10.8 4.4',
+  // Let fall: a crystal over a falling chevron.
+  dropped: 'M8 2.2 11 4V7.8L8 9.6 5 7.8V4ZM5.2 11.6 8 14 10.8 11.6',
+  // Sent home: a crystal inside a turning arrow.
+  returned: 'M8 5.2 10.2 6.5V9.5L8 10.8 5.8 9.5V6.5ZM3 9.5A5.2 5.2 0 1 0 4.2 4.4M4.2 1.6V4.4H7',
+  // Brought to the brazier: a flame over a bowl.
+  captured: 'M8 2C9.8 4 10.4 5.6 9.5 7.4H6.5C5.6 5.6 6.2 4 8 2ZM2.6 9.4H13.4L11.4 13.8H4.6Z',
+  // Sky Crown's (not drawn yet): a plain ring.
+  zoneTaken: 'M3 8a5 5 0 1 0 10 0a5 5 0 1 0-10 0',
+};
 
 export interface StatusGlyph {
   /** DRAGON_FLAG_* bit that shows it. */

@@ -5,17 +5,17 @@
  * game layer can hand in the collision world it already built for its views (one BVH per page,
  * not one per session), tests can fly in open sky, and net-bots can skip the map entirely.
  *
- * Host and clients must build the same world from the same `(settings.map, seed)`; the seed
- * travels in MATCH_START.
+ * Host and clients must build the same world from the same `(settings.map, seed)`; both
+ * travel in MATCH_START.
  */
 
 import {
   GREYBOX_SPIRES_DEFAULT_SEED,
+  createArenaMap,
   createGreyboxSpires,
-  createShatteredSpires,
   spawnGatesForMode,
 } from '../../shared';
-import type { ArenaMap, HostSettings, Quat, SpawnGate, TeamId, Vec3 } from '../../shared';
+import type { ArenaMap, HostSettings, MapId, Quat, SpawnGate, TeamId, Vec3 } from '../../shared';
 import { NULL_COLLISION_WORLD, createMapCollisionWorld } from '../../sim';
 import type { SimCollisionWorld } from '../../sim';
 
@@ -81,25 +81,34 @@ export function matchWorldOf(
 }
 
 /**
- * A `MatchWorldFactory` for the real Shattered Spires (T-4.5): what matches fly on. It builds
- * the map and its BVH once per layout seed (about 70 ms, allocates) and keeps the latest, so a
- * rematch or a mode change costs nothing. Every map id flies Shattered Spires until the second
- * map ships.
+ * A `MatchWorldFactory` for the real maps: what matches fly on. It builds the map the lobby
+ * picked (`settings.map`, src/shared/maps/registry.ts) and its BVH once per map and layout seed
+ * (about 70 ms, allocates) and keeps the latest, so a rematch or a mode change costs nothing.
+ * The host worker uses this; the page uses the cache in src/game/match-assets.ts, which builds
+ * the same world from the same two values (tests/game/match-world-parity.test.ts).
  */
-export function createShatteredSpiresMatchWorldFactory(): MatchWorldFactory {
+export function createMapMatchWorldFactory(): MatchWorldFactory {
   let seedOf = -1;
+  let mapOf: MapId | null = null;
   let map: ArenaMap | null = null;
   let collision: SimCollisionWorld | null = null;
   return (settings, seed) => {
     const key = seed >>> 0;
-    if (map === null || collision === null || seedOf !== key) {
-      map = createShatteredSpires(key);
+    if (map === null || collision === null || seedOf !== key || mapOf !== settings.map) {
+      map = createArenaMap(settings.map, key);
       collision = createMapCollisionWorld(map);
       seedOf = key;
+      mapOf = settings.map;
     }
     return matchWorldOf(map, collision, settings.mode);
   };
 }
+
+/**
+ * The old name of `createMapMatchWorldFactory`, from when Shattered Spires was the only map.
+ * Kept so callers that still use it (the host worker's entry) build by map id too.
+ */
+export const createShatteredSpiresMatchWorldFactory = createMapMatchWorldFactory;
 
 const OPEN_SKY_GATE_DISTANCE = 300;
 const OPEN_SKY_ALTITUDE = 320;

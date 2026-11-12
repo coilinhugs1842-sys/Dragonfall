@@ -7,7 +7,8 @@
  * WHAT IT DOES, in order of priority (later steps overrule earlier ones):
  *   1. a goal heading from its mode: PATROL (a weaving circle), ENGAGE (nose onto the lead
  *      point of its target), EXTEND (fly straight out of a turning fight, then come back),
- *      RETREAT (to a healthy ally or its own gate while it is badly hurt);
+ *      RETREAT (to a healthy ally or its own gate while it is badly hurt), OBJECTIVE (Ember
+ *      Relay: to the enemy's shard, home to its brazier with it, to its own dropped shard);
  *   2. the storm wall: turn back before it;
  *   3. terrain: feeler rays along the flight path (the centre one every tick, two of six others
  *      in turn) pick a side to pass on and a way over or under;
@@ -16,6 +17,12 @@
  * On top of the steering: boost / flap / dive, the primary when the target is in range, in the
  * aim window, in sight and not spawn protected, the other three abilities by rules read from
  * the ability table's kinds and tags (not from class names), and the dodge roll.
+ *
+ * EMBER RELAY (T-6.3), decided on every re-plan from `state.relay`: the bot that carries the
+ * enemy's shard flies it to its own brazier; the mate nearest to the team's own dropped shard
+ * fetches it; while the enemy's shard can be taken the nearest half of the team goes for it;
+ * everybody else fights as usual, preferring the enemy that carries their shard and enemies
+ * near a mate who carries. A bot on such an errand still fires at what crosses its nose.
  *
  * COST: steering every tick; targets, mode and abilities every `replanS` (staggered per bot by
  * its seed). Three terrain rays per tick plus one per enemy in sight per re-plan.
@@ -45,6 +52,10 @@ import {
   FLIGHT_TUNING,
   NO_PLAYER,
   PROJECTILE_DEFS,
+  SHARD_CARRIED,
+  SHARD_DROPPED,
+  TEAM_EMBER,
+  TEAM_FROST,
   TICK_DT_S,
   TICK_HZ,
   ZONE_DEFS,
@@ -118,11 +129,28 @@ export const BOT_MODE_PATROL = 0;
 export const BOT_MODE_ENGAGE = 1;
 export const BOT_MODE_EXTEND = 2;
 export const BOT_MODE_RETREAT = 3;
+/** Ember Relay: on its way to a shard or a brazier (see `BotBrain.errand`). */
+export const BOT_MODE_OBJECTIVE = 4;
 export type BotMode =
   | typeof BOT_MODE_PATROL
   | typeof BOT_MODE_ENGAGE
   | typeof BOT_MODE_EXTEND
-  | typeof BOT_MODE_RETREAT;
+  | typeof BOT_MODE_RETREAT
+  | typeof BOT_MODE_OBJECTIVE;
+
+/** What a bot in BOT_MODE_OBJECTIVE is doing. */
+export const BOT_ERRAND_NONE = 0;
+/** Flying to the enemy's shard (on its stand or dropped). */
+export const BOT_ERRAND_TAKE = 1;
+/** Carrying the enemy's shard to its own brazier. */
+export const BOT_ERRAND_CARRY = 2;
+/** Flying to its own team's dropped shard to send it home. */
+export const BOT_ERRAND_RETURN = 3;
+export type BotErrand =
+  | typeof BOT_ERRAND_NONE
+  | typeof BOT_ERRAND_TAKE
+  | typeof BOT_ERRAND_CARRY
+  | typeof BOT_ERRAND_RETURN;
 
 /**
  * The feelers. CENTER runs along the flight path from the dragon. LEFT / RIGHT / UP / DOWN run
@@ -232,6 +260,14 @@ export class BotBrain {
   private dodgeTicks = -1;
   private dodgeDir = 1;
   private lastButtons = 0;
+  /** Ember Relay: the errand of the last plan, where it leads, and the state it was planned on. */
+  private relayErrand: BotErrand = BOT_ERRAND_NONE;
+  private errandX = NaN;
+  private errandY = NaN;
+  private errandZ = NaN;
+  private relayRevision = -1;
+  /** Living riders of its team, itself included, as of the last `matesNearer`. */
+  private matesAlive = 1;
 
   // --- Scratch of one think (fields, not arguments: see `integrateDragon` on boxed floats) --------
   // Fields that hold fractions start as NaN, not 0: the engine then lays them out as doubles
@@ -296,6 +332,11 @@ export class BotBrain {
     return this.targetPlayer;
   }
 
+  /** Its Ember Relay errand as of the last plan (BOT_ERRAND_*). */
+  get errand(): BotErrand {
+    return this.relayErrand;
+  }
+
   /** A new life for the brain: a new seed and nothing remembered (a new match or round). */
   reset(seed: number): void {
     this.rng = seed >>> 0;
@@ -326,6 +367,9 @@ export class BotBrain {
     this.errYawGoal = 0;
     this.errPitchGoal = 0;
     this.dodgeDir = 1;
+    this.errandX = 0;
+    this.errandY = 0;
+    this.errandZ = 0;
     this.rest();
   }
 
@@ -443,6 +487,9 @@ export class BotBrain {
       planned = true;
     }
     const replanTicks = ticksOf(tune.replanS);
+    // A shard changed hands: what was planned a moment ago may now lead nowhere.
+    const relay = state.relay;
+    if (relay.active && relay.revision !== this.relayRevision) planned = true;
     if (planned || (age + this.stagger) % replanTicks === 0) {
       planned = true;
       this.plan(state, collision, arena, self, tune, level);
@@ -456,7 +503,13 @@ export class BotBrain {
       this.botMode = target !== undefined ? BOT_MODE_ENGAGE : BOT_MODE_PATROL;
       this.stuckTicks = 0;
     }
-    if (target === undefined && this.botMode !== BOT_MODE_RETREAT) this.botMode = BOT_MODE_PATROL;
+    if (
+      target === undefined &&
+      this.botMode !== BOT_MODE_RETREAT &&
+      this.botMode !== BOT_MODE_OBJECTIVE
+    ) {
+      this.botMode = BOT_MODE_PATROL;
+    }
 
     // --- The target: lead point, aim, range --------------------------------------------------------
     const primary = abilities.primary;
@@ -541,6 +594,23 @@ export class BotBrain {
       this.wantYaw = this.extendYaw;
       this.wantPitch = this.extendPitch;
       wantBoost = true;
+    } else if (mode === BOT_MODE_OBJECTIVE) {
+      const dx = this.errandX - px;
+      const dy = this.errandY - py;
+      const dz = this.errandZ - pz;
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const ahead = dx * noseX + dy * noseY + dz * noseZ;
+      if (distance < tune.relayMinTurnM && ahead < Math.cos(tune.relayTurnAngle) * distance) {
+        // Too close to turn onto it: straight on and level, round again from further out.
+        this.wantYaw = self.yaw;
+        this.wantPitch = 0;
+      } else {
+        this.goX = dx;
+        this.goY = dy;
+        this.goZ = dz;
+        this.headTo();
+      }
+      wantBoost = distance > tune.relayMinTurnM;
     } else if (mode === BOT_MODE_RETREAT) {
       const ally = this.allySlot >= 0 ? dragons[this.allySlot] : undefined;
       const haven = ally !== undefined && isAlive(ally) ? ally.position : self.home;
@@ -829,6 +899,21 @@ export class BotBrain {
     let ally = -1;
     let allyDistance = Infinity;
 
+    // Ember Relay: who has this team's shard, and where a mate is carrying the enemy's.
+    const relay = state.relay;
+    const ownShard = relay.active ? relay.shards[self.team] : undefined;
+    const theirShard = relay.active
+      ? relay.shards[self.team === TEAM_EMBER ? TEAM_FROST : TEAM_EMBER]
+      : undefined;
+    const thiefId =
+      ownShard !== undefined && ownShard.status === SHARD_CARRIED ? ownShard.carrierId : NO_PLAYER;
+    const escorted =
+      theirShard !== undefined &&
+      theirShard.status === SHARD_CARRIED &&
+      theirShard.carrierId !== self.id
+        ? theirShard.position
+        : undefined;
+
     for (let i = 0; i < dragons.length; i++) {
       const other = dragons[i];
       if (other === undefined || other === self || !isAlive(other)) continue;
@@ -875,6 +960,15 @@ export class BotBrain {
       if (!los) score *= tune.targetHiddenPenalty;
       if (i === this.targetSlot) score *= tune.targetStickiness;
       if (other.spawnProtectTicks > 0) score *= tune.targetProtectedPenalty;
+      if (other.id === thiefId) score *= tune.relayCarrierBias;
+      else if (escorted !== undefined) {
+        const ex = op.x - escorted.x;
+        const ey = op.y - escorted.y;
+        const ez = op.z - escorted.z;
+        if (ex * ex + ey * ey + ez * ez < tune.relayEscortRange * tune.relayEscortRange) {
+          score *= tune.relayEscortBias;
+        }
+      }
       if (score < bestScore) {
         bestScore = score;
         best = i;
@@ -915,8 +1009,111 @@ export class BotBrain {
       }
     }
 
+    // Ember Relay: an errand overrules the fight, except for a bot that is breaking off or
+    // flying out of a turning fight. The carrier never waits: it flies home whatever it was doing.
+    this.relayRevision = relay.revision;
+    const errand = relay.active ? this.pickErrand(state, self, tune) : BOT_ERRAND_NONE;
+    this.relayErrand = errand;
+    if (
+      errand === BOT_ERRAND_CARRY ||
+      (errand !== BOT_ERRAND_NONE &&
+        this.botMode !== BOT_MODE_RETREAT &&
+        this.botMode !== BOT_MODE_EXTEND)
+    ) {
+      this.botMode = BOT_MODE_OBJECTIVE;
+    }
+
     this.errYawGoal = (this.random() * 2 - 1) * level.aimError;
     this.errPitchGoal = (this.random() * 2 - 1) * level.aimError;
+  }
+
+  /**
+   * What this bot should do about the shards, if anything, and where that leads (`errandX/Y/Z`).
+   * In order: carry the enemy's shard home; fetch its own team's dropped shard (the nearest mate
+   * does, and anyone close to it); go for the enemy's shard while it can be taken (the nearest
+   * `relayRunnerShare` of the living team).
+   */
+  private pickErrand(
+    state: Readonly<SimState>,
+    self: Readonly<DragonState>,
+    tune: BotTuning,
+  ): BotErrand {
+    const relay = state.relay;
+    const team = self.team;
+    const own = relay.shards[team];
+    const theirs = relay.shards[team === TEAM_EMBER ? TEAM_FROST : TEAM_EMBER];
+    if (own === undefined || theirs === undefined) return BOT_ERRAND_NONE;
+
+    if (theirs.status === SHARD_CARRIED && theirs.carrierId === self.id) {
+      const brazier = relay.braziers[team];
+      if (brazier === undefined) return BOT_ERRAND_NONE;
+      this.errandX = brazier.x;
+      this.errandY = brazier.y;
+      this.errandZ = brazier.z;
+      return BOT_ERRAND_CARRY;
+    }
+
+    if (own.status === SHARD_DROPPED) {
+      const at = own.position;
+      this.queryX = at.x;
+      this.queryY = at.y;
+      this.queryZ = at.z;
+      const dx = at.x - this.px;
+      const dy = at.y - this.py;
+      const dz = at.z - this.pz;
+      const near = dx * dx + dy * dy + dz * dz < tune.relayReturnRange * tune.relayReturnRange;
+      if (near || this.matesNearer(state, self) === 0) {
+        this.errandX = at.x;
+        this.errandY = at.y;
+        this.errandZ = at.z;
+        return BOT_ERRAND_RETURN;
+      }
+    }
+
+    if (theirs.status !== SHARD_CARRIED) {
+      const at = theirs.position;
+      this.queryX = at.x;
+      this.queryY = at.y;
+      this.queryZ = at.z;
+      const nearer = this.matesNearer(state, self);
+      const runners = Math.round(this.matesAlive * tune.relayRunnerShare);
+      if (nearer < (runners > 1 ? runners : 1)) {
+        this.errandX = at.x;
+        this.errandY = at.y;
+        this.errandZ = at.z;
+        return BOT_ERRAND_TAKE;
+      }
+    }
+    return BOT_ERRAND_NONE;
+  }
+
+  /**
+   * How many living mates are nearer to the point in `queryX/Y/Z` than this bot is. Also counts
+   * the living team, this bot included, into `matesAlive`.
+   */
+  private matesNearer(state: Readonly<SimState>, self: Readonly<DragonState>): number {
+    const dragons = state.dragons;
+    const x = this.queryX;
+    const y = this.queryY;
+    const z = this.queryZ;
+    const mx = x - this.px;
+    const my = y - this.py;
+    const mz = z - this.pz;
+    const mine = mx * mx + my * my + mz * mz;
+    let nearer = 0;
+    let alive = 1;
+    for (let i = 0; i < dragons.length; i++) {
+      const other = dragons[i];
+      if (other === undefined || other === self || !isAlive(other)) continue;
+      if (other.team !== self.team) continue;
+      alive++;
+      const dx = x - other.position.x;
+      const dy = y - other.position.y;
+      const dz = z - other.position.z;
+      if (dx * dx + dy * dy + dz * dz < mine) nearer++;
+    }
+    this.matesAlive = alive;
+    return nearer;
   }
 
   // --- Steering helpers ---------------------------------------------------------------------------------
@@ -1363,6 +1560,8 @@ export class BotBrain {
     this.pressTicks = 0;
     this.dodgeTicks = -1;
     this.lastButtons = 0;
+    this.relayErrand = BOT_ERRAND_NONE;
+    this.relayRevision = -1;
     this.feel.fill(Infinity);
   }
 

@@ -17,6 +17,7 @@ describe('parseQueryFlags', () => {
       autopilot: false,
       skipSeconds: 0,
       quality: null,
+      autoQuality: false,
       netsim: null,
       bots: 0,
       lan: false,
@@ -25,6 +26,7 @@ describe('parseQueryFlags', () => {
       noWorker: false,
       autopilotBot: false,
       mode: null,
+      map: null,
       scoreLimit: 0,
       timeLimitS: -1,
       teamSize: 0,
@@ -33,6 +35,7 @@ describe('parseQueryFlags', () => {
       lagCompensation: true,
       joinCode: '',
       noCinematics: false,
+      record: false,
       viewer: '',
     };
     expect(parseQueryFlags('')).toEqual(off);
@@ -77,6 +80,16 @@ describe('parseQueryFlags', () => {
     expect(parseQueryFlags('?skip=soon').skipSeconds).toBe(0);
     expect(parseQueryFlags('?skip=Infinity').skipSeconds).toBe(MAX_SKIP_SECONDS);
     expect(parseQueryFlags('?skip=99999').skipSeconds).toBe(MAX_SKIP_SECONDS);
+  });
+
+  it('reads ?autoquality as a switch of its own, apart from ?quality=', () => {
+    expect(parseQueryFlags('?autoquality').autoQuality).toBe(true);
+    expect(parseQueryFlags('?autoquality=0').autoQuality).toBe(false);
+    expect(parseQueryFlags('?quality=low').autoQuality).toBe(false);
+    expect(parseQueryFlags('?autoquality&quality=low')).toMatchObject({
+      autoQuality: true,
+      quality: 'low',
+    });
   });
 
   it('accepts only known quality presets', () => {
@@ -159,6 +172,26 @@ describe('match set-up flags', () => {
     });
   });
 
+  it('reads ?map as a map id, in any letter case, next to the other set-up flags', () => {
+    expect(parseQueryFlags('?map=emberfall-caldera').map).toBe('emberfall-caldera');
+    expect(parseQueryFlags('?map=Emberfall-Caldera%20').map).toBe('emberfall-caldera');
+    expect(parseQueryFlags('?map=shattered-spires').map).toBe('shattered-spires');
+    expect(parseQueryFlags('?solo&map=emberfall-caldera&autopilot')).toMatchObject({
+      solo: true,
+      map: 'emberfall-caldera',
+      autopilot: true,
+    });
+    expect(parseQueryFlags('?bench=20&map=emberfall-caldera')).toMatchObject({
+      bench: true,
+      map: 'emberfall-caldera',
+    });
+    // Junk, an empty value and a bare flag pick no map.
+    expect(parseQueryFlags('?map=greybox').map).toBeNull();
+    expect(parseQueryFlags('?map=').map).toBeNull();
+    expect(parseQueryFlags('?map').map).toBeNull();
+    expect(parseQueryFlags('?map=toString').map).toBeNull();
+  });
+
   it('reads ?autopilot=bot, ?lagcomp=0 and ?join', () => {
     expect(parseQueryFlags('?autopilot=bot')).toMatchObject({
       autopilot: true,
@@ -168,6 +201,12 @@ describe('match set-up flags', () => {
     expect(parseQueryFlags('?lagcomp=0').lagCompensation).toBe(false);
     expect(parseQueryFlags('?lagcomp').lagCompensation).toBe(true);
     expect(parseQueryFlags('?join=abcde').joinCode).toBe('ABCDE');
+  });
+
+  it('reads ?record, with or without a frame rate', () => {
+    expect(parseQueryFlags('?record').record).toBe(true);
+    expect(parseQueryFlags('?record=30').record).toBe(true);
+    expect(parseQueryFlags('?record=0').record).toBe(false);
   });
 });
 
@@ -181,6 +220,7 @@ describe('getQueryFlags', () => {
       autopilot: false,
       skipSeconds: 0,
       quality: null,
+      autoQuality: false,
       netsim: null,
       bots: 0,
       lan: false,
@@ -189,6 +229,7 @@ describe('getQueryFlags', () => {
       noWorker: false,
       autopilotBot: false,
       mode: null,
+      map: null,
       scoreLimit: 0,
       timeLimitS: -1,
       teamSize: 0,
@@ -197,6 +238,7 @@ describe('getQueryFlags', () => {
       lagCompensation: true,
       joinCode: '',
       noCinematics: false,
+      record: false,
       viewer: '',
     });
   });

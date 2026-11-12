@@ -4,6 +4,8 @@
  *
  *   integrateDragon -> SimCollisionWorld.resolveDragon -> finalizeDragon
  *
+ * (`applyHeatVents` is part of the middle step on a map that has vents.)
+ *
  * THE MODEL
  * - Heading is three plain angles (yaw, pitch, bank), not an integrated quaternion. Pitch is
  *   limited to `maxClimbPitch`/`maxDivePitch`, both below a quarter turn. DECISION: no loops.
@@ -63,6 +65,7 @@ import {
   DRAGON_FLAG_STALLED,
   DRAGON_FLAG_VEILED,
   TICK_DT_S,
+  heatVentStrength,
 } from '../shared';
 import type {
   ClassAbilities,
@@ -70,10 +73,12 @@ import type {
   DragonClassId,
   FlightTuning,
   InputFrame,
+  MapVent,
   MatchTuning,
   PlayerId,
   TeamId,
   Vec3,
+  VentTuning,
 } from '../shared';
 import { cancelAbilities, moveScaleOf, stepAbilities } from './abilities';
 import { resetDragonState } from './dragon-state';
@@ -442,6 +447,42 @@ function integrateDeathFall(dragon: DragonState, flight: FlightTuning): void {
   dragon.position.x += (Math.sin(dragon.yaw) * forwardH + dragon.burst.x) * dt;
   dragon.position.y += (Math.sin(dragon.pitch) * dragon.speed + dragon.burst.y) * dt;
   dragon.position.z += (Math.cos(dragon.yaw) * forwardH + dragon.burst.z) * dt;
+}
+
+/**
+ * Heat vents (docs/GAME_DESIGN.md, Emberfall Caldera): a living dragon inside a vent's column is
+ * pushed up, gains speed along its nose and gets stamina back, each in proportion to how deep
+ * in the column it is (`heatVentStrength`: 1 on the axis near the mouth, 0 at the edge and at
+ * the top).
+ *
+ * - Lift goes into `burst.y` (m/s, fades by itself like a flap's kick), so the terrain sweep
+ *   and the burst cap apply to it like to any other push.
+ * - Boost is added to `speed`; `finalizeDragon` holds it under the class's speed cap. It also
+ *   lifts a stalled dragon back over its stall speed.
+ * - Stamina comes back without the usual delay; `finalizeDragon` caps it at 1.
+ *
+ * A step of the per-dragon tick, between `integrateDragon` and `finalizeDragon`: the map's
+ * collision world calls it from `resolveDragon`, which the host's sim and a client's predictor
+ * both run, so the two agree tick for tick. A pure function of the dragon's primary fields
+ * (all of them in the owner snapshot) and the map's vents. Dead dragons fall through.
+ */
+export function applyHeatVents(
+  dragon: DragonState,
+  vents: readonly MapVent[],
+  tuning: Readonly<VentTuning>,
+): void {
+  if ((dragon.flags & DRAGON_FLAG_ALIVE) === 0) return;
+  const dt = TICK_DT_S;
+  for (let i = 0; i < vents.length; i++) {
+    const vent = vents[i];
+    if (vent === undefined) continue;
+    const strength = heatVentStrength(vent, dragon.position, tuning);
+    if (!(strength > 0)) continue;
+    const push = strength * dt;
+    dragon.burst.y += vent.lift * tuning.liftScale * push;
+    dragon.speed += vent.boost * tuning.boostScale * push;
+    dragon.stamina += tuning.staminaPerS * push;
+  }
 }
 
 /**

@@ -44,10 +44,13 @@ import { createVfx } from '../vfx';
 import type { Vfx, VfxStats } from '../vfx';
 import { cloudFieldFromMap, createCloudBillboards, createCloudSea } from '../world/clouds';
 import { createMapView, preloadMapAssets } from '../world/map';
+import { createMapLook } from '../world/map-look';
 import { loadMapAssets } from '../world/props';
 import type { MapLoadState, MapView } from '../world/map';
 import { createWorldLighting } from '../world/light';
 import { applySkyFog, createSkyDome, createSkyLights } from '../world/sky';
+import { createEmberRelayView } from '../world/relay';
+import type { EmberRelayView } from '../world/relay';
 import { createStormWallView } from '../world/storm';
 import type { StormWallView } from '../world/storm';
 import type { MatchAssets } from './match-assets';
@@ -172,11 +175,16 @@ export interface Stage {
 
 interface MatchViews {
   readonly seed: number;
+  readonly mapId: ArenaMap['id'];
+  /** The match map's own sea level (the camera stays above it). */
+  readonly seaY: number;
   readonly mapView: MapView;
   readonly dragons: Dragons;
   readonly rig: CameraRig;
   readonly vfx: Vfx;
   readonly storm: StormWallView;
+  /** Ember Relay's shards, braziers and beacons; draws nothing in other modes. */
+  readonly relay: EmberRelayView;
   readonly unsubscribe: Unsubscribe | null;
 }
 
@@ -208,6 +216,9 @@ export function createStage(options: StageOptions): Stage {
   });
   scene.add(sky.object, lights.sun, lights.hemisphere, sea.object, lighting.object);
   for (const layer of clouds.objects) scene.add(layer);
+  // A match on another map repaints these views for its own sky (dusk over the caldera) while
+  // it is loaded; the title and the lobby always show `map`'s.
+  const look = createMapLook({ scene, sky, sea, clouds, lighting }, map);
 
   const backdropCamera = new PerspectiveCamera(BACKDROP_FOV, 1, 0.5, 6000);
   // The camera a CameraDirector places. Its own object, so the chase rig's smoothing state and
@@ -221,7 +232,7 @@ export function createStage(options: StageOptions): Stage {
   function runDirector(view: WorldView | null, dtS: number): boolean {
     if (director === null || !director.direct(directedCamera, view, dtS)) return false;
     // Above the cloud sea whatever the path says: under it the screen is one flat colour.
-    const minY = cloudSeaY + CAMERA_SEA_CLEARANCE;
+    const minY = (match !== null ? match.seaY : cloudSeaY) + CAMERA_SEA_CLEARANCE;
     if (directedCamera.position.y < minY) directedCamera.position.y = minY;
     if (directedCamera.fov !== directedFov) {
       directedFov = directedCamera.fov;
@@ -327,6 +338,7 @@ export function createStage(options: StageOptions): Stage {
     match?.dragons.setQuality(preset);
     match?.vfx.setQuality(preset);
     match?.storm.setQuality(preset);
+    match?.relay.setQuality(preset);
   }
 
   function applyCameraSettings(rig: CameraRig): void {
@@ -401,14 +413,17 @@ export function createStage(options: StageOptions): Stage {
 
   function unloadMatch(): void {
     if (match === null) return;
-    scene.remove(match.mapView.object, match.dragons.object, match.storm.object);
+    scene.remove(match.mapView.object, match.dragons.object, match.storm.object, match.relay.object);
     match.unsubscribe?.();
     match.vfx.dispose();
     match.storm.dispose();
+    match.relay.dispose();
     match.mapView.dispose();
     match.dragons.dispose();
     match.rig.dispose();
     match = null;
+    // Back to the sky of the title and the lobby.
+    look.use(map);
     chasing = false;
     watchedId = NO_PLAYER;
     lastSubjectId = NO_PLAYER;
@@ -454,9 +469,12 @@ export function createStage(options: StageOptions): Stage {
     loadMatch(assets: MatchAssets, riders?: readonly DragonClassId[]): void {
       if (disposed) return;
       if (match !== null) {
-        if (match.seed === assets.seed) return;
+        if (match.seed === assets.seed && match.mapId === assets.map.id) return;
         unloadMatch();
       }
+      // The match is flown under its own map's sky, fog and light.
+      look.use(assets.map);
+      const seaY = assets.map.colliders.cloudSeaY ?? assets.map.colliders.floorY;
       const mapView = createMapView(assets.map, preset, {
         chunkSize: STAGE_MAP_CHUNK_SIZE,
         renderer: webgl,
@@ -467,16 +485,17 @@ export function createStage(options: StageOptions): Stage {
       if (riders !== undefined && riders.length > 0) dragons.prewarm(riders);
       const rig = createCameraRig({
         terrain: assets.collision,
-        minY: cloudSeaY + CAMERA_SEA_CLEARANCE,
+        minY: seaY + CAMERA_SEA_CLEARANCE,
       });
       rig.setAspect(aspect);
       rig.snap();
       applyCameraSettings(rig);
       const storm = createStormWallView(preset, {
-        floorY: cloudSeaY,
+        floorY: seaY,
         ceilingY: assets.map.colliders.ceilingY,
       });
-      scene.add(mapView.object, dragons.object, storm.object);
+      const relay = createEmberRelayView(preset);
+      scene.add(mapView.object, dragons.object, storm.object, relay.object);
       // The effects add their own objects to the scene (and take them out again on dispose).
       const vfx = createVfx({
         scene,
@@ -485,7 +504,7 @@ export function createStage(options: StageOptions): Stage {
         seed: assets.seed,
       });
       const unsubscribe = events !== null ? vfx.connect(events) : null;
-      match = { seed: assets.seed, mapView, dragons, rig, vfx, storm, unsubscribe };
+      match = { seed: assets.seed, mapId: assets.map.id, seaY, mapView, dragons, rig, vfx, storm, relay, unsubscribe };
       showLobby(false);
       void warmUp();
       watchedId = NO_PLAYER;
@@ -612,6 +631,7 @@ export function createStage(options: StageOptions): Stage {
       views.dragons.update(view, dtS, camera);
       lighting.setBlobCasters(view.dragons, view.dragonCount, camera.position);
       views.storm.update(view, camera.position, timeS);
+      views.relay.update(view, timeS);
       // Last: the effects read the placed camera (billboards, near fade).
       camera.updateMatrixWorld();
       views.vfx.update(view, timeS, dtS, camera);
