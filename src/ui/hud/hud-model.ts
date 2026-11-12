@@ -494,6 +494,26 @@ export const BANNER_TITLES: readonly string[] = [
   'Frost Order',
 ];
 
+// --- Cinematic phases (T-5.4, T-5.5) ------------------------------------------------------------------
+
+/**
+ * False while a cinematic owns the screen: the intro flyby and the results podium. The combat
+ * HUD (vitals, abilities, reticle, score, compass, killfeed) is hidden then; the title card,
+ * the countdown and the hold-to-show scoreboard are not part of it.
+ */
+export function combatHudVisible(phase: MatchPhase): boolean {
+  return phase !== 'intro' && phase !== 'results';
+}
+
+/**
+ * 0..UNIT_STEPS for the intro title card's opacity; 0 = do not draw. The cinematic fades the
+ * card through the state, so the step is fine (0.5 %) and nothing in CSS eases it.
+ */
+export function introCardStep(opacity: number | undefined): number {
+  if (opacity === undefined) return 0;
+  return quantizeVisible(opacity, UNIT_STEPS);
+}
+
 export function teamKey(team: TeamId | null): 'ember' | 'frost' | 'none' {
   return team === TEAM_EMBER ? 'ember' : team === TEAM_FROST ? 'frost' : 'none';
 }

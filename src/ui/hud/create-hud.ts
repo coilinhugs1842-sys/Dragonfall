@@ -66,6 +66,7 @@ import {
   clockMinutesString,
   clockSecondsString,
   clockTotalSeconds,
+  combatHudVisible,
   compassPinned,
   compassStep,
   cooldownSecondsShown,
@@ -92,6 +93,7 @@ import {
   ultimatePercent,
 } from './hud-model';
 import type { BannerId } from './hud-model';
+import { createIntroCard } from './intro-card';
 
 export interface HudOptions {
   /**
@@ -363,6 +365,9 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
   const rootShown = new Visibility(el);
   const rootTeam = new DataAttr(el, 'team');
   const rootDown = new DataAttr(el, 'down');
+  // 'cine' while the intro flyby or the results podium owns the screen: CSS hides the combat
+  // HUD, and `update` stops feeding it.
+  const rootChrome = new DataAttr(el, 'chrome');
 
   // --- Full-screen veils (each a single static gradient; only opacity changes) -------------------
   const lowHealth = div('dfh-lowhp');
@@ -723,6 +728,9 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
   board.append(boardHead, boardTeams, watchersNode);
   el.appendChild(board);
 
+  // --- Match intro: title card and skip hint ------------------------------------------------------
+  const intro = createIntroCard(el);
+
   root.appendChild(el);
 
   // --- State kept between frames ------------------------------------------------------------------
@@ -749,6 +757,7 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
   let shownBoardLimit = -1;
   let shownClockTotal = -2;
   let tabHeld = false;
+  let combatShown = true;
 
   const reticleX = new StepStyle(aim, '--dfh-rx', px);
   const reticleY = new StepStyle(aim, '--dfh-ry', px);
@@ -1158,10 +1167,19 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       if (rootShown.visible) {
         rootShown.set(false);
         boardShown.set(false);
+        intro.hide();
         tabHeld = false;
         fresh = true;
       }
       return;
+    }
+    const combat = combatHudVisible(hud.phase);
+    if (combat !== combatShown) {
+      combatShown = combat;
+      rootChrome.set(combat ? 'full' : 'cine');
+      // The gauges were not fed while hidden: redraw them all, and do not replay a hit marker
+      // for something that happened during the cinematic.
+      if (combat) fresh = true;
     }
     const text = fresh || nowMs - lastTextMs >= TEXT_INTERVAL_MS || nowMs < lastTextMs;
     if (text) lastTextMs = nowMs;
@@ -1180,24 +1198,29 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
     }
     rootDown.set(local !== null && !local.alive ? '1' : '0');
 
-    updateVeils(local);
-    updateCentre(hud, local);
-    updateHeader(hud, text);
-    updateCompass(hud, text);
-    updateFeed(hud);
-    vitalsShown.set(local !== null);
-    abilitiesShown.set(local !== null);
-    if (local !== null) {
-      updateVitals(local, text);
-      updateSlots(hud, local, text);
+    if (combat) {
+      updateVeils(local);
+      updateCentre(hud, local);
+      updateHeader(hud, text);
+      updateCompass(hud, text);
+      updateFeed(hud);
+      vitalsShown.set(local !== null);
+      abilitiesShown.set(local !== null);
+      if (local !== null) {
+        updateVitals(local, text);
+        updateSlots(hud, local, text);
+      } else {
+        lastButtons = 0;
+      }
+      updateRespawn(hud, local);
+      spectateShown.set(local === null);
+      if (local === null && text) spectateName.set(hud.spectatingName ?? '');
     } else {
       lastButtons = 0;
     }
-    updateRespawn(hud, local);
-    spectateShown.set(local === null);
-    if (local === null && text) spectateName.set(hud.spectatingName ?? '');
     updateBanner(hud);
     updateBoard(hud, nowMs);
+    intro.update(hud);
 
     rootShown.set(true);
     fresh = false;

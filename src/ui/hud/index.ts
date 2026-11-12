@@ -21,6 +21,7 @@ export type {
   MutableHudLocalState,
   MutableHudReticleState,
   MutableHudState,
+  MutableIntroCardState,
   MutableKillfeedEntry,
   MutableScoreboardRow,
 } from './hud-state';

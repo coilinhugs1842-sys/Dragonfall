@@ -1173,11 +1173,70 @@
   font-size: 0.86em;
 }
 
-.dfu-allow {
+.dfu-allow,
+.dfu-picks {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.3em;
+}
+
+/*
+ * A mode or a map, as one of a row of radio buttons. The chosen one is filled and framed; one
+ * that is not built yet is dashed and says "Soon" (words and a border style, not a colour).
+ */
+.dfu-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  min-height: 2.1em;
+  padding: 0 0.75em;
+  border: 1px solid var(--dfu-line-strong);
+  border-radius: 0.25em;
+  background: transparent;
+  color: var(--dfu-muted);
+  font-size: 0.8em;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.dfu-pick:hover:not(:disabled) {
+  border-color: var(--dfu-text);
+  color: var(--dfu-text);
+  background: var(--dfu-wash);
+}
+
+.dfu-pick[aria-checked='true'] {
+  border-color: var(--dfu-text);
+  background: var(--dfu-text);
+  color: var(--dfu-ink);
+  font-weight: 600;
+}
+
+.dfu-pick:disabled:not([aria-checked='true']) {
+  opacity: 0.6;
+}
+
+.dfu-pick[data-soon='1'] {
+  border-style: dashed;
+  border-color: var(--dfu-line-strong);
+  color: var(--dfu-muted);
+  opacity: 1;
+}
+
+.dfu-pick-soon {
+  padding: 0.05em 0.4em;
+  border: 1px solid var(--dfu-line);
+  border-radius: 0.2em;
+  color: var(--dfu-edge);
+  font-size: 0.78em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Only the aerie layout has rows that act as "look at this rider" buttons (aerie.css). */
+.dfu-slot-focus {
+  display: none;
 }
 
 .dfu-start {
@@ -1241,38 +1300,73 @@
   background: var(--dfu-text);
 }
 
+/* --- Scene cuts: fade and loading (T-5.6) ------------------------------------------------------ */
+
+/*
+ * The fade between scenes is the cream of the sky (docs/ART_DIRECTION.md: `#F4E6CC`), not black:
+ * the aerie and the maps are bright, so a cut through the sky's own light is the gentler one.
+ * Opacity is written from `UiState.fade` each frame: no transition here, it would lag the cut.
+ */
+.dfu-fade {
+  position: absolute;
+  inset: 0;
+  background: #f4e6cc;
+  pointer-events: none;
+}
+
+/*
+ * Loading is ink on that same cream: it takes over from a full fade and hands back to one
+ * without the screen changing colour. Its opacity is written by the UI too (it appears at once
+ * and fades out), so no transition either.
+ */
 .dfu-loading {
   display: grid;
   place-items: center;
-  background: linear-gradient(180deg, #17172e 0%, #2c2850 60%, #3d335f 100%);
+  background: linear-gradient(180deg, #f4e6cc 0%, #f4e6cc 46%, #f3d6ae 100%);
+  color: var(--dfu-ink);
 }
 
 .dfu-loading-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.9em;
-  width: min(26em, 80%);
+  gap: 0.8em;
+  width: min(27em, 80%);
   text-align: center;
 }
 
-.dfu-loading-label {
+.dfu-loading-name {
+  /* Letter-spacing trails the last glyph: pull the box back so the word sits centred. */
+  margin: 0 -0.22em 0.1em 0;
   font-family: var(--dfu-serif);
-  font-size: 1.4em;
-  letter-spacing: 0.06em;
+  font-size: 3.3em;
+  letter-spacing: 0.22em;
+  line-height: 1.1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dfu-loading-label {
+  min-height: 1.4em;
+  color: rgb(20 24 36 / 74%);
+  font-family: var(--dfu-serif);
+  font-size: 1.15em;
+  font-style: italic;
+  letter-spacing: 0.04em;
 }
 
 .dfu-progress {
   width: 100%;
   height: 3px;
+  margin-top: 0.4em;
   overflow: hidden;
-  background: var(--dfu-line);
+  background: rgb(20 24 36 / 16%);
 }
 
 .dfu-progress-fill {
   width: 100%;
   height: 100%;
-  background: var(--dfu-text);
+  background: var(--dfu-ink);
   transform: scaleX(0);
   transform-origin: left center;
 }
@@ -1408,112 +1502,19 @@
   flex-wrap: wrap;
 }
 
-/* --- Match result (T-3.4) ------------------------------------------------------------------------- */
+/*
+ * --- Reduced motion from the game's own setting --------------------------------------------------
+ *
+ * The rules above follow the system preference. The in-game "Reduce motion" setting must do the
+ * same on a machine whose system says nothing, so src/game marks <html> and everything that
+ * slides, scales or spins stops here. Plain opacity changes written from state are kept.
+ */
 
-.dfu-results {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 1.5em;
-  background: rgb(9 11 20 / 46%);
-  pointer-events: none;
+[data-df-motion='reduced'] .dfu-root *,
+[data-df-motion='reduced'] .dfu-root *::before,
+[data-df-motion='reduced'] .dfu-root *::after {
+  animation: none !important;
+  transition: none !important;
 }
 
-.dfu-results-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.7em;
-  width: min(46em, 100%);
-  max-height: 100%;
-  overflow: hidden;
-  padding: 1.6em 2em 1.4em;
-  background: var(--dfu-panel-solid);
-  text-align: center;
-}
-
-.dfu-results-title {
-  font-size: 2.2em;
-}
-
-.dfu-results[data-winner='ember'] .dfu-results-title {
-  border-bottom: 2px solid var(--dfu-ember);
-}
-
-.dfu-results[data-winner='frost'] .dfu-results-title {
-  border-bottom: 2px solid var(--dfu-frost);
-}
-
-.dfu-results-score {
-  color: var(--dfu-muted);
-  font-size: 1.15em;
-  letter-spacing: 0.04em;
-}
-
-.dfu-results-tables {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(18em, 1fr));
-  gap: 1em 1.6em;
-  text-align: left;
-}
-
-.dfu-results-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.86em;
-}
-
-.dfu-results-table th {
-  padding: 0.3em 0.4em;
-  color: var(--dfu-muted);
-  font-size: 0.82em;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-align: right;
-  text-transform: uppercase;
-}
-
-.dfu-results-table th.dfu-results-team {
-  text-align: left;
-}
-
-.dfu-results-table[data-team='ember'] th.dfu-results-team {
-  color: var(--dfu-ember);
-}
-
-.dfu-results-table[data-team='frost'] th.dfu-results-team {
-  color: var(--dfu-frost);
-}
-
-.dfu-results-table td {
-  padding: 0.32em 0.4em;
-  border-top: 1px solid var(--dfu-line);
-  text-align: right;
-}
-
-.dfu-results-table td:first-child {
-  text-align: left;
-}
-
-.dfu-results-name {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 0.6em;
-  align-items: baseline;
-}
-
-.dfu-results-class {
-  color: var(--dfu-faint);
-  font-size: 0.85em;
-}
-
-.dfu-results-award {
-  color: var(--dfu-edge);
-  font-size: 0.8em;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.dfu-results-me td {
-  background: var(--dfu-wash);
-}
+/* The match result (T-5.5) is in results.css; the aerie lobby (T-5.3) in aerie.css. */

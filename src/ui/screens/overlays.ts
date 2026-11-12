@@ -1,7 +1,8 @@
 /**
  * Small layers that sit over the lobby or the match (T-2.9): the connection chip, the "trying to
- * rejoin" strip, the escape menu, the session-ended notice and the loading card. Each keeps the
- * values it last wrote and touches the DOM only when one changes.
+ * rejoin" strip, the escape menu and the session-ended notice. Each keeps the values it last
+ * wrote and touches the DOM only when one changes. (The loading presentation and the scene-cut
+ * fade are in `transitions.ts`.)
  */
 
 import type { SignalingMode, UiError, UiIntentHandler, UiState } from '../../shared/ui';
@@ -199,45 +200,4 @@ export class SessionNotice {
   private readonly onBack = (): void => {
     this.onIntent({ type: 'title.dismissError' });
   };
-}
-
-/** Loading card between the lobby and the match: a label and a bar. */
-export class LoadingCard {
-  readonly root: HTMLElement;
-  private readonly label: HTMLElement;
-  private readonly fill: HTMLElement;
-  private readonly bar: HTMLElement;
-  private shownLabel = '';
-  private shownPercent = -1;
-
-  constructor() {
-    this.root = el('div', 'dfu-screen dfu-loading df-interactive');
-    const card = el('div', 'dfu-loading-card');
-    this.label = el('p', 'dfu-loading-label', 'Preparing the sky…');
-    this.bar = el('div', 'dfu-progress');
-    this.bar.setAttribute('role', 'progressbar');
-    this.bar.setAttribute('aria-valuemin', '0');
-    this.bar.setAttribute('aria-valuemax', '100');
-    this.fill = el('div', 'dfu-progress-fill');
-    this.bar.appendChild(this.fill);
-    append(card, el('p', 'dfu-overline', 'Dragonfall'), this.label, this.bar);
-    this.root.appendChild(card);
-  }
-
-  update(state: UiState): void {
-    const loading = state.loading;
-    const label = loading === null || loading.label === '' ? 'Preparing the sky…' : loading.label;
-    if (label !== this.shownLabel) {
-      this.shownLabel = label;
-      this.label.textContent = label;
-    }
-    const progress = loading === null ? 0 : loading.progress;
-    const percent = progress >= 0 ? Math.min(100, Math.round(progress * 100)) : 0;
-    if (percent !== this.shownPercent) {
-      this.shownPercent = percent;
-      // Transform only: the bar never triggers layout while the match is loading.
-      this.fill.style.transform = `scaleX(${percent / 100})`;
-      this.bar.setAttribute('aria-valuenow', String(percent));
-    }
-  }
 }

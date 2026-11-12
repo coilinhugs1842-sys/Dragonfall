@@ -1071,6 +1071,24 @@
   transform: translateX(-50%);
 }
 
+/*
+ * The same soft ink cloud as behind the intro's title card: the 3-2-1 comes straight after the
+ * flyby, usually over the brightest part of the sky, and thin serif digits vanish there.
+ */
+.dfh-banner::before {
+  content: '';
+  position: absolute;
+  inset: -1.4em -10em -1.6em;
+  z-index: -1;
+  /* Wide and faint on purpose: a tight dark oval reads as a smudge on the sky, not as shade. */
+  background: radial-gradient(
+    ellipse closest-side,
+    rgb(14 16 28 / 40%) 0%,
+    rgb(14 16 28 / 22%) 50%,
+    rgb(14 16 28 / 0%) 100%
+  );
+}
+
 .dfh-banner > .dfh-overline {
   color: var(--dfh-text);
   font-size: 0.82em;
@@ -1275,6 +1293,117 @@
   }
 }
 
+/* --- Cinematic phases: intro flyby and results podium (T-5.4, T-5.5) ---------------------------- */
+
+/* The combat HUD steps aside; the countdown banner, the scoreboard and the title card stay. */
+.dfh-root[data-chrome='cine'] > :not(.dfh-banner, .dfh-board, .dfh-intro, .dfh-skip) {
+  display: none;
+}
+
+/*
+ * Back from a cinematic: the gauges fade in with the 3-2-1 instead of popping (opacity only, so
+ * it is fine with reduced motion). Only the always-present pieces: the veils and the respawn
+ * panel keep appearing at once, as they do in play.
+ */
+.dfh-root[data-chrome='full'] > .dfh-top,
+.dfh-root[data-chrome='full'] > .dfh-centre,
+.dfh-root[data-chrome='full'] > .dfh-feed,
+.dfh-root[data-chrome='full'] > .dfh-vitals,
+.dfh-root[data-chrome='full'] > .dfh-abilities {
+  animation: dfh-chrome-in 0.45s ease-out;
+}
+
+@keyframes dfh-chrome-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/*
+ * Title card: lower left third, where a film puts a location title. The countdown that follows
+ * is in the upper third, so the two never overlap even while the card is still fading out.
+ * Opacity is written by the HUD from the state: no transition here.
+ */
+.dfh-intro {
+  position: absolute;
+  bottom: 17%;
+  left: 6%;
+  max-width: 80%;
+  /* Keeps the veil below inside this card whatever its opacity is. */
+  isolation: isolate;
+  text-shadow:
+    0 1px 3px rgb(20 24 36 / 85%),
+    0 0 1.4em rgb(20 24 36 / 55%);
+}
+
+/*
+ * Parchment letters on a cream sky need something dark behind them, and a text shadow alone is
+ * not enough at this size. A soft ink cloud (one gradient, no blur) that thins out to nothing,
+ * so the card has no visible box. It fades with the card.
+ */
+.dfh-intro::before {
+  content: '';
+  position: absolute;
+  inset: -3.2em -9em -3.4em -7em;
+  z-index: -1;
+  background: radial-gradient(
+    ellipse closest-side,
+    rgb(14 16 28 / 58%) 0%,
+    rgb(14 16 28 / 40%) 45%,
+    rgb(14 16 28 / 0%) 100%
+  );
+}
+
+.dfh-intro-map {
+  font-family: var(--dfh-serif);
+  font-size: 3.7em;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: 0.1em;
+}
+
+.dfh-intro-rule {
+  width: 9em;
+  height: 1px;
+  margin: 0.7em 0 0.6em;
+  background: var(--dfh-text);
+  box-shadow: 0 0 2px rgb(20 24 36 / 80%);
+}
+
+.dfh-intro-mode {
+  color: var(--dfh-text);
+  font-size: 1.05em;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+}
+
+/* Skip hint: small, bottom right, out of the card's way. */
+.dfh-skip {
+  position: absolute;
+  right: 1.7em;
+  bottom: 1.5em;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.35em 0.8em 0.4em 0.45em;
+  border: 1px solid var(--dfh-line);
+  border-radius: 2em;
+  background: var(--dfh-panel-soft);
+  color: var(--dfh-muted);
+  font-size: 0.78em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dfh-skip-key {
+  padding: 0.1em 0.7em 0.15em;
+  border: 1px solid var(--dfh-line-strong);
+  border-radius: 1em;
+  color: var(--dfh-text);
+  font-family: inherit;
+  font-size: 0.92em;
+}
+
 /* --- Motion (decorative only) ------------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1363,4 +1492,26 @@
 
 .df-reduce-motion .dfh-bar-ghost {
   transition: none;
+}
+
+/*
+ * What Settings actually writes: `data-df-motion="reduced"` on <html> (applyPageSettings). The
+ * countdown digit then appears without its scale beat, so the 3-2-1 after the intro is still.
+ */
+[data-df-motion='reduced'] .dfh-lowhp::before,
+[data-df-motion='reduced'] .dfh-ult[data-state='ready'] > .dfh-slot-face::after,
+[data-df-motion='reduced'] .dfh-banner-title {
+  animation: none;
+}
+
+[data-df-motion='reduced'] .dfh-bar-ghost {
+  transition: none;
+}
+
+[data-df-motion='reduced'] .dfh-hit[data-pulse='down-a'] {
+  animation-name: dfh-hit-a;
+}
+
+[data-df-motion='reduced'] .dfh-hit[data-pulse='down-b'] {
+  animation-name: dfh-hit-b;
 }

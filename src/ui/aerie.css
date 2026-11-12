@@ -1,0 +1,761 @@
+/*
+ * The lobby in the 3D aerie (T-5.2, T-5.3): `.dfu-lobby[data-layout='aerie']`. New pieces are
+ * prefixed `dfa-`; the rosters, the class picker and the rules are the flat lobby's own nodes
+ * (ui.css), restyled here to fit narrow docks.
+ *
+ * The scene is the point of this screen, so the middle of it stays empty:
+ *   top bar (room code, status, leave) | Ember dock left, Frost dock right | bottom bar.
+ * The frame itself lets the pointer through; only the panels take it.
+ *
+ * Cost rules as in ui.css: no backdrop-filter, no blur, no large shadows. Panels are a little
+ * denser than the flat lobby's because they sit on a bright sky instead of a dusk veil.
+ */
+
+.dfu-lobby[data-layout='aerie'] {
+  --dfa-dock: min(17em, 25vw);
+  --dfa-top: 4.5em;
+  --dfa-panel: rgb(20 24 36 / 86%);
+
+  display: block;
+  padding: 0;
+  background: none;
+  /* Also undoes the small-window rule of the flat layout (this frame never scrolls). */
+  overflow: hidden;
+}
+
+.dfu-lobby[data-layout='aerie'] .dfu-panel {
+  background: var(--dfa-panel);
+}
+
+/* --- Top bar: room code, status, leave ---------------------------------------------------------- */
+
+.dfa-top {
+  position: absolute;
+  top: 0.6em;
+  left: 1em;
+  display: flex;
+  align-items: center;
+  gap: 1.5em;
+  /* The top-right corner belongs to the connection chip. */
+  max-width: calc(100% - 14em);
+  min-height: 3.2em;
+  padding: 0.3em 0.6em 0.3em 0.9em;
+}
+
+.dfa-top .dfu-code-block {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+}
+
+.dfa-top .dfu-code-block > .dfu-overline {
+  /* Two short lines beside the code instead of a line above it. */
+  width: 3.6em;
+  font-size: 0.62em;
+  letter-spacing: 0.26em;
+  line-height: 1.25;
+}
+
+.dfa-top .dfu-code-line {
+  gap: 0.6em;
+}
+
+.dfa-top .dfu-code {
+  font-size: 1.7em;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+}
+
+.dfa-top .dfu-lobby-title {
+  min-width: 0;
+  padding: 0 0 0 1.4em;
+  border-left: 1px solid var(--dfu-line);
+}
+
+.dfa-top .dfu-heading {
+  font-size: 1.05em;
+  letter-spacing: 0.12em;
+}
+
+.dfa-top .dfu-lobby-status {
+  overflow: hidden;
+  font-size: 0.78em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfa-top > .dfu-btn {
+  flex: none;
+  min-height: 2.5em;
+  font-size: 0.76em;
+}
+
+/* --- Docks: one roster at each side, as the terraces stand -------------------------------------- */
+
+.dfa-dock {
+  position: absolute;
+  top: var(--dfa-top);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  width: var(--dfa-dock);
+  /* Stops above the bottom bar; a full 5-rider roster plus watchers scrolls if it must. */
+  max-height: calc(100% - var(--dfa-top) - 7em);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.dfa-dock[data-side='ember'] {
+  left: 1em;
+}
+
+.dfa-dock[data-side='frost'] {
+  right: 1em;
+}
+
+.dfa-dock .dfu-team {
+  padding: 0.5em 0.55em 0.55em;
+}
+
+.dfa-dock .dfu-team-head {
+  gap: 0.45em;
+  min-height: 2em;
+  margin-bottom: 0.3em;
+  padding: 0 0.15em;
+}
+
+.dfa-dock .dfu-team-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 1.05em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfa-dock .dfu-team-count {
+  white-space: nowrap;
+}
+
+.dfa-dock .dfu-team-head > .dfu-btn {
+  flex: none;
+  min-height: 2em;
+  padding: 0 0.7em;
+  font-size: 0.68em;
+}
+
+.dfa-dock .dfu-slots {
+  gap: 0.25em;
+}
+
+/*
+ * A perch row in a dock: name and class at the left, signal bars and ready state at the right.
+ * The whole row is the "look at this rider" button (`.dfu-slot-focus` covers it); the host's
+ * move and remove buttons appear over its right end when the row is pointed at or focused.
+ */
+.dfa-dock .dfu-slots .dfu-slot {
+  position: relative;
+  grid-template-columns: 1.1em minmax(0, 1fr) auto;
+  column-gap: 0.55em;
+  height: 2.7em;
+  padding: 0 0.5em;
+}
+
+/* Perches beyond the team size are not shown at all: the dock stays as short as the team. */
+.dfa-dock .dfu-slots .dfu-slot[data-kind='closed'] {
+  display: none;
+}
+
+.dfa-dock .dfu-slots .dfu-slot[data-kind='open'] {
+  height: 2em;
+}
+
+.dfa-dock .dfu-slots .dfu-slot-empty {
+  grid-area: 1 / 2 / 3 / 4;
+  font-size: 0.72em;
+}
+
+.dfa-dock .dfu-slots .dfu-slot-ping {
+  grid-area: 1 / 3 / 2 / 4;
+  align-self: end;
+  justify-self: end;
+  min-width: 0;
+  line-height: 1;
+}
+
+/* The bars say enough in a narrow row; the number stays in the flat layout. */
+.dfa-dock .dfu-slots .dfu-slot-ping > .dfu-num {
+  display: none;
+}
+
+.dfa-dock .dfu-slots .dfu-bars > i:nth-child(4) {
+  margin-right: 0;
+}
+
+/*
+ * The state shares the class line (it spans both columns and sits at the right end), so the
+ * narrow column at the right is only as wide as the signal bars and the name gets the rest.
+ */
+.dfa-dock .dfu-slots .dfu-slot-state {
+  grid-area: 2 / 2 / 3 / 4;
+  align-self: start;
+  justify-self: end;
+  min-width: 0;
+  font-size: 0.68em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dfa-dock .dfu-slots .dfu-slot-focus {
+  display: block;
+  position: absolute;
+  inset: -1px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  background: transparent;
+}
+
+.dfa-dock .dfu-slots .dfu-slot-focus:hover:not(:disabled) {
+  border-color: var(--dfu-line-strong);
+  background: rgb(255 246 232 / 7%);
+}
+
+.dfa-dock .dfu-slots .dfu-slot-focus:focus-visible {
+  outline-offset: -2px;
+}
+
+/* The rider in the close-up: a bright frame and a bar at the row's outer edge. */
+.dfa-dock .dfu-slots .dfu-slot[data-focus='1'] {
+  border-color: var(--dfu-text);
+  background: rgb(255 246 232 / 16%);
+  box-shadow: inset 3px 0 0 var(--dfu-text);
+}
+
+.dfa-dock[data-side='frost'] .dfu-slots .dfu-slot[data-focus='1'] {
+  box-shadow: inset -3px 0 0 var(--dfu-text);
+}
+
+.dfa-dock .dfu-slots .dfu-slot-actions {
+  position: absolute;
+  top: 50%;
+  right: 0.3em;
+  padding: 0.2em;
+  border-radius: 0.3em;
+  background: var(--dfu-panel-solid);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.dfa-dock .dfu-slots .dfu-slot:hover .dfu-slot-actions,
+.dfa-dock .dfu-slots .dfu-slot:focus-within .dfu-slot-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dfa-dock .dfu-watchers {
+  padding: 0.45em 0.6em 0.5em;
+}
+
+.dfa-dock .dfu-watcher-list {
+  min-height: 1.9em;
+}
+
+/* --- Bottom bar: your dragon, ready, side | rules, start ---------------------------------------- */
+
+.dfa-bottom {
+  position: absolute;
+  right: 1em;
+  bottom: 0.8em;
+  left: 1em;
+  display: flex;
+  align-items: center;
+  gap: 1.1em;
+  width: fit-content;
+  max-width: calc(100% - 2em);
+  margin: 0 auto;
+  padding: 0.55em 0.7em;
+}
+
+.dfa-you {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  min-width: 0;
+}
+
+.dfa-you .dfu-classes {
+  grid-template-columns: repeat(4, minmax(0, 7.4em));
+  gap: 0.35em;
+  min-width: 0;
+}
+
+.dfa-you .dfu-class {
+  min-width: 0;
+  padding: 0.4em 0.65em 0.45em;
+}
+
+.dfa-you .dfu-class-name {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 1.05em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfa-you .dfu-class-role {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 0.62em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The ability line is in the settings' controls page and on the HUD; no room for it here. */
+.dfa-you .dfu-class-detail {
+  display: none;
+}
+
+.dfa-you > .dfu-btn {
+  flex: none;
+  min-height: 3.3em;
+}
+
+.dfa-you > .dfu-ready {
+  min-width: 9em;
+}
+
+/* Floats over the bar's left end so that it does not push the controls about. */
+.dfa-you > .dfu-lock-note {
+  position: absolute;
+  bottom: calc(100% + 0.45em);
+  left: 0;
+  padding: 0.3em 0.75em;
+  border: 1px solid var(--dfu-line);
+  border-radius: 1em;
+  background: var(--dfa-panel);
+  white-space: nowrap;
+}
+
+.dfa-host {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 0.3em 0.5em;
+  padding-left: 1.1em;
+  border-left: 1px solid var(--dfu-line);
+}
+
+.dfa-host > .dfu-start-note {
+  grid-column: 1 / -1;
+  max-width: 24em;
+  min-height: 0;
+  font-size: 0.72em;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.dfa-host > .dfu-btn {
+  width: auto;
+  min-height: 2.6em;
+}
+
+.dfa-host > .dfu-btn-large {
+  min-width: 10.5em;
+}
+
+.dfa-rules-toggle[aria-expanded='true'] {
+  border-color: var(--dfu-text);
+  background: rgb(255 246 232 / 16%);
+}
+
+/* A caret that turns over when the drawer is open: the state is a shape as well as a fill. */
+.dfa-rules-toggle::after {
+  content: '';
+  width: 0.4em;
+  height: 0.4em;
+  margin: 0.25em 0 0 0.15em;
+  border-top: 1.5px solid currentcolor;
+  border-left: 1.5px solid currentcolor;
+  transform: rotate(45deg);
+}
+
+.dfa-rules-toggle[aria-expanded='true']::after {
+  margin-top: -0.2em;
+  transform: rotate(225deg);
+}
+
+/* --- Rules drawer: the host panel, opened over the bottom bar ----------------------------------- */
+
+.dfa-drawer {
+  position: absolute;
+  bottom: calc(100% + 0.6em);
+  left: 50%;
+  /* Centred on the bar, as wide as the gap between the docks at 1280×720. */
+  width: min(54em, 100vw - 2em);
+  transform: translateX(-50%);
+}
+
+/* Nearly opaque: it opens over the name cards and they must not read through it. */
+.dfu-lobby[data-layout='aerie'] .dfa-drawer > .dfu-rules {
+  max-height: calc(100vh - 13em);
+  margin: 0;
+  padding: 0.9em 1.1em 1em;
+  background: rgb(20 24 36 / 97%);
+  animation: none;
+}
+
+.dfa-roster-hint {
+  text-align: right;
+}
+
+.dfa-drawer .dfu-rules-head {
+  /* Room for the close button. */
+  padding-right: 2.6em;
+}
+
+.dfa-drawer-close {
+  position: absolute;
+  top: 0.75em;
+  right: 0.9em;
+  z-index: 1;
+}
+
+.dfa-drawer .dfu-rule-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20em, 1fr));
+  gap: 0.35em 2.2em;
+}
+
+/* Start and its note live in the bottom bar in this layout. */
+.dfa-drawer .dfu-start {
+  display: none;
+}
+
+.dfa-drawer .dfu-host-tools {
+  justify-content: flex-end;
+}
+
+.dfa-drawer .dfu-host-tools > .dfu-btn {
+  flex: 0 1 auto;
+}
+
+/* --- Close-up and take-off ---------------------------------------------------------------------- */
+
+.dfa-back {
+  position: absolute;
+  right: 0;
+  bottom: 7.4em;
+  left: 0;
+  width: fit-content;
+  margin: 0 auto;
+  border-color: var(--dfu-line-strong);
+  background: var(--dfa-panel);
+}
+
+.dfa-back::before {
+  content: '';
+  width: 0.45em;
+  height: 0.45em;
+  margin-right: 0.1em;
+  border-bottom: 1.5px solid currentcolor;
+  border-left: 1.5px solid currentcolor;
+  transform: rotate(45deg);
+}
+
+.dfa-back:hover:not(:disabled) {
+  background: var(--dfu-panel-solid);
+}
+
+.dfa-notice {
+  position: absolute;
+  right: 0;
+  bottom: 2.4em;
+  left: 0;
+  width: fit-content;
+  margin: 0 auto;
+  padding: 0.7em 2.6em 0.8em;
+  border-top: 1px solid var(--dfu-line-strong);
+  border-bottom: 1px solid var(--dfu-line-strong);
+  background: linear-gradient(
+    90deg,
+    rgb(20 24 36 / 0%) 0%,
+    rgb(20 24 36 / 84%) 18%,
+    rgb(20 24 36 / 84%) 82%,
+    rgb(20 24 36 / 0%) 100%
+  );
+  text-align: center;
+}
+
+.dfa-notice-text {
+  font-family: var(--dfu-serif);
+  font-size: 2em;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* The rosters stay up during the take-off but nothing in them can be pressed. */
+.dfu-lobby[data-layout='aerie']:not([data-phase='lobby']) .dfu-slot-actions,
+.dfu-lobby[data-layout='aerie']:not([data-phase='lobby']) .dfu-team-head .dfu-btn,
+.dfu-lobby[data-layout='aerie']:not([data-phase='lobby']) .dfa-top .dfu-btn-small {
+  display: none;
+}
+
+/* --- Name cards over the perches (T-5.2) -------------------------------------------------------- */
+
+.dfa-plates {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/*
+ * A box the size of the viewport, moved by a percentage of itself: the perch's viewport
+ * fraction goes straight into the transform and nothing is measured. It paints nothing; the
+ * card inside is its own compositor layer, so a move re-rasters nothing either.
+ */
+.dfa-plate-wrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform: translate(var(--dfa-x, 0%), var(--dfa-y, 0%));
+}
+
+.dfa-plate {
+  --dfa-team: var(--dfu-muted);
+
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.05em;
+  min-width: 6.5em;
+  /* 12em of the lobby's font size (this card's own is 0.9 of it): see PLATE_WIDTH_EM. */
+  max-width: 13.3em;
+  padding: 0.3em 0.6em 0.35em;
+  border: 1px solid var(--dfu-line);
+  border-top: 2px solid var(--dfa-team);
+  border-radius: 0.3em;
+  background: rgb(20 24 36 / 86%);
+  color: var(--dfu-text);
+  font-size: 0.9em;
+  line-height: 1.3;
+  text-align: left;
+  pointer-events: auto;
+  /* Anchor = the tip of the pointer under the card, which sits on the perch's screen point. */
+  transform: translate(-50%, calc(-100% - 0.5em)) scale(var(--dfa-s, 1));
+  transform-origin: 50% calc(100% + 0.5em);
+  will-change: transform;
+}
+
+.dfa-plate::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -0.4em;
+  border: 0.4em solid transparent;
+  border-top-color: rgb(20 24 36 / 86%);
+  border-bottom-width: 0;
+}
+
+.dfa-plate[data-team='ember'] {
+  --dfa-team: var(--dfu-ember);
+}
+
+.dfa-plate[data-team='frost'] {
+  --dfa-team: var(--dfu-frost);
+}
+
+.dfa-plate[data-team='ember'] .dfa-shape-frost,
+.dfa-plate[data-team='frost'] .dfa-shape-ember {
+  display: none;
+}
+
+.dfa-plate:hover {
+  border-color: var(--dfu-text);
+  border-top-color: var(--dfa-team);
+  background: var(--dfu-panel-solid);
+}
+
+.dfa-plate[data-focus='1'] {
+  border-color: var(--dfu-text);
+  border-top-color: var(--dfa-team);
+  background: var(--dfu-panel-solid);
+}
+
+.dfa-plate-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  min-width: 0;
+}
+
+.dfa-plate-mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--dfa-team);
+  font-size: 0.85em;
+}
+
+.dfa-plate-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ready = a filled ring with a tick; not ready = an empty ring; away = a dashed one. */
+.dfa-plate-ready {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 1.1em;
+  height: 1.1em;
+  border: 1.5px solid var(--dfu-faint);
+  border-radius: 50%;
+  color: var(--dfu-ink);
+  font-size: 0.82em;
+}
+
+.dfa-plate-ready > .dfu-icon {
+  width: 0.8em;
+  height: 0.8em;
+  visibility: hidden;
+}
+
+.dfa-plate[data-state='ready'] .dfa-plate-ready {
+  border-color: var(--dfu-text);
+  background: var(--dfu-text);
+}
+
+.dfa-plate[data-state='ready'] .dfa-plate-ready > .dfu-icon {
+  visibility: visible;
+}
+
+.dfa-plate[data-state='away'] {
+  border-style: dashed;
+  border-top-style: solid;
+}
+
+.dfa-plate[data-state='away'] .dfa-plate-ready {
+  border-style: dashed;
+}
+
+.dfa-plate[data-state='away'] .dfa-plate-name {
+  color: var(--dfu-muted);
+  font-style: italic;
+}
+
+.dfa-plate-sub {
+  gap: 0.35em;
+}
+
+.dfa-plate-class {
+  margin-right: auto;
+  color: var(--dfu-muted);
+  font-size: 0.66em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dfa-plate .dfu-badge {
+  padding: 0 0.4em;
+  font-size: 0.56em;
+}
+
+/* --- Stronger team markers (colour-blind setting): bigger shapes with a parchment outline ------- */
+
+[data-df-markers='strong'] .dfa-plate-mark,
+[data-df-markers='strong'] .dfa-dock .dfu-slot-mark,
+[data-df-markers='strong'] .dfa-dock .dfu-team-icon {
+  font-size: 1.15em;
+}
+
+[data-df-markers='strong'] .dfa-plate-mark path,
+[data-df-markers='strong'] .dfa-dock .dfu-slot-mark path,
+[data-df-markers='strong'] .dfa-dock .dfu-team-icon path {
+  stroke: var(--dfu-text);
+  stroke-width: 1.3px;
+  stroke-linejoin: round;
+}
+
+[data-df-markers='strong'] .dfa-plate {
+  border-top-width: 3px;
+}
+
+/* --- Motion (compositor-only; skipped for reduced motion, see also ui.css) ---------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .dfa-top {
+    animation: dfa-drop 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  .dfa-dock[data-side='ember'] {
+    animation: dfa-from-left 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) 0.06s both;
+  }
+
+  .dfa-dock[data-side='frost'] {
+    animation: dfa-from-right 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) 0.06s both;
+  }
+
+  .dfa-bottom {
+    animation: dfu-rise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) 0.12s both;
+  }
+
+  .dfa-notice,
+  .dfa-back {
+    animation: dfu-fade 0.3s ease-out both;
+  }
+
+  .dfa-drawer > .dfu-rules {
+    animation: dfu-rise 0.22s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  .dfa-dock .dfu-slots .dfu-slot-actions {
+    transition: opacity 0.12s ease-out;
+  }
+}
+
+@keyframes dfa-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-0.6em);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dfa-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-0.9em);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dfa-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(0.9em);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

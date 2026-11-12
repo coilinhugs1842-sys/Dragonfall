@@ -96,6 +96,13 @@ export interface MutableHudCompassMarker {
   alive: boolean;
 }
 
+/** The match intro's title card; `opacity` is rewritten every intro frame (T-5.4). */
+export interface MutableIntroCardState {
+  mapName: string;
+  modeName: string;
+  opacity: number;
+}
+
 /** Structurally assignable to HudState. */
 export interface MutableHudState {
   mode: ModeId;
@@ -127,6 +134,10 @@ export interface MutableHudState {
   spectatingName: string;
   spectators: string[];
   scoreboardOpen: boolean;
+  /** Point this at `introCardPool` while the intro's title card is up, null otherwise. */
+  introCard: MutableIntroCardState | null;
+  /** The one title-card object to reuse. */
+  readonly introCardPool: MutableIntroCardState;
 }
 
 function createKillfeedEntry(): MutableKillfeedEntry {
@@ -225,6 +236,8 @@ export function createHudState(scoreboardRows = 10): MutableHudState {
     spectatingName: '',
     spectators: [],
     scoreboardOpen: false,
+    introCard: null,
+    introCardPool: { mapName: '', modeName: '', opacity: 0 },
   };
 }
 
@@ -249,6 +262,8 @@ export function resetHudState(hud: MutableHudState): void {
   hud.spectatingName = '';
   hud.spectators.length = 0;
   hud.scoreboardOpen = false;
+  hud.introCard = null;
+  hud.introCardPool.opacity = 0;
 }
 
 /**

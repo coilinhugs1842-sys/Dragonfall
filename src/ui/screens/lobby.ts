@@ -1,12 +1,21 @@
 /**
- * Temporary 2D lobby panel (T-2.8). The cinematic aerie replaces the backdrop in Phase 5; the
- * rules column on the right is the basis of the host panel and stays.
+ * The lobby (T-2.8, T-5.3), in two layouts of the same controls:
  *
- * Everything is built once: 2 × MAX_TEAM_SIZE perch rows, MAX_LOBBY_MEMBERS watcher rows and the
- * rules controls. `update` refills a reused LobbyView and writes only the cells whose value
- * changed. One delegated click listener turns `data-act` buttons into intents.
+ * - `flat`: the 2D panel over the drifting sky, used when there is no 3D aerie behind the UI;
+ * - `aerie` (`UiState.aerie`): the 3D aerie is on screen, so nothing may cover the middle. The
+ *   Ember roster docks at the left edge and the Frost roster at the right (as the terraces
+ *   stand), the room code and Leave run along the top, the player's own controls and Start
+ *   along the bottom, and the match rules open as a drawer. Name cards float over the perches
+ *   (`lobby-plates.ts`), and a click on a rider asks for the close-up camera.
+ *
+ * Everything is built once: 2 × MAX_TEAM_SIZE perch rows, MAX_LOBBY_MEMBERS watcher rows, the
+ * rules controls and both layouts' frames. Switching layout moves the same nodes between the
+ * frames (rare: once on entering the room), so a control keeps its state and its listeners.
+ * `update` refills a reused LobbyView and writes only the cells whose value changed. One
+ * delegated click listener turns `data-act` buttons into intents.
  */
 
+import '../aerie.css';
 import type { DragonClassId } from '../../shared/classes';
 import { DRAGON_CLASSES, DRAGON_CLASS_IDS, isDragonClassId } from '../../shared/classes';
 import type { LobbySide, PlayerId, TeamId } from '../../shared/constants';
@@ -24,6 +33,14 @@ import type { UiIntentHandler, UiStartBlocker, UiState } from '../../shared/ui';
 import { actionTarget, append, button, copyText, el, icon } from '../dom';
 import type { IconName } from '../dom';
 import { pingBars } from '../view-model/connection';
+import type { LobbyLayout, PlateBand } from '../view-model/aerie-view';
+import {
+  aerieNotice,
+  createPlateBand,
+  focusTarget,
+  lobbyLayoutFor,
+  measurePlateBand,
+} from '../view-model/aerie-view';
 import type { LobbyView, SlotView } from '../view-model/lobby-view';
 import {
   SLOT_CLOSED,
@@ -36,6 +53,7 @@ import {
   teamSizeRange,
 } from '../view-model/lobby-view';
 import { describeStart } from '../view-model/messages';
+import { LobbyPlates } from './lobby-plates';
 
 const MODE_IDS = Object.keys(MODES) as ModeId[];
 const MAP_IDS = Object.keys(MAPS) as MapId[];
@@ -44,6 +62,18 @@ const TEAM_ICON: Readonly<Record<TeamId, IconName>> = {
   [TEAM_FROST]: TEAMS[TEAM_FROST].icon,
 };
 const COPY_FEEDBACK_MS = 1600;
+/**
+ * A name card's footprint at scale 1, in em of the lobby's font size (aerie.css: `.dfa-plate`
+ * is at most 12em wide and two lines tall, plus its pointer). Used to keep whole cards clear of
+ * the docked panels.
+ */
+const PLATE_WIDTH_EM = 12;
+const PLATE_HEIGHT_EM = 4;
+/** Clear space kept between a docked panel and a card, in em. */
+const PLATE_GAP_EM = 0.5;
+/** Layout measurements taken after something that moves the panels (see `measureBand`). */
+const BAND_MEASURES = 3;
+const BAND_MEASURE_ATTEMPTS = 12;
 const BOT_LEVEL_LABELS: Readonly<Record<BotDifficulty, string>> = {
   easy: 'Easy',
   normal: 'Normal',
@@ -81,7 +111,10 @@ interface SlotDom {
   readonly toFrost: HTMLButtonElement;
   readonly toWatch: HTMLButtonElement;
   readonly kick: HTMLButtonElement;
+  /** Aerie layout: the row itself as a button that asks for the close-up. Perch rows only. */
+  readonly focus: HTMLButtonElement | null;
   readonly isWatcher: boolean;
+  focused: boolean;
   kind: number;
   playerId: PlayerId;
   shownName: string;
@@ -134,6 +167,14 @@ function createSlotDom(markIcon: IconName, isWatcher: boolean): SlotDom {
   const kick = moveButton('kick', 'cross', 'kick');
   append(actions, toEmber, toFrost, toWatch, kick);
   const empty = el('span', 'dfu-slot-empty');
+  // First in the row, so the keyboard reaches "look at this rider" before the host's buttons.
+  // It covers the row in the aerie layout and does not exist for the flat one (CSS).
+  let focus: HTMLButtonElement | null = null;
+  if (!isWatcher) {
+    focus = button('dfu-slot-focus', '', 'focusRow');
+    focus.setAttribute('aria-pressed', 'false');
+    row.appendChild(focus);
+  }
   append(row, mark, id, classLabel, ping, state, actions, empty);
   return {
     row,
@@ -150,7 +191,9 @@ function createSlotDom(markIcon: IconName, isWatcher: boolean): SlotDom {
     toFrost,
     toWatch,
     kick,
+    focus,
     isWatcher,
+    focused: false,
     kind: -1,
     playerId: NO_PLAYER,
     shownName: '',
@@ -208,6 +251,7 @@ function applySlot(dom: SlotDom, view: SlotView): void {
     dom.toWatch.title = 'Move to the watchers';
     dom.kick.setAttribute('aria-label', `Remove ${view.name} from the room`);
     dom.kick.title = 'Remove from the room';
+    dom.focus?.setAttribute('aria-label', `Look at ${view.name}`);
   }
   if (dom.classId !== view.classId) {
     dom.classId = view.classId;
@@ -289,7 +333,69 @@ function switchButton(action: string, label: string, offText: string): HTMLButto
   return node;
 }
 
+/** One mode or map on the host panel. */
+interface PickDom {
+  readonly node: HTMLButtonElement;
+  readonly id: string;
+  readonly name: string;
+  readonly soon: HTMLElement;
+  /** The availability last drawn; null before the first refresh. */
+  available: boolean | null;
+}
+
+/**
+ * A choice among a few named things (mode, map) as a row of radio buttons rather than a
+ * dropdown, so the ones that are not built yet are visible, marked "Soon", instead of hiding
+ * inside a closed list.
+ */
+function pickGroup(
+  label: string,
+  action: string,
+  ids: readonly string[],
+  nameOf: (id: string) => string,
+  out: PickDom[],
+): HTMLElement {
+  const group = el('div', 'dfu-picks');
+  group.setAttribute('role', 'radiogroup');
+  group.setAttribute('aria-label', label);
+  for (const id of ids) {
+    const name = nameOf(id);
+    const node = button('dfu-pick', '', action);
+    node.dataset['pick'] = id;
+    node.setAttribute('role', 'radio');
+    node.setAttribute('aria-checked', 'false');
+    const soon = el('span', 'dfu-pick-soon', 'Soon');
+    soon.hidden = true;
+    append(node, el('span', '', name), soon);
+    out.push({ node, id, name, soon, available: null });
+    group.appendChild(node);
+  }
+  return group;
+}
+
+/**
+ * Draws one choice. Availability is read from the shared table on every refresh, not once at
+ * start-up: a mode or map becomes selectable by itself when its `available` flag turns true.
+ */
+function applyPick(pick: PickDom, available: boolean, chosen: boolean, canEdit: boolean): void {
+  if (pick.available !== available) {
+    pick.available = available;
+    pick.soon.hidden = available;
+    pick.node.dataset['soon'] = available ? '0' : '1';
+    if (available) {
+      pick.node.removeAttribute('aria-label');
+      pick.node.title = '';
+    } else {
+      pick.node.setAttribute('aria-label', `${pick.name}, coming soon`);
+      pick.node.title = 'Coming soon';
+    }
+  }
+  setPressed(pick.node, 'aria-checked', chosen);
+  setDisabled(pick.node, !canEdit || !available);
+}
+
 interface TeamDom {
+  readonly box: HTMLElement;
   readonly count: HTMLElement;
   readonly countCache: { value: string };
   readonly join: HTMLButtonElement;
@@ -317,8 +423,8 @@ export class LobbyScreen {
   private readonly lockNote: HTMLElement;
 
   private readonly rulesOwner: HTMLElement;
-  private readonly modeSelect: HTMLSelectElement;
-  private readonly mapSelect: HTMLSelectElement;
+  private readonly modePicks: PickDom[] = [];
+  private readonly mapPicks: PickDom[] = [];
   private readonly sizeButtons: HTMLButtonElement[] = [];
   private readonly unevenSwitch: HTMLButtonElement;
   private readonly lockSwitch: HTMLButtonElement;
@@ -336,14 +442,65 @@ export class LobbyScreen {
   private readonly addFrostBot: HTMLButtonElement;
   private readonly fillBotsButton: HTMLButtonElement;
   private readonly clearBotsButton: HTMLButtonElement;
+  private readonly rosterHint: HTMLElement;
   private readonly startButton: HTMLButtonElement;
   private readonly startNote: HTMLElement;
+
+  // The movable pieces and the two frames they sit in (see `setLayout`).
+  private readonly codeBlock: HTMLElement;
+  private readonly statusBlock: HTMLElement;
+  private readonly watchersBox: HTMLElement;
+  private readonly classGroup: HTMLElement;
+  private readonly leaveButton: HTMLButtonElement;
+  private readonly rules: HTMLElement;
+  // Flat frame.
+  private readonly main: HTMLElement;
+  private readonly head: HTMLElement;
+  private readonly teamsRow: HTMLElement;
+  private readonly self: HTMLElement;
+  private readonly selfActions: HTMLElement;
+  private readonly startBox: HTMLElement;
+  // Aerie frame.
+  private readonly top: HTMLElement;
+  private readonly docks: readonly [HTMLElement, HTMLElement];
+  private readonly bottom: HTMLElement;
+  private readonly youGroup: HTMLElement;
+  private readonly hostGroup: HTMLElement;
+  private readonly drawer: HTMLElement;
+  private readonly rulesToggle: HTMLButtonElement;
+  private readonly switchButton: HTMLButtonElement;
+  private readonly backButton: HTMLButtonElement;
+  private readonly notice: HTMLElement;
+  private readonly noticeText: HTMLElement;
+  private readonly plates = new LobbyPlates();
+
+  private layout: LobbyLayout = 'flat';
+  /** The rules drawer of the aerie layout: local to this screen, like an open dropdown. */
+  private drawerOpen = false;
+  /** False while the take-off plays (or a match runs): the aerie layout shows a line instead. */
+  private controlsShown = true;
+  /** The rider in the close-up, as last drawn; NO_PLAYER in the flat layout. */
+  private focusId: PlayerId = NO_PLAYER;
+  /** The team "Switch side" would move the local rider to, or null. */
+  private switchTarget: TeamId | null = null;
+  private shownSwitchTarget: TeamId | null = null;
+  private shownPhase: LobbyPhase | null = null;
+  private readonly noticeCache = { value: '' };
+
+  // The screen area the docked panels leave free for name cards. Measured from the page only
+  // after something moved the panels (layout, window size, interface size), never per frame.
+  private readonly band: PlateBand = createPlateBand();
+  private pendingMeasures = 0;
+  private measureAttempts = 0;
+  private lastScale = -1;
 
   // Inputs of the last full refresh: when none changed, `update` returns at once.
   private lastLobby: LobbyState | null = null;
   private lastLocalId: PlayerId = NO_PLAYER;
   private lastIsHost = false;
   private lastBlocker: UiStartBlocker | null | undefined = undefined;
+  private lastLayout: LobbyLayout | null = null;
+  private lastFocusId: PlayerId = NO_PLAYER;
   private readonly lastPings = new Int16Array(256).fill(-1);
 
   private readonly codeCache = { value: '' };
@@ -363,8 +520,10 @@ export class LobbyScreen {
     this.root.setAttribute('aria-label', 'Lobby');
 
     // --- Header: room code + status ---
-    const head = el('header', 'dfu-lobby-head');
+    this.head = el('header', 'dfu-lobby-head');
+    const head = this.head;
     const codeBlock = el('div', 'dfu-code-block');
+    this.codeBlock = codeBlock;
     this.code = el('output', 'dfu-code');
     this.code.setAttribute('aria-label', 'Room code');
     this.copyButton = button('dfu-btn dfu-btn-small', '', 'copyCode');
@@ -374,16 +533,19 @@ export class LobbyScreen {
     append(codeLine, this.code, this.copyButton);
     append(codeBlock, el('p', 'dfu-overline', 'Room code'), codeLine);
     const statusBlock = el('div', 'dfu-lobby-title');
+    this.statusBlock = statusBlock;
     this.status = el('p', 'dfu-lobby-status');
     append(statusBlock, el('h2', 'dfu-heading', 'The Aerie'), this.status);
     append(head, codeBlock, statusBlock);
 
     // --- Team columns ---
     const teamsRow = el('div', 'dfu-teams');
+    this.teamsRow = teamsRow;
     this.teams = [this.buildTeam(TEAM_EMBER, teamsRow), this.buildTeam(TEAM_FROST, teamsRow)];
 
     // --- Watchers ---
     const watchersBox = el('section', 'dfu-panel dfu-watchers');
+    this.watchersBox = watchersBox;
     const watchersHead = el('header', 'dfu-team-head');
     this.watcherCount = el('span', 'dfu-team-count dfu-num');
     this.watchButton = button('dfu-btn dfu-btn-small', 'Watch', 'spectate');
@@ -403,7 +565,9 @@ export class LobbyScreen {
 
     // --- Own controls ---
     const self = el('footer', 'dfu-panel dfu-self');
+    this.self = self;
     const classGroup = el('div', 'dfu-classes');
+    this.classGroup = classGroup;
     classGroup.setAttribute('role', 'radiogroup');
     classGroup.setAttribute('aria-label', 'Your dragon');
     for (const id of DRAGON_CLASS_IDS) {
@@ -422,6 +586,7 @@ export class LobbyScreen {
       classGroup.appendChild(node);
     }
     const selfActions = el('div', 'dfu-self-actions');
+    this.selfActions = selfActions;
     this.readyButton = button('dfu-btn dfu-btn-primary dfu-ready', '', 'ready');
     this.readyButton.setAttribute('aria-pressed', 'false');
     this.readyLabel = el('span');
@@ -429,43 +594,37 @@ export class LobbyScreen {
     this.lockNote = el('p', 'dfu-hint dfu-lock-note');
     append(this.lockNote, icon('lock'), el('span', '', 'Teams are locked by the host.'));
     this.lockNote.hidden = true;
-    append(selfActions, this.readyButton, button('dfu-btn', 'Leave room', 'leave'), this.lockNote);
+    this.leaveButton = button('dfu-btn', 'Leave room', 'leave');
+    append(selfActions, this.readyButton, this.leaveButton, this.lockNote);
     append(self, classGroup, selfActions);
 
     const main = el('div', 'dfu-lobby-main');
+    this.main = main;
     append(main, head, teamsRow, watchersBox, self);
 
     // --- Rules column (host panel) ---
     const rules = el('aside', 'dfu-panel dfu-rules');
+    this.rules = rules;
+    rules.id = 'dfu-rules';
     rules.setAttribute('aria-label', 'Match rules');
     const rulesHead = el('header', 'dfu-rules-head');
     this.rulesOwner = el('span', 'dfu-hint');
     append(rulesHead, el('h3', 'dfu-heading dfu-heading-small', 'Match rules'), this.rulesOwner);
 
-    this.modeSelect = el('select', 'dfu-select');
-    this.modeSelect.dataset['setting'] = 'mode';
-    for (const id of MODE_IDS) {
-      const option = el(
-        'option',
-        '',
-        MODES[id].available ? MODES[id].name : `${MODES[id].name} (later)`,
-      );
-      option.value = id;
-      option.disabled = !MODES[id].available;
-      this.modeSelect.appendChild(option);
-    }
-    this.mapSelect = el('select', 'dfu-select');
-    this.mapSelect.dataset['setting'] = 'map';
-    for (const id of MAP_IDS) {
-      const option = el(
-        'option',
-        '',
-        MAPS[id].available ? MAPS[id].name : `${MAPS[id].name} (later)`,
-      );
-      option.value = id;
-      option.disabled = !MAPS[id].available;
-      this.mapSelect.appendChild(option);
-    }
+    const modeGroup = pickGroup(
+      'Mode',
+      'pickMode',
+      MODE_IDS,
+      (id) => MODES[id as ModeId].name,
+      this.modePicks,
+    );
+    const mapGroup = pickGroup(
+      'Map',
+      'pickMap',
+      MAP_IDS,
+      (id) => MAPS[id as MapId].name,
+      this.mapPicks,
+    );
 
     const sizeGroup = el('div', 'dfu-segment');
     sizeGroup.setAttribute('role', 'group');
@@ -548,6 +707,7 @@ export class LobbyScreen {
     );
 
     const startBox = el('div', 'dfu-start');
+    this.startBox = startBox;
     this.startButton = button('dfu-btn dfu-btn-primary dfu-btn-large', 'Start match', 'start');
     this.startNote = el('p', 'dfu-hint dfu-start-note');
     this.startNote.id = 'dfu-start-note';
@@ -558,8 +718,8 @@ export class LobbyScreen {
     const ruleList = el('div', 'dfu-rule-list');
     append(
       ruleList,
-      ruleRow('Mode', this.modeSelect),
-      ruleRow('Map', this.mapSelect),
+      ruleRow('Mode', modeGroup),
+      ruleRow('Map', mapGroup),
       ruleRow('Riders per team', sizeGroup),
       ruleRow('Uneven teams', this.unevenSwitch),
       ruleRow('Lock teams', this.lockSwitch),
@@ -569,9 +729,53 @@ export class LobbyScreen {
       ruleRow('Dragons', allowGroup),
       ruleRow('Bot skill', botLevelGroup),
     );
-    append(rules, rulesHead, ruleList, this.hostTools, this.botTools, startBox);
+    // Aerie layout: the move / remove buttons only appear on a roster row that is pointed at
+    // or focused (the rows are narrow), so the host panel says where they are.
+    this.rosterHint = el(
+      'p',
+      'dfu-hint dfa-roster-hint',
+      'To move or remove a rider, point at their row in the rosters.',
+    );
+    this.rosterHint.hidden = true;
+    append(rules, rulesHead, ruleList, this.hostTools, this.botTools, this.rosterHint, startBox);
+
+    // --- Aerie frame: built now, filled by `setLayout` when a state asks for it ---
+    this.top = el('header', 'dfu-panel dfa-top df-interactive');
+    const emberDock = el('div', 'dfa-dock df-interactive');
+    emberDock.dataset['side'] = 'ember';
+    const frostDock = el('div', 'dfa-dock df-interactive');
+    frostDock.dataset['side'] = 'frost';
+    this.docks = [emberDock, frostDock];
+
+    this.bottom = el('footer', 'dfu-panel dfa-bottom df-interactive');
+    this.youGroup = el('div', 'dfa-you');
+    this.hostGroup = el('div', 'dfa-host');
+    this.switchButton = button('dfu-btn', 'Switch side', 'switchSide');
+    this.switchButton.hidden = true;
+    this.rulesToggle = button('dfu-btn dfa-rules-toggle', 'Match rules', 'rulesToggle');
+    this.rulesToggle.setAttribute('aria-expanded', 'false');
+    this.rulesToggle.setAttribute('aria-controls', 'dfu-rules');
+    this.drawer = el('div', 'dfa-drawer');
+    this.drawer.hidden = true;
+    const closeDrawer = button('dfu-icon-btn dfa-drawer-close', '', 'rulesClose');
+    closeDrawer.setAttribute('aria-label', 'Close the match rules');
+    closeDrawer.title = 'Close';
+    closeDrawer.appendChild(icon('cross'));
+    this.drawer.appendChild(closeDrawer);
+    append(this.bottom, this.youGroup, this.hostGroup);
+
+    this.backButton = button('dfu-btn dfu-btn-small dfa-back df-interactive', 'Back to the aerie', 'focusBack');
+    this.backButton.hidden = true;
+    this.notice = el('div', 'dfa-notice');
+    this.notice.setAttribute('role', 'status');
+    this.notice.hidden = true;
+    this.noticeText = el('p', 'dfa-notice-text');
+    append(this.notice, el('p', 'dfu-overline', 'The Aerie'), this.noticeText);
 
     append(this.root, main, rules);
+
+    // A resize moves the docked panels: the name cards' free area is measured again.
+    window.addEventListener('resize', this.onResize);
 
     this.root.addEventListener('click', this.onClick);
     this.root.addEventListener('change', this.onChange);
@@ -580,6 +784,45 @@ export class LobbyScreen {
   update(state: UiState): void {
     const lobby = state.lobby;
     if (lobby === null) return;
+    const layout = lobbyLayoutFor(state.aerie);
+    if (layout !== this.layout) this.setLayout(layout);
+    const aerie = layout === 'aerie';
+    // The close-up belongs to the 3D aerie: without it nothing is highlighted.
+    const focusId = aerie ? (state.lobbyFocusId ?? NO_PLAYER) : NO_PLAYER;
+    const lobbyChanged = lobby !== this.lastLobby;
+    this.refresh(state, lobby, layout, focusId);
+    if (!aerie) return;
+
+    // Name cards follow the perches, so this part runs every frame (see lobby-plates.ts).
+    const scale = state.settings.uiScale ?? 1;
+    if (scale !== this.lastScale) {
+      this.lastScale = scale;
+      this.requestMeasure();
+    }
+    if (this.pendingMeasures > 0) this.measureBand();
+    this.plates.update(state, lobby, lobbyChanged, this.band, focusId);
+  }
+
+  /**
+   * Escape in the aerie layout: close the rules drawer, else leave the close-up. Returns true
+   * when it did something (the screen manager then keeps the key from doing anything else).
+   */
+  handleEscape(): boolean {
+    if (this.layout !== 'aerie' || !this.controlsShown) return false;
+    if (this.drawerOpen) {
+      this.setDrawer(false);
+      this.rulesToggle.focus();
+      return true;
+    }
+    if (this.focusId !== NO_PLAYER) {
+      this.onIntent({ type: 'lobby.focusPlayer', playerId: null });
+      return true;
+    }
+    return false;
+  }
+
+  /** Everything that only changes when the lobby does. Returns at once when nothing did. */
+  private refresh(state: UiState, lobby: LobbyState, layout: LobbyLayout, focusId: PlayerId): void {
     const connection = state.connection;
     const pings = state.playerPings;
     const blocker = state.startBlocker;
@@ -588,6 +831,8 @@ export class LobbyScreen {
       connection.localPlayerId === this.lastLocalId &&
       connection.isHost === this.lastIsHost &&
       blocker === this.lastBlocker &&
+      layout === this.lastLayout &&
+      focusId === this.lastFocusId &&
       !this.pingsChanged(lobby, pings)
     ) {
       return;
@@ -596,7 +841,11 @@ export class LobbyScreen {
     this.lastLocalId = connection.localPlayerId;
     this.lastIsHost = connection.isHost;
     this.lastBlocker = blocker;
+    this.lastLayout = layout;
+    this.lastFocusId = focusId;
+    this.focusId = focusId;
     this.rememberPings(lobby, pings);
+    const aerie = layout === 'aerie';
 
     const view = computeLobbyView(
       this.view,
@@ -624,7 +873,15 @@ export class LobbyScreen {
       for (let i = 0; i < dom.slots.length; i++) {
         const slotDom = dom.slots[i];
         const slotView = slots[i];
-        if (slotDom !== undefined && slotView !== undefined) applySlot(slotDom, slotView);
+        if (slotDom === undefined || slotView === undefined) continue;
+        applySlot(slotDom, slotView);
+        const focused =
+          focusId !== NO_PLAYER && slotView.kind === SLOT_PLAYER && slotView.playerId === focusId;
+        if (focused !== slotDom.focused) {
+          slotDom.focused = focused;
+          slotDom.row.dataset['focus'] = focused ? '1' : '0';
+          slotDom.focus?.setAttribute('aria-pressed', focused ? 'true' : 'false');
+        }
       }
       setText(dom.count, dom.countCache, `${view.counts[team as TeamId]} / ${view.teamSize}`);
       setDisabled(dom.join, !view.canJoin[team as TeamId]);
@@ -663,6 +920,17 @@ export class LobbyScreen {
     );
     const showLock = settings.teamsLocked && view.editable;
     if (this.lockNote.hidden === showLock) this.lockNote.hidden = !showLock;
+    // Aerie layout: one button to cross to the other order (watchers use the rosters' Join).
+    const side = view.localSide;
+    const other = side === TEAM_EMBER ? TEAM_FROST : side === TEAM_FROST ? TEAM_EMBER : null;
+    this.switchTarget = other;
+    if (this.switchButton.hidden === (other !== null)) this.switchButton.hidden = other === null;
+    setDisabled(this.switchButton, other === null || !view.canJoin[other]);
+    if (other !== null && other !== this.shownSwitchTarget) {
+      this.shownSwitchTarget = other;
+      this.switchButton.setAttribute('aria-label', `Switch to ${TEAMS[other].name}`);
+      this.switchButton.title = `Switch to ${TEAMS[other].name}`;
+    }
 
     // Rules column.
     const canEdit = view.localIsHost && view.editable;
@@ -671,10 +939,12 @@ export class LobbyScreen {
       this.ownerCache,
       view.localIsHost ? 'You are the host' : 'Set by the host',
     );
-    if (this.modeSelect.value !== settings.mode) this.modeSelect.value = settings.mode;
-    setDisabled(this.modeSelect, !canEdit);
-    if (this.mapSelect.value !== settings.map) this.mapSelect.value = settings.map;
-    setDisabled(this.mapSelect, !canEdit);
+    for (const pick of this.modePicks) {
+      applyPick(pick, MODES[pick.id as ModeId].available, pick.id === settings.mode, canEdit);
+    }
+    for (const pick of this.mapPicks) {
+      applyPick(pick, MAPS[pick.id as MapId].available, pick.id === settings.map, canEdit);
+    }
     const range = teamSizeRange(settings.mode);
     for (let i = 0; i < this.sizeButtons.length; i++) {
       const node = this.sizeButtons[i];
@@ -711,6 +981,8 @@ export class LobbyScreen {
       setDisabled(node, !canEdit);
     }
     if (this.botTools.hidden === view.localIsHost) this.botTools.hidden = !view.localIsHost;
+    const showRosterHint = aerie && view.localIsHost;
+    if (this.rosterHint.hidden === showRosterHint) this.rosterHint.hidden = !showRosterHint;
     let ember = 0;
     let frost = 0;
     let bots = 0;
@@ -733,14 +1005,136 @@ export class LobbyScreen {
         ? describeStart(blocker, view.localIsHost, view.memberCount)
         : PHASE_TEXT[lobby.phase],
     );
+
+    // Aerie layout: while the take-off plays the controls give way to one line.
+    if (lobby.phase !== this.shownPhase) {
+      this.shownPhase = lobby.phase;
+      this.root.dataset['phase'] = lobby.phase;
+    }
+    const notice = aerie ? aerieNotice(lobby.phase) : '';
+    const controls = notice === '';
+    if (controls !== this.controlsShown) {
+      this.controlsShown = controls;
+      this.bottom.hidden = !controls;
+      this.notice.hidden = controls;
+      this.applyDrawer();
+      // The bottom bar came or went: the name cards' free area changed with it.
+      this.requestMeasure();
+    }
+    if (!controls) setText(this.noticeText, this.noticeCache, notice);
+    const showBack = aerie && controls && focusId !== NO_PLAYER;
+    if (this.backButton.hidden === showBack) this.backButton.hidden = !showBack;
+    for (let team = 0; team < 2; team++) {
+      for (const slot of this.teams[team as TeamId].slots) {
+        if (slot.focus !== null) setDisabled(slot.focus, !controls);
+      }
+    }
   }
 
   dispose(): void {
     if (this.copyTimer !== null) clearTimeout(this.copyTimer);
+    window.removeEventListener('resize', this.onResize);
     this.root.removeEventListener('click', this.onClick);
     this.root.removeEventListener('change', this.onChange);
     this.root.remove();
   }
+
+  /**
+   * Moves the shared controls into one layout's frame. Appending a node that is already in the
+   * page moves it, so nothing is rebuilt and every control keeps its state.
+   */
+  private setLayout(layout: LobbyLayout): void {
+    this.layout = layout;
+    const ember = this.teams[TEAM_EMBER].box;
+    const frost = this.teams[TEAM_FROST].box;
+    if (layout === 'aerie') {
+      append(this.top, this.codeBlock, this.statusBlock, this.leaveButton);
+      append(this.docks[0], ember, this.watchersBox);
+      append(this.docks[1], frost);
+      append(this.youGroup, this.classGroup, this.readyButton, this.switchButton, this.lockNote);
+      // Reading order: why Start is unavailable, the rules (the drawer opens right after its
+      // button, so Tab walks into it), then Start.
+      this.drawer.appendChild(this.rules);
+      append(this.hostGroup, this.startNote, this.rulesToggle, this.drawer, this.startButton);
+      this.root.replaceChildren(
+        this.top,
+        this.docks[0],
+        this.docks[1],
+        this.plates.root,
+        this.backButton,
+        this.notice,
+        this.bottom,
+      );
+      // The frame itself must let the pointer through to the scene; its panels take it.
+      this.root.classList.remove('df-interactive');
+    } else {
+      append(this.head, this.codeBlock, this.statusBlock);
+      append(this.teamsRow, ember, frost);
+      append(this.selfActions, this.readyButton, this.leaveButton, this.lockNote);
+      append(this.self, this.classGroup, this.selfActions);
+      append(this.main, this.head, this.teamsRow, this.watchersBox, this.self);
+      append(this.startBox, this.startButton, this.startNote);
+      this.root.replaceChildren(this.main, this.rules);
+      this.root.classList.add('df-interactive');
+    }
+    this.root.dataset['layout'] = layout;
+    this.applyDrawer();
+    this.requestMeasure();
+  }
+
+  private setDrawer(open: boolean): void {
+    if (open === this.drawerOpen) return;
+    this.drawerOpen = open;
+    this.applyDrawer();
+  }
+
+  /** The drawer shows when it is open, in the aerie layout, while the controls are up. */
+  private applyDrawer(): void {
+    const show = this.drawerOpen && this.controlsShown && this.layout === 'aerie';
+    const hidden = this.layout === 'aerie' && !show;
+    if (this.drawer.hidden !== hidden) this.drawer.hidden = hidden;
+    setPressed(this.rulesToggle, 'aria-expanded', show);
+  }
+
+  private requestMeasure(): void {
+    this.pendingMeasures = BAND_MEASURES;
+    this.measureAttempts = 0;
+  }
+
+  /**
+   * Reads where the docked panels end, to know the area left for name cards. A layout read, so
+   * it only runs a few frames after something moved the panels: more than one because the
+   * interface-size variable and the first reveal land a frame after the state that announced
+   * them. `offset*` values ignore transforms, so the panels' slide-in does not skew them.
+   */
+  private measureBand(): void {
+    const root = this.root;
+    const left = this.docks[0];
+    const right = this.docks[1];
+    const style = typeof getComputedStyle === 'function' ? getComputedStyle(root) : null;
+    const em = style === null ? Number.NaN : parseFloat(style.fontSize);
+    const gap = PLATE_GAP_EM * em;
+    const height = root.clientHeight;
+    const usable = measurePlateBand(
+      this.band,
+      root.clientWidth,
+      height,
+      left.offsetLeft + left.offsetWidth + gap,
+      right.offsetLeft - gap,
+      this.top.offsetTop + this.top.offsetHeight + gap,
+      this.controlsShown ? this.bottom.offsetTop - gap : height,
+      PLATE_WIDTH_EM * em,
+      PLATE_HEIGHT_EM * em,
+    );
+    this.measureAttempts += 1;
+    // Hidden (not revealed yet) measures as nothing: try again next frame, but not for ever.
+    if (usable || this.measureAttempts >= BAND_MEASURE_ATTEMPTS) this.pendingMeasures -= 1;
+    if (this.measureAttempts >= BAND_MEASURE_ATTEMPTS) this.pendingMeasures = 0;
+  }
+
+  private readonly onResize = (): void => {
+    if (this.layout === 'aerie') this.requestMeasure();
+  };
 
   private buildTeam(team: TeamId, parent: HTMLElement): TeamDom {
     const info = TEAMS[team];
@@ -765,7 +1159,7 @@ export class LobbyScreen {
     }
     append(box, head, list);
     parent.appendChild(box);
-    return { count, countCache: { value: '' }, join, slots };
+    return { box, count, countCache: { value: '' }, join, slots };
   }
 
   private applySwitch(
@@ -933,6 +1327,43 @@ export class LobbyScreen {
       case 'start':
         this.onIntent({ type: 'host.start' });
         break;
+      case 'pickMode': {
+        const mode = target.dataset['pick'];
+        if (mode !== undefined && mode in MODES && MODES[mode as ModeId].available) {
+          this.onIntent({ type: 'host.setMode', mode: mode as ModeId });
+        }
+        break;
+      }
+      case 'pickMap': {
+        const map = target.dataset['pick'];
+        if (map !== undefined && map in MAPS && MAPS[map as MapId].available) {
+          this.onIntent({ type: 'host.setMap', map: map as MapId });
+        }
+        break;
+      }
+      case 'switchSide':
+        if (this.switchTarget !== null) {
+          this.onIntent({ type: 'lobby.switchSide', side: this.switchTarget });
+        }
+        break;
+      // A rider's row or name card: frame them, or let go if they are already framed.
+      case 'focusRow':
+      case 'focusPlate': {
+        const playerId = this.playerIdOf(target);
+        if (playerId === null || this.layout !== 'aerie' || !this.controlsShown) break;
+        this.onIntent({ type: 'lobby.focusPlayer', playerId: focusTarget(this.focusId, playerId) });
+        break;
+      }
+      case 'focusBack':
+        this.onIntent({ type: 'lobby.focusPlayer', playerId: null });
+        break;
+      case 'rulesToggle':
+        this.setDrawer(!this.drawerOpen);
+        break;
+      case 'rulesClose':
+        this.setDrawer(false);
+        this.rulesToggle.focus();
+        break;
       default:
         break;
     }
@@ -943,13 +1374,7 @@ export class LobbyScreen {
     // A control now shows what the player picked, not what the host holds. Forget the last
     // refresh so the next update writes the real value back if the host refuses or clamps it.
     this.lastLobby = null;
-    if (target === this.modeSelect) {
-      const mode = this.modeSelect.value;
-      if (mode in MODES) this.onIntent({ type: 'host.setMode', mode: mode as ModeId });
-    } else if (target === this.mapSelect) {
-      const map = this.mapSelect.value;
-      if (map in MAPS) this.onIntent({ type: 'host.setMap', map: map as MapId });
-    } else if (target === this.timeSelect) {
+    if (target === this.timeSelect) {
       const timeLimitS = Number(this.timeSelect.value);
       if (Number.isFinite(timeLimitS)) this.onIntent({ type: 'host.setTimeLimit', timeLimitS });
     } else if (target === this.scoreInput) {

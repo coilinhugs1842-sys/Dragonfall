@@ -1,0 +1,459 @@
+/*
+ * The match result (T-5.5): `.dfu-results`, pieces prefixed `dfr-`.
+ *
+ * The 3D podium fills the middle of the screen, so this frames it and never covers it: the
+ * winner banner along the top, the three award cards along the bottom, the full table as a
+ * compact panel at the right edge. Nothing here takes the pointer.
+ *
+ * The parts arrive in turn. `data-on` is written by the UI from its own clock (results.ts);
+ * the CSS below only says how a part looks while it is off and how it comes on.
+ */
+
+.dfu-results {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Both team shapes are in the markup; the nearest `data-team` picks one. */
+.dfr-shape {
+  display: none;
+}
+
+.dfu-results [data-team='ember'] .dfr-shape-ember,
+.dfu-results [data-team='frost'] .dfr-shape-frost,
+.dfu-results[data-winner='ember'] .dfr-title > .dfr-shape-ember,
+.dfu-results[data-winner='frost'] .dfr-title > .dfr-shape-frost {
+  display: inline-block;
+}
+
+.dfr-shape-ember {
+  color: var(--dfu-ember);
+}
+
+.dfr-shape-frost {
+  color: var(--dfu-frost);
+}
+
+/* --- Banner ------------------------------------------------------------------------------------ */
+
+.dfr-banner {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15em;
+  padding: 1.1em 1em 2.6em;
+  /* An ink veil that thins out downwards: the words read on any sky, the podium stays clear. */
+  background: linear-gradient(
+    180deg,
+    rgb(14 16 28 / 82%) 0%,
+    rgb(14 16 28 / 62%) 55%,
+    rgb(14 16 28 / 0%) 100%
+  );
+  text-align: center;
+}
+
+.dfr-overline {
+  letter-spacing: 0.4em;
+}
+
+.dfr-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0 0.5em 0.08em;
+  border-bottom: 2px solid var(--dfu-line-strong);
+  font-family: var(--dfu-serif);
+  font-size: 3em;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.dfr-title > .dfr-shape {
+  width: 0.62em;
+  height: 0.62em;
+}
+
+.dfu-results[data-winner='ember'] .dfr-title {
+  border-bottom-color: var(--dfu-ember);
+}
+
+.dfu-results[data-winner='frost'] .dfr-title {
+  border-bottom-color: var(--dfu-frost);
+}
+
+.dfr-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7em;
+  margin-top: 0.35em;
+  font-size: 1.35em;
+  letter-spacing: 0.06em;
+}
+
+.dfr-score-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.dfr-score-side > .dfr-shape {
+  width: 0.7em;
+  height: 0.7em;
+}
+
+.dfr-score-dash {
+  color: var(--dfu-muted);
+}
+
+/* --- Award cards ------------------------------------------------------------------------------- */
+
+.dfr-awards {
+  position: absolute;
+  right: 1em;
+  bottom: 1.3em;
+  left: 1em;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.9em;
+}
+
+.dfr-award {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1em;
+  width: 13.5em;
+  min-width: 0;
+  padding: 0.6em 0.9em 0.7em;
+  border: 1px solid var(--dfu-line);
+  border-top: 2px solid var(--dfu-line-strong);
+  border-radius: 0.35em;
+  background: rgb(20 24 36 / 88%);
+}
+
+.dfr-award[data-team='ember'] {
+  border-top-color: var(--dfu-ember);
+}
+
+.dfr-award[data-team='frost'] {
+  border-top-color: var(--dfu-frost);
+}
+
+/* The MVP stands in the middle, a little taller, as on the podium. */
+.dfr-award[data-award='0'] {
+  order: 2;
+  width: 15em;
+  padding-top: 0.8em;
+  padding-bottom: 0.95em;
+}
+
+.dfr-award[data-award='1'] {
+  order: 1;
+}
+
+.dfr-award[data-award='2'] {
+  order: 3;
+}
+
+.dfr-award-title {
+  margin-bottom: 0.25em;
+}
+
+.dfr-award-who {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  min-width: 0;
+}
+
+.dfr-award-who > .dfr-shape {
+  flex: none;
+  width: 0.85em;
+  height: 0.85em;
+}
+
+.dfr-award-name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--dfu-serif);
+  font-size: 1.3em;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dfr-award[data-award='0'] .dfr-award-name {
+  font-size: 1.5em;
+}
+
+.dfr-award-class {
+  color: var(--dfu-muted);
+  font-size: 0.68em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: pre;
+}
+
+.dfr-award-figure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.5em;
+  margin-top: 0.35em;
+}
+
+.dfr-award-value {
+  font-size: 1.55em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.dfr-award-unit {
+  color: var(--dfu-muted);
+  font-size: 0.7em;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.dfr-award-detail {
+  min-height: 1.3em;
+  color: var(--dfu-edge);
+  font-size: 0.78em;
+}
+
+/* --- Full table -------------------------------------------------------------------------------- */
+
+.dfr-table {
+  position: absolute;
+  top: 8.6em;
+  right: 1.2em;
+  width: 24.5em;
+  padding: 0.5em 0.75em 0.55em;
+  background: rgb(20 24 36 / 88%);
+  font-size: 0.82em;
+}
+
+.dfr-team {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.dfr-team + .dfr-team {
+  margin-top: 0.5em;
+}
+
+.dfr-team th,
+.dfr-team td {
+  padding: 0.18em 0.3em;
+  font-weight: 400;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dfr-team thead th {
+  padding-bottom: 0.25em;
+  border-bottom: 2px solid var(--dfu-line-strong);
+  vertical-align: bottom;
+}
+
+.dfr-team[data-team='ember'] thead th {
+  border-bottom-color: var(--dfu-ember);
+}
+
+.dfr-team[data-team='frost'] thead th {
+  border-bottom-color: var(--dfu-frost);
+}
+
+.dfr-team th.dfr-team-head {
+  text-align: left;
+}
+
+.dfr-team-head > .dfr-shape {
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 0.45em;
+  vertical-align: -0.08em;
+}
+
+.dfr-team-name {
+  font-family: var(--dfu-serif);
+  font-size: 1.15em;
+  letter-spacing: 0.08em;
+}
+
+.dfr-team-score {
+  margin-left: 0.7em;
+  font-size: 1.15em;
+}
+
+.dfr-col {
+  width: 3.1em;
+  color: var(--dfu-muted);
+  font-size: 0.74em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.dfr-row > * {
+  border-top: 1px solid var(--dfu-line);
+}
+
+.dfr-row:first-child > * {
+  border-top: 0;
+}
+
+.dfr-team th.dfr-cell-who {
+  text-align: left;
+}
+
+.dfr-who {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45em;
+  min-width: 0;
+}
+
+.dfr-row-name {
+  flex: 0 1 auto;
+  min-width: 2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dfr-who > .dfu-badge {
+  align-self: center;
+}
+
+.dfr-row-marks {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dfu-edge);
+  font-size: 0.7em;
+  letter-spacing: 0.1em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.dfr-row-marks:empty {
+  display: none;
+}
+
+.dfr-row-class {
+  flex: none;
+  margin-left: auto;
+  color: var(--dfu-faint);
+  font-size: 0.74em;
+  letter-spacing: 0.08em;
+}
+
+.dfr-team td {
+  color: var(--dfu-muted);
+}
+
+.dfr-team td.dfr-cell-key {
+  color: var(--dfu-text);
+}
+
+/* Your own row: a wash, a bar at its left end and the "You" badge (never colour alone). */
+.dfr-row[data-me='1'] > * {
+  background: rgb(255 246 232 / 12%);
+}
+
+.dfr-row[data-me='1'] > td {
+  color: var(--dfu-text);
+}
+
+.dfr-row[data-me='1'] > .dfr-cell-who {
+  box-shadow: inset 3px 0 0 var(--dfu-text);
+  padding-left: 0.6em;
+}
+
+.dfr-foot {
+  margin-top: 0.55em;
+  padding-top: 0.4em;
+  border-top: 1px solid var(--dfu-line);
+  font-size: 0.86em;
+  text-align: right;
+}
+
+/* --- Stronger team markers ---------------------------------------------------------------------- */
+
+[data-df-markers='strong'] .dfr-shape {
+  transform: scale(1.25);
+}
+
+[data-df-markers='strong'] .dfr-shape path {
+  stroke: var(--dfu-text);
+  stroke-width: 1.3px;
+  stroke-linejoin: round;
+}
+
+[data-df-markers='strong'] .dfr-award {
+  border-top-width: 3px;
+}
+
+/* --- Reveal ------------------------------------------------------------------------------------ */
+
+.dfr-part {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.dfr-part[data-on='1'] {
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dfr-part {
+    transition:
+      opacity 0.5s ease-out,
+      transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1),
+      visibility 0s linear 0.5s;
+  }
+
+  .dfr-part[data-on='1'] {
+    transition-delay: 0s;
+  }
+
+  .dfr-banner:not([data-on='1']) {
+    transform: translateY(-0.8em);
+  }
+
+  .dfr-award:not([data-on='1']) {
+    transform: translateY(1em);
+  }
+
+  .dfr-table:not([data-on='1']) {
+    transform: translateX(1em);
+  }
+}
+
+/*
+ * Reduced motion, from the system or from the game's own setting: no sliding, and nothing is
+ * held back either (the UI's clock is told the same through `settings.reduceMotion`; this
+ * covers a system preference the game was not told about).
+ */
+@media (prefers-reduced-motion: reduce) {
+  .dfr-part {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+[data-df-motion='reduced'] .dfr-part {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}

@@ -13,16 +13,12 @@ import type { UiIntentHandler, UiState } from '../shared/ui';
 import { el } from './dom';
 import { createHud } from './hud';
 import { LobbyScreen } from './screens/lobby';
-import {
-  ConnectionChip,
-  LoadingCard,
-  PauseMenu,
-  SessionNotice,
-  createReconnectStrip,
-} from './screens/overlays';
+import { ConnectionChip, PauseMenu, SessionNotice, createReconnectStrip } from './screens/overlays';
 import { ResultsPanel } from './screens/results';
 import { TitleScreen } from './screens/title';
 import type { NameStore } from './screens/title';
+import { FadeLayer, LoadingOverlay } from './screens/transitions';
+import { createSkipLatch, isSkipKey, rearmSkip, takeSkip } from './view-model/cinematic';
 import { computeLayers, createLayerFlags } from './view-model/connection';
 import type { LayerFlags } from './view-model/connection';
 import { isSessionEndError } from './view-model/messages';
@@ -33,6 +29,11 @@ export const PLAYER_NAME_STORAGE_KEY = 'dragonfall.name';
 export interface UiOptions {
   /** Where the rider name is kept. Default: `localStorage[PLAYER_NAME_STORAGE_KEY]`. */
   readonly nameStore?: NameStore;
+  /**
+   * The clock for the UI's own timing (the results reveal, the loading presentation's minimum
+   * time on screen), in ms. Default: `performance.now()`. Tests and previews pass their own.
+   */
+  readonly now?: () => number;
 }
 
 export interface Ui {
@@ -79,7 +80,10 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
 
   const title = new TitleScreen(onIntent, options?.nameStore ?? createLocalNameStore(), refresh);
   const lobby = new LobbyScreen(onIntent);
-  const loading = new LoadingCard();
+  const loading = new LoadingOverlay();
+  const fade = new FadeLayer();
+  const now = options?.now ?? ((): number => performance.now());
+  const skip = createSkipLatch();
   const chip = new ConnectionChip();
   const strip = createReconnectStrip();
   const pause = new PauseMenu(onIntent);
@@ -91,21 +95,16 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
   const layers: LayerFlags = createLayerFlags();
   // What is on the page now. Everything starts hidden; the first update reveals.
   const shown: LayerFlags = createLayerFlags();
-  for (const node of [
-    title.root,
-    lobby.root,
-    loading.root,
-    chip.root,
-    strip,
-    pause.root,
-    notice.root,
-  ]) {
+  for (const node of [title.root, lobby.root, chip.root, strip, pause.root, notice.root]) {
     node.hidden = true;
   }
   let baseInert = false;
 
-  base.append(title.root, lobby.root, loading.root, chip.root, strip);
-  container.append(base, pause.root, notice.root);
+  base.append(title.root, lobby.root, chip.root, strip);
+  // Stacking, bottom to top: the page (HUD, menus), the scene-cut fade, the loading
+  // presentation, then the dialogs that must stay usable whatever is going on underneath.
+  // (The settings panel is its own root, mounted after this one, so it is above all of it.)
+  container.append(base, fade.root, loading.root, pause.root, notice.root);
   root.appendChild(container);
   // The match HUD sits inside `base`, under everything else there, so the escape menu and the
   // session notice cover it and `inert` disables it with the rest. The results go on top of it.
@@ -131,11 +130,16 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
     );
 
     // Fill a layer before revealing it, so it never flashes stale content.
+    const nowMs = now();
     const inMatch = state.screen === 'match' && !layers.notice;
-    hud.update(inMatch ? state.hud : null);
+    hud.update(inMatch ? state.hud : null, nowMs);
+    rearmSkip(skip, inMatch ? state.hud : null);
     const showResults = inMatch && state.results !== null;
-    if (showResults) results.update(state);
-    if (showResults !== resultsShown) setHidden(results.root, !(resultsShown = showResults));
+    if (showResults) results.update(state, nowMs);
+    if (showResults !== resultsShown) {
+      setHidden(results.root, !(resultsShown = showResults));
+      if (!showResults) results.reset();
+    }
     // The chip is a setting during a match (the lobby always shows it).
     if (layers.chip && state.screen === 'match' && state.settings.showNetChip === false) {
       layers.chip = false;
@@ -143,16 +147,15 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
 
     if (layers.title) title.update(state);
     if (layers.lobby) lobby.update(state);
-    if (layers.loading) loading.update(state);
     if (layers.chip) chip.update(state);
+    // These two run every frame: each returns after one comparison when nothing changed.
+    fade.update(state);
+    loading.update(state, layers.loading, nowMs);
     if (layers.pause) pause.update(state);
     if (layers.notice && error !== null) notice.update(error, state.settings.signaling);
 
     if (layers.title !== shown.title) setHidden(title.root, !(shown.title = layers.title));
     if (layers.lobby !== shown.lobby) setHidden(lobby.root, !(shown.lobby = layers.lobby));
-    if (layers.loading !== shown.loading) {
-      setHidden(loading.root, !(shown.loading = layers.loading));
-    }
     if (layers.chip !== shown.chip) setHidden(chip.root, !(shown.chip = layers.chip));
     if (layers.reconnecting !== shown.reconnecting) {
       setHidden(strip, !(shown.reconnecting = layers.reconnecting));
@@ -175,12 +178,31 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
   }
 
   /**
-   * Escape: close the escape menu, or open it during a match, or step back on the title. While
-   * the pointer is locked the browser keeps Escape for itself (it only releases the lock), so
-   * `src/game` should also raise `pauseMenuOpen` when the lock is lost.
+   * Space or Enter during the match intro: skip it. Not while a menu is in front (there the
+   * same keys press its buttons) and only once per intro. Returns true when the key was used.
+   */
+  const onSkipKey = (event: KeyboardEvent, state: UiState): boolean => {
+    if (!isSkipKey(event.code)) return false;
+    const menuOpen = shown.pause || shown.notice || state.settingsOpen === true;
+    if (!takeSkip(skip, state.screen, state.hud, menuOpen)) return false;
+    // Space would otherwise also "click" whatever still has the focus from the lobby.
+    event.preventDefault();
+    onIntent({ type: 'match.skipIntro' });
+    return true;
+  };
+
+  /**
+   * Escape: close the escape menu, or open it during a match, or step back on the title or in
+   * the aerie lobby (rules drawer, close-up). While the pointer is locked the browser keeps
+   * Escape for itself (it only releases the lock), so `src/game` should also raise
+   * `pauseMenuOpen` when the lock is lost.
    */
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape' || event.repeat || last === null) return;
+    if (event.repeat || last === null) return;
+    if (event.key !== 'Escape') {
+      onSkipKey(event, last);
+      return;
+    }
     // The settings panel owns Escape while it is open (it closes itself).
     if (shown.notice || last.settingsOpen === true) return;
     if (shown.pause) {
@@ -192,6 +214,8 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
     } else if (shown.title && title.handleEscape()) {
       event.preventDefault();
       refresh();
+    } else if (shown.lobby && lobby.handleEscape()) {
+      event.preventDefault();
     }
   };
   document.addEventListener('keydown', onKeyDown);
