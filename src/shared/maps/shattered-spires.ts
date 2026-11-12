@@ -179,6 +179,22 @@ function distanceToSegment(
   return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
 }
 
+/**
+ * Camera path of the match-intro flyby (src/cinematics/match-intro.ts), Catmull-Rom through
+ * these points. It comes in from the west, so the low sun (+X) is in frame: wide and high outside
+ * the rim, down through the gap between two rim spires, and on between the claws of the Sundered
+ * Crown to end beside the sky-well. Drawn for the default seed; tests/cinematics/match-intro.test.ts
+ * keeps it out of the rock.
+ */
+const INTRO_SPLINE: readonly Vec3[] = [
+  { x: -950, y: 440, z: 190 },
+  { x: -800, y: 418, z: 60 },
+  { x: -570, y: 368, z: -12 },
+  { x: -340, y: 322, z: -52 },
+  { x: -175, y: 305, z: -47 },
+  { x: -88, y: 300, z: -42 },
+];
+
 /** Ember's canyon centre line (XZ), from its mouth near the gate toward the middle. */
 const CANYON_LINE: readonly (readonly [number, number])[] = [
   [280, -740],
@@ -613,6 +629,7 @@ export function createShatteredSpires(
       cloudSeaY: SPIRES_CLOUD_SEA_Y,
     },
     skyWell: { position: { x: 0, y: SPIRES_SKY_WELL_Y, z: 0 }, ringRadius: ringRadius },
+    introSpline: INTRO_SPLINE,
     canyons: [canyon, canyon.map((p) => ({ x: -p.x, y: p.y, z: -p.z }))],
   };
 }
