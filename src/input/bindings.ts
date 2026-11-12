@@ -7,6 +7,11 @@
  * `KeyboardEvent.code` values (physical keys, so WASD stays WASD on AZERTY) or `Mouse0`..`Mouse4`
  * for `MouseEvent.button` 0..4. Every function returns a NEW table and leaves its input alone.
  *
+ * The gamepad has a SECOND table of the same shape (`Pad0`..`Pad16`, see ./gamepad-bindings.ts)
+ * and every function here works on either. One table for both devices was not possible: the
+ * keyboard defaults already fill both slots of some actions, and a saved keyboard table lists
+ * its actions in full, so pad defaults added later would never reach an existing player.
+ *
  * A/D: the design doc lists A/D both as "fine yaw" and as "add roll". They are ONE action pair
  * here (`turnLeft`/`turnRight`) that does both: it sets BUTTON_ROLL_LEFT/RIGHT (the sim banks
  * harder and tightens the turn) and adds a small fine-yaw term to `steerX`. A dragon rolls to
@@ -36,7 +41,7 @@ export const INPUT_ACTIONS = [
 
 export type InputAction = (typeof INPUT_ACTIONS)[number];
 
-/** A `KeyboardEvent.code`, or `Mouse0`..`Mouse4`. */
+/** A `KeyboardEvent.code`, `Mouse0`..`Mouse4`, or a gamepad code (./gamepad-bindings.ts). */
 export type InputCode = string;
 
 export type InputBindings = Readonly<Record<InputAction, readonly InputCode[]>>;
@@ -50,7 +55,9 @@ export const MAX_CODES_PER_ACTION = 2;
 /**
  * Codes a page cannot use for a held game action:
  * - Escape always releases pointer lock (the browser does it, it cannot be prevented);
- * - the OS/Meta keys open system UI and their keyup is often never delivered.
+ * - the OS/Meta keys open system UI and their keyup is often never delivered;
+ * - on a gamepad, `Pad9` (Menu / Start) always opens the pause menu, the pad's Escape, and
+ *   `Pad16` (Home / Guide) belongs to the OS and most browsers never report it.
  */
 export const RESERVED_CODES: readonly InputCode[] = [
   'Escape',
@@ -58,6 +65,8 @@ export const RESERVED_CODES: readonly InputCode[] = [
   'MetaRight',
   'OSLeft',
   'OSRight',
+  'Pad9',
+  'Pad16',
 ];
 
 /**
@@ -133,10 +142,17 @@ export function resetBindings(): InputBindings {
   return cloneBindings(DEFAULT_BINDINGS);
 }
 
-/** Puts one action back to its default and leaves the others alone ("reset this row"). */
-export function resetActionBinding(bindings: InputBindings, action: InputAction): InputBindings {
+/**
+ * Puts one action back to its default and leaves the others alone ("reset this row").
+ * `defaults`: the table the row comes from (DEFAULT_GAMEPAD_BINDINGS for the pad's table).
+ */
+export function resetActionBinding(
+  bindings: InputBindings,
+  action: InputAction,
+  defaults: InputBindings = DEFAULT_BINDINGS,
+): InputBindings {
   return mapBindings(bindings, (other, codes) => [
-    ...(other === action ? DEFAULT_BINDINGS[action] : codes),
+    ...(other === action ? defaults[action] : codes),
   ]);
 }
 
@@ -241,21 +257,25 @@ function sanitizeCodes(value: unknown, fallback: readonly InputCode[]): readonly
  * Reads what `serializeBindings` wrote. Never throws: broken text, a wrong version or a
  * non-object gives the defaults; a missing or malformed action gets its default; unknown actions
  * and reserved or duplicate codes are dropped. An explicitly empty list stays empty (unbound).
+ * `defaults`: the table to fall back on (DEFAULT_GAMEPAD_BINDINGS for the pad's table).
  */
-export function parseBindings(text: string | null | undefined): InputBindings {
-  if (typeof text !== 'string') return resetBindings();
+export function parseBindings(
+  text: string | null | undefined,
+  defaults: InputBindings = DEFAULT_BINDINGS,
+): InputBindings {
+  if (typeof text !== 'string') return cloneBindings(defaults);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return resetBindings();
+    return cloneBindings(defaults);
   }
-  if (typeof parsed !== 'object' || parsed === null) return resetBindings();
+  if (typeof parsed !== 'object' || parsed === null) return cloneBindings(defaults);
   const root = parsed as { version?: unknown; bindings?: unknown };
-  if (root.version !== BINDINGS_FORMAT_VERSION) return resetBindings();
-  if (typeof root.bindings !== 'object' || root.bindings === null) return resetBindings();
+  if (root.version !== BINDINGS_FORMAT_VERSION) return cloneBindings(defaults);
+  if (typeof root.bindings !== 'object' || root.bindings === null) return cloneBindings(defaults);
   const table = root.bindings as Partial<Record<InputAction, unknown>>;
-  return mapBindings(DEFAULT_BINDINGS, (action, fallback) =>
+  return mapBindings(defaults, (action, fallback) =>
     Object.hasOwn(table, action) ? sanitizeCodes(table[action], fallback) : [...fallback],
   );
 }

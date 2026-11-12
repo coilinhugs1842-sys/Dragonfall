@@ -32,6 +32,37 @@ export type {
 } from './bindings';
 export { createFlightOverlay } from './flight-overlay';
 export type { FlightOverlay, FlightOverlayOptions } from './flight-overlay';
+export {
+  DEFAULT_GAMEPAD_BINDINGS,
+  GAMEPAD_BUTTON_CODES,
+  GAMEPAD_BUTTON_COUNT,
+  GAMEPAD_FLICK_LEFT,
+  GAMEPAD_FLICK_RIGHT,
+  GAMEPAD_MENU_BUTTON,
+  gamepadButtonCode,
+  gamepadButtonIndex,
+  gamepadCodeLabel,
+  gamepadCodeShortLabel,
+  isGamepadCode,
+  parseGamepadBindings,
+  resetGamepadBindings,
+} from './gamepad-bindings';
+export { createGamepadSource, pollGamepadSource, rumbleGamepad } from './gamepad-source';
+export type { GamepadProvider, GamepadSource } from './gamepad-source';
+export {
+  DEFAULT_GAMEPAD_OPTIONS,
+  buttonIsDown,
+  consumeGamepadPause,
+  consumeGamepadPress,
+  createGamepadState,
+  disconnectGamepad,
+  pollGamepad,
+  releaseGamepad,
+  setGamepadBindings,
+  stickReticleGain,
+  stickSteerGain,
+} from './gamepad-state';
+export type { GamepadButtonLike, GamepadLike, GamepadOptions, GamepadState } from './gamepad-state';
 export { InputController, createInputController } from './input-controller';
 export type { InputControllerOptions } from './input-controller';
 export {
@@ -45,12 +76,15 @@ export {
   inputCodeDown,
   inputCodeUp,
   inputMouseMove,
+  inputPadActions,
+  inputPadPulse,
   isActionActive,
   isCodeBound,
   releaseAllInput,
+  releasePadInput,
   sampleInput,
   setInputAim,
   setInputBindings,
 } from './input-state';
-export type { InputOptions, InputState } from './input-state';
+export type { InputDevice, InputOptions, InputState } from './input-state';
 export { reticleDecay, reticleSteerGain, reticleUnitsPerCount, unitCircleScale } from './reticle';

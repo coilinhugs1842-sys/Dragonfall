@@ -13,6 +13,14 @@
  *
  * TAPS: an action pressed and released between two samples (a dodge tap shorter than 33 ms)
  * is latched and still reported as held for exactly one frame.
+ *
+ * GAMEPAD. ./gamepad-state.ts reads the pad and leaves its share here as plain numbers (the
+ * `pad*` fields), so the frame is still built in one place:
+ * - actions held by pad buttons are OR-ed with the keys;
+ * - the right stick adds to the same fine pitch / yaw term as W/S and A/D;
+ * - the left stick IS the reticle while the pad owns the steering (`steerDevice`): the stick
+ *   position is the reticle position, and the pad's own dead zone and curve replace the mouse's.
+ *   The last device that steered owns it, so a resting stick never fights the mouse.
  */
 import {
   BUTTON_AIM,
@@ -80,6 +88,9 @@ export const DEFAULT_INPUT_OPTIONS: Readonly<InputOptions> = {
 export const MIN_SENSITIVITY = 0.1;
 export const MAX_SENSITIVITY = 5;
 
+/** A kind of input device. Keyboard and mouse are one: nobody uses one without the other. */
+export type InputDevice = 'keyboard' | 'gamepad';
+
 export interface InputState {
   /** Live settings: write a field at any time, it is read on the next event or sample. */
   readonly options: InputOptions;
@@ -89,6 +100,29 @@ export interface InputState {
    */
   reticleX: number;
   reticleY: number;
+  /**
+   * The device that gave input last: a bound key or mouse button, mouse movement, a pad button,
+   * a stick pushed out of its dead zone. For the HUD, to show the right button glyphs.
+   */
+  activeDevice: InputDevice;
+  /**
+   * The device that owns the reticle. `keyboard`: mouse movement adds to it and it eases back
+   * to the centre. `gamepad`: the left stick's position is written into it on every poll and
+   * the steer is `padSteerX/Y`. Mouse movement takes it at once; the pad takes it when the
+   * stick is moved (not while it merely rests off-centre).
+   */
+  steerDevice: InputDevice;
+  // --- The gamepad's share, written by ./gamepad-state.ts. All 0 without a pad. ---
+  /** Bitmask of `inputActionBit`: actions held by pad buttons right now. */
+  padActions: number;
+  /** Pad actions pressed since the last sample (taps, and the one-frame flick dodge). */
+  padLatchedActions: number;
+  /** Steer vector from the left stick, after its dead zone, sensitivity and curve. */
+  padSteerX: number;
+  padSteerY: number;
+  /** Right stick in [-1, 1] after its dead zone: scales the fine yaw / pitch term of the keys. */
+  padFineX: number;
+  padFineY: number;
   /** Bitmask of `inputActionBit`: actions held right now. */
   heldActions: number;
   /** Actions pressed since the last sample (so a tap between two samples is not lost). */
@@ -157,6 +191,14 @@ export function createInputState(
     options: { ...DEFAULT_INPUT_OPTIONS, ...options },
     reticleX: 0,
     reticleY: 0,
+    activeDevice: 'keyboard',
+    steerDevice: 'keyboard',
+    padActions: 0,
+    padLatchedActions: 0,
+    padSteerX: 0,
+    padSteerY: 0,
+    padFineX: 0,
+    padFineY: 0,
     heldActions: 0,
     latchedActions: 0,
     sampledActions: 0,
@@ -218,13 +260,14 @@ export function inputCodeDown(state: InputState, code: InputCode): boolean {
   if (
     (actions & BIT_BOOST) !== 0 &&
     state.slotHeld[slot] !== 1 &&
-    (state.heldActions & BIT_BOOST) === 0
+    ((state.heldActions | state.padActions) & BIT_BOOST) === 0
   ) {
     state.boostLatched = !state.boostLatched;
   }
   state.slotHeld[slot] = 1;
   state.heldActions |= actions;
   state.latchedActions |= actions;
+  state.activeDevice = 'keyboard';
   return true;
 }
 
@@ -257,9 +300,53 @@ export function inputMouseMove(state: InputState, dx: number, dy: number): void 
   const scale = unitCircleScale(x, y);
   state.reticleX = x * scale;
   state.reticleY = y * scale;
+  // The mouse takes the reticle from the pad at once, from wherever the stick had put it.
+  if (dx !== 0 || dy !== 0) {
+    state.steerDevice = 'keyboard';
+    state.activeDevice = 'keyboard';
+  }
 }
 
-/** Releases every key and button; the reticle stays. Use when focus or pointer lock is lost. */
+/**
+ * The actions held by pad buttons right now (a bitmask of `inputActionBit`); call once per
+ * gamepad poll. Newly set bits are latched like key presses, so a tap shorter than a tick still
+ * reaches one frame, and a press of the pad's boost button flips the boost latch like the key.
+ */
+export function inputPadActions(state: InputState, held: number): void {
+  const pressed = held & ~state.padActions;
+  if ((pressed & BIT_BOOST) !== 0 && (state.heldActions & BIT_BOOST) === 0) {
+    state.boostLatched = !state.boostLatched;
+  }
+  state.padActions = held;
+  state.padLatchedActions |= pressed;
+}
+
+/** Pad actions that count as pressed for exactly the next frame (the flick dodge). */
+export function inputPadPulse(state: InputState, actions: number): void {
+  state.padLatchedActions |= actions;
+}
+
+/**
+ * Drops everything the gamepad contributed: its held actions and both sticks. Keys, mouse
+ * buttons and the reticle are untouched (./gamepad-state.ts centres a reticle the pad owned).
+ */
+export function releasePadInput(state: InputState): void {
+  // `isActionActive` also reads the last sampled frame: the pad's actions leave that too.
+  state.sampledActions &= ~(state.padActions | state.padLatchedActions);
+  state.padActions = 0;
+  state.padLatchedActions = 0;
+  state.padSteerX = 0;
+  state.padSteerY = 0;
+  state.padFineX = 0;
+  state.padFineY = 0;
+}
+
+/**
+ * Releases every key and mouse button; the reticle stays. Use when focus or pointer lock is
+ * lost. The gamepad's share is not touched: its buttons are read as levels on every poll, so
+ * dropping them here would turn each held button into a fresh press (`releaseGamepad` in
+ * ./gamepad-state.ts is the pad's counterpart).
+ */
 export function releaseAllInput(state: InputState): void {
   state.slotHeld.fill(0);
   state.heldActions = 0;
@@ -304,7 +391,9 @@ export function centerReticle(state: InputState): void {
  * buttons, e.g. `isActionActive(state, 'scoreboard')` for the HUD.
  */
 export function isActionActive(state: InputState, action: InputAction): boolean {
-  return ((state.sampledActions | state.heldActions) & inputActionBit(action)) !== 0;
+  return (
+    ((state.sampledActions | state.heldActions | state.padActions) & inputActionBit(action)) !== 0
+  );
 }
 
 /**
@@ -318,8 +407,10 @@ export function sampleInput(
   dtS: number = TICK_DT_S,
 ): InputFrame {
   const options = state.options;
-  let actions = state.heldActions | state.latchedActions;
+  let actions =
+    state.heldActions | state.latchedActions | state.padActions | state.padLatchedActions;
   state.latchedActions = 0;
+  state.padLatchedActions = 0;
   if (options.boostToggle) {
     // The key only flips the latch; the latch is what boosts.
     actions = state.boostLatched ? actions | BIT_BOOST : actions & ~BIT_BOOST;
@@ -334,17 +425,31 @@ export function sampleInput(
     rx = 0;
     ry = 0;
   }
-  const gain = reticleSteerGain(
-    Math.sqrt(rx * rx + ry * ry),
-    options.deadZone,
-    options.curveExponent,
-  );
+  const padSteers = state.steerDevice === 'gamepad';
+  let steerX: number;
+  let steerY: number;
+  if (padSteers) {
+    // The stick already went through the pad's own dead zone and curve.
+    steerX = state.padSteerX;
+    steerY = state.padSteerY;
+  } else {
+    const gain = reticleSteerGain(
+      Math.sqrt(rx * rx + ry * ry),
+      options.deadZone,
+      options.curveExponent,
+    );
+    steerX = rx * gain;
+    steerY = ry * gain;
+  }
 
   const yawKeys =
     ((actions & BIT_TURN_RIGHT) !== 0 ? 1 : 0) - ((actions & BIT_TURN_LEFT) !== 0 ? 1 : 0);
   let pitchKeys =
     ((actions & BIT_PITCH_UP) !== 0 ? 1 : 0) - ((actions & BIT_PITCH_DOWN) !== 0 ? 1 : 0);
   if (options.invertKeyPitch) pitchKeys = -pitchKeys;
+  // The right stick is the analogue W/S and A/D: together they never exceed one full key.
+  const yawFine = clampUnit(yawKeys + state.padFineX);
+  const pitchFine = clampUnit(pitchKeys + state.padFineY);
 
   let buttons = 0;
   for (let i = 0; i < ACTION_COUNT; i++) {
@@ -352,14 +457,21 @@ export function sampleInput(
   }
 
   out.tick = tick;
-  out.steerX = clampUnit(rx * gain + yawKeys * clampFraction(options.keyYawSteer));
-  out.steerY = clampUnit(ry * gain + pitchKeys * clampFraction(options.keyPitchSteer));
+  out.steerX = clampUnit(steerX + yawFine * clampFraction(options.keyYawSteer));
+  out.steerY = clampUnit(steerY + pitchFine * clampFraction(options.keyPitchSteer));
   out.buttons = state.aimValid ? buttons | BUTTON_AIM : buttons;
   out.aimYaw = state.aimValid ? state.aimYaw : 0;
   out.aimPitch = state.aimValid ? state.aimPitch : 0;
 
-  const decay = reticleDecay(options.recenterRate, dtS);
-  state.reticleX = rx * decay;
-  state.reticleY = ry * decay;
+  if (padSteers) {
+    // A stick returns to the centre by itself and the next poll writes its position again:
+    // easing the reticle here would only make the HUD dot creep between two polls.
+    state.reticleX = rx;
+    state.reticleY = ry;
+  } else {
+    const decay = reticleDecay(options.recenterRate, dtS);
+    state.reticleX = rx * decay;
+    state.reticleY = ry * decay;
+  }
   return out;
 }
