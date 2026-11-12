@@ -2,7 +2,8 @@
  * Dev/test switches read from the page URL (`?perf`, `?debug`, `?bench`, `?autopilot`, `?skip=20`,
  * `?quality=low`, `?netsim=bad`, `?bots=8`, `?lan`, `?solo`, `?autostart`, `?noworker`, and the
  * match set-up switches `?mode=duel`, `?score=5`, `?time=0`, `?teamsize=2`, `?botlevel=hard`,
- * `?fill`, `?lagcomp=0`, `?join=CODE`), and `?viewer=dragon:<class>` for the asset viewer.
+ * `?fill`, `?lagcomp=0`, `?join=CODE`, `?nocine`), and the dev viewers `?viewer=dragon:<class>`,
+ * `?viewer=cine:<scene>` and `?viewer=ui:<screen>`.
  * This module is deliberately tiny and dependency-free (shared types and the pure netsim profile
  * table only): main.ts imports it statically to decide whether the heavy dev chunks (stats-gl,
  * lil-gui) get fetched at all.
@@ -98,8 +99,14 @@ export interface QueryFlags {
   /** `?join=CODE`: skip the title and join this room at once (two-page tests). '' = off. */
   readonly joinCode: string;
   /**
-   * `?viewer=dragon:<class>`: open a dev viewer instead of the game (src/dev/dragon-viewer.ts).
-   * Lower-cased; '' = off.
+   * `?nocine`: a room hosted by this page starts its matches at once, with no lobby launch and
+   * no intro (load tests and scripted matches that should not wait twelve seconds).
+   */
+  readonly noCinematics: boolean;
+  /**
+   * `?viewer=dragon:<class>`, `?viewer=cine:<scene>`, `?viewer=ui:<screen>`: open a dev viewer
+   * instead of the game (src/dev/dragon-viewer.ts, cine-viewer.ts, ui-preview.ts). Lower-cased;
+   * '' = off.
    */
   readonly viewer: string;
 }
@@ -193,6 +200,7 @@ export function parseQueryFlags(search: string): QueryFlags {
     fillBots: isOn(params, 'fill'),
     lagCompensation: params.get('lagcomp') === null || isOn(params, 'lagcomp'),
     joinCode: (params.get('join') ?? '').trim().toUpperCase().slice(0, 12),
+    noCinematics: isOn(params, 'nocine'),
     viewer: (params.get('viewer') ?? '').trim().toLowerCase().slice(0, 32),
   };
 }

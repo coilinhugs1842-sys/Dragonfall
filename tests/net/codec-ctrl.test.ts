@@ -134,7 +134,7 @@ describe('message table', () => {
   });
 
   it('uses the protocol version of the shared constants', () => {
-    expect(PROTOCOL_VERSION).toBe(2);
+    expect(PROTOCOL_VERSION).toBe(3);
   });
 });
 

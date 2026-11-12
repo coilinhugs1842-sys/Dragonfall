@@ -246,7 +246,19 @@ export async function launch({ width = 1280, height = 720, extraArgs = [] } = {}
     if (handlers !== undefined) for (const handler of handlers) handler(message.params);
   });
 
+  // A browser that dies (or a page that crashes) takes the socket with it: every call still
+  // waiting is failed, so the script reports it instead of ending silently with no output.
+  let closed = false;
+  socket.addEventListener('close', () => {
+    closed = true;
+    for (const entry of pending.values()) {
+      entry.reject(new Error(`${entry.method}: the browser closed the connection`));
+    }
+    pending.clear();
+  });
+
   function send(method, params = {}) {
+    if (closed) return Promise.reject(new Error(`${method}: the browser closed the connection`));
     const id = nextId++;
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject, method });

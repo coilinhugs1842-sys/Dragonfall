@@ -38,8 +38,12 @@ export const LAG_COMP_MAX_REWIND_MS = 200;
 /** A disconnected player's slot is held this long for a reconnect. */
 export const RECONNECT_GRACE_MS = 30_000;
 
-/** Bump on any wire-format change; the host rejects a `hello` with a different version. */
-export const PROTOCOL_VERSION = 2;
+/**
+ * Bump on any wire-format change; the host rejects a `hello` with a different version.
+ * 3: the match timeline (Phase 5). The lobby has a `starting` phase, a match can open with an
+ *    `intro`, and during intro and countdown the MATCH_PHASE header tick is the tick play begins.
+ */
+export const PROTOCOL_VERSION = 3;
 
 // --- Rooms and signaling ------------------------------------------------------------------------
 

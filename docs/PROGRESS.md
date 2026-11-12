@@ -5,13 +5,77 @@ up where the last one stopped.
 
 ## Current state
 
-- **Phase:** 4 (art pass) built with procedural assets; Phase 5 (cinematics + lobby) is in progress. The user
-  asked (2026-11-11) for Phase 4 to be finished and Phases 5, 6 and 7 built, with the trailer first in Phase 7.
-  Gates for Phases 0-4 are still theirs to run on real laptops.
-- **Next:** T-5.1.
+- **Phase:** 5 (cinematics + lobby) is built and checked in headless browsers; Phase 6 (scale + content) is
+  next. The user asked (2026-11-11) for Phase 4 to be finished and Phases 5, 6 and 7 built, with the trailer
+  first in Phase 7. Gates for Phases 0-5 are still theirs to run on real laptops.
+- **Next:** T-6.4 (wire Emberfall Caldera; its data and assets are committed), then T-6.6, T-6.3, T-6.2, T-6.5.
 - **Open issues:** see the latest entry.
 
 ## Log
+
+### 2026-11-11: Phase 5 cinematics + lobby (T-5.1 to T-5.6)
+- The full flow now runs: title → aerie lobby → take-off → map flyby with title card → both gates → 3-2-1 →
+  match → death cam on a takedown → podium with awards → back to the aerie with teams kept.
+- **T-5.1** Host timeline (DECISIONS 42): lobby `starting` 3 s, `intro` 6 s on a room's first round, ceasefire
+  outside `playing`, bots idle after the end, host-only skip from the second match, `?nocine`.
+  `PROTOCOL_VERSION` 3.
+- **T-5.2 / T-5.3** `src/cinematics/aerie`: two terraces of five perches cut from the map's own models;
+  riders fly in and land, rear when ready, take off in sequence at the start; drifting camera, close-up on a
+  rider (click a row or a name card, Esc to leave). The lobby UI docks round it: rosters left and right, class
+  picker and Start at the bottom, the full host panel under "Match rules".
+- **T-5.4** `match-intro.ts`: flyby along the map's `introSpline`, title card, far gate, own gate, ending on
+  the chase camera's pose.
+- **T-5.5** `death-cam.ts` (orbit round the killer for 3 s, never an enemy that is veiled) and
+  `src/cinematics/podium` (formation pass, three winners land, awards, DECISIONS 44).
+- **T-5.6** `src/game/show.ts` owns all four and the one directed camera (DECISIONS 43). Cuts go through a
+  cream fade that waits for the shader warm-up (DECISIONS 45). Rigs are built at match load
+  (`Dragons.prewarm`), late assets re-run the warm-up, the lobby's rigs are freed while a match is loaded and
+  the aerie is freed with the room.
+- Review fixes from the Phase 4 list are in (commit `1cf56e1`): loader failure paths, retry of a failed dragon
+  class, dispose of instanced buffers, shadow map freed on Low, LOD cap hysteresis, textures capped by the
+  preset's `maxTextureSize`, tests for the animator, the LOD pickers and worker/main map parity.
+- 2517 tests in 119 files; typecheck, test, build pass. Entry chunk 591 kB (196 gzip).
+- **Checked in headless Edge** with `tools/capture/timeline.mjs` (a page over time, with the game's clocks per
+  frame) and `tools/capture/duo.mjs` (a host page and a guest page in one room over real WebRTC): host and
+  guest show the same phase within 0.15 s through lobby, launch, intro, countdown and play; no console errors
+  or warnings on either page; results, podium and the return to the lobby on the host.
+- **`?bench`, production build, same set-up as the Phase 4 table (GTX 1660 SUPER, 1920 × 1080, 60 s):**
+
+  | | Low | Medium | High | Budget (L / M / H) |
+  | --- | --- | --- | --- | --- |
+  | Avg fps | 293.4 | 297.0 | 294.4 | 60 |
+  | 1 % low fps | 108.6 | 147.6 | 113.6 | |
+  | Slowest frame, ms | 60.0 | 50.0 | 76.7 | |
+  | Draw calls, max | 41 | 56 | 91 | 120 / 180 / 350 |
+  | Triangles, max | 78.9k | 138.7k | 307.4k | 250k / 450k / 1.2M |
+  | Particles, peak | 154 | 204 | 374 | 600 / 1200 / 3000 |
+  | Audio voices, peak | 16 | 24 | 20 | 16 / 24 / 32 |
+  | Render scale, min | 0.70 | 0.85 | 1.00 | |
+
+  The 1 % lows are lower than in the Phase 4 table, so the Phase 4 commit was rebuilt and run back to back
+  with this one on Medium: Phase 4 gave 150.8 and 133.1 (slowest frames 47 and 100 ms), this build 159.1
+  (slowest 30 ms). The difference to the old table is the machine on the day, not the code. Both builds
+  still have a few 30 to 100 ms frames in the first 15 s of a fight: first use of something (not yet found).
+- Lobby cost (aerie viewer, ten dragons, whole frame): Low 23 draw calls / 38k triangles, Medium up to 41 /
+  94k, High 64 / 152k. Podium: 5 to 6 draw calls, under 2.5k triangles.
+- **Phase 5 gate for the user** (4+ players, real laptops):
+  1. Host a room, share the code, have three or more people join. In the aerie: does everyone see every
+     rider land, the ready rear, and the name cards over the right dragons? Click a rider for the close-up.
+  2. Host: open Match rules, change mode, team size and a class restriction; move a rider; press Start.
+  3. Everyone: take-off, flyby with the map's name, both gates, 3-2-1, all at the same moment on every screen.
+  4. Get taken down once: the camera should circle whoever got you for about 3 s.
+  5. Finish the match: formation pass, podium, awards, table, then the aerie again with the same teams.
+  6. Start a second match: the host should see "skip" during the intro (Space or Enter).
+- **Not verified:** all of it in motion by a person (only stills and clocks were read); sound during the
+  cinematics; anything on U-series hardware; reduce-motion versions in the real game (viewer only).
+- **Known gaps:** the first second of the intro is under the fade while shaders compile; a lone host in a
+  hosted room still gets launch and intro; terrain and storm damage are not stopped by the ceasefire; the
+  end of the flyby pushes into the pink sky-well crystal, which is flat-shaded up close; seat heights on the
+  perches were measured for one class only.
+- **Incident:** the capture tool leaked a browser profile per run (138 folders, 6.8 GB in the temp folder; C:
+  ran out of space for a while). A workstream deleted the `dragonfall-cdp-*` folders. Fixed in
+  `tools/capture/cdp.mjs`: the browser tree is killed, the profile is always deleted, the next launch sweeps
+  what a hard kill left, and the profile's caches are capped (about 4 MB each now).
 
 ### 2026-11-11: Phase 4 art pass (T-4.2 to T-4.9; T-4.1 blocked)
 - The game now has its real look: four skinned dragons with riders, the Shattered Spires map built from 12

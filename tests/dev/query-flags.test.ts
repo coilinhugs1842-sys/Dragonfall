@@ -32,6 +32,7 @@ describe('parseQueryFlags', () => {
       fillBots: false,
       lagCompensation: true,
       joinCode: '',
+      noCinematics: false,
       viewer: '',
     };
     expect(parseQueryFlags('')).toEqual(off);
@@ -195,6 +196,7 @@ describe('getQueryFlags', () => {
       fillBots: false,
       lagCompensation: true,
       joinCode: '',
+      noCinematics: false,
       viewer: '',
     });
   });

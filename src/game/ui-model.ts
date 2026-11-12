@@ -13,6 +13,7 @@ import type {
   ControlsUiState,
   HudState,
   LoadingState,
+  LobbyPlate,
   LobbyState,
   PlayerId,
   ResultsState,
@@ -95,9 +96,18 @@ export interface MutableUiState {
   settingsTab: SettingsTab;
   /** Absent until `src/game` has a binding table to show. */
   controls?: ControlsUiState;
+  /** The aerie is drawn behind the lobby (the panels dock to the sides). */
+  aerie: boolean;
+  /** Name-card anchors over the perches: the show's own pool, `lobbyPlateCount` live entries. */
+  lobbyPlates: readonly LobbyPlate[];
+  lobbyPlateCount: number;
+  lobbyFocusId: PlayerId;
+  /** The cream between two scenes, 0..1. */
+  fade: number;
 }
 
 const NO_PINGS: readonly number[] = Object.freeze([]);
+const NO_PLATES: readonly LobbyPlate[] = Object.freeze([]);
 
 export function createUiState(settings: SettingsState = DEFAULT_SETTINGS): MutableUiState {
   return {
@@ -119,6 +129,11 @@ export function createUiState(settings: SettingsState = DEFAULT_SETTINGS): Mutab
     pauseMenuOpen: false,
     settingsOpen: false,
     settingsTab: 'video',
+    aerie: false,
+    lobbyPlates: NO_PLATES,
+    lobbyPlateCount: 0,
+    lobbyFocusId: NO_PLAYER,
+    fade: 0,
   };
 }
 

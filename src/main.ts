@@ -113,6 +113,17 @@ function boot(): void {
     return;
   }
 
+  // `?viewer=ui:<screen>`: one UI screen with made-up state, over the plain backdrop.
+  if (flags.viewer.startsWith('ui')) {
+    void import('./dev/ui-preview').then((m) => {
+      m.startUiPreview(
+        requireElement('ui', HTMLElement),
+        new URLSearchParams(window.location.search),
+      );
+    });
+    return;
+  }
+
   const now = (): number => performance.now();
   // Fetched only with `?netsim` or `?debug`; the game waits for it before its first transport.
   const netsim = loadNetsim(flags, now);
@@ -148,6 +159,8 @@ function boot(): void {
       solo: flags.solo && !bench,
       autostart: flags.autostart || bench,
       noWorker: flags.noWorker,
+      // The bench measures the fight, not the way into it.
+      cinematics: !flags.noCinematics && !bench,
       measure: flags.perf || flags.debug || bench || import.meta.env.DEV,
     },
     storage: { local: storageOrNull('localStorage'), session: storageOrNull('sessionStorage') },

@@ -3,8 +3,11 @@
  * the cloud puffs; a match adds the map, the dragons and the chase camera on top and takes them
  * away again when it ends (docs/ARCHITECTURE.md, "Scenes and memory").
  *
- * - Title and lobby: `updateBackdrop` drifts a camera slowly over the cloud sea. Cheap: two
- *   fullscreen-ish passes and the puffs, no map, no dragons. (The aerie scene is Phase 5.)
+ * - Title: `updateBackdrop` drifts a camera slowly over the cloud sea. Cheap: two
+ *   fullscreen-ish passes and the puffs, no map, no dragons.
+ * - Lobby: `setLobbySet` puts the aerie's terraces into the same sky and `updateLobby` draws
+ *   the riders perched on them. The set is hidden, and its dragons are freed by the caller,
+ *   while a match is loaded.
  * - Match: `updateMatch` moves every view to the frame's WorldView. The camera follows the local
  *   dragon; a spectator follows one rider at a time (`cycleSpectateTarget`).
  *
@@ -22,11 +25,13 @@ import type { CameraDirector, CameraRig } from '../render';
 import {
   DRAGON_FLAG_ALIVE,
   DRAGON_FLAG_VEILED,
+  MAX_PLAYERS,
   NO_PLAYER,
   QUALITY_PRESETS,
   findDragonView,
 } from '../shared';
 import type {
+  DragonClassId,
   DragonView,
   GameEventSource,
   ArenaMap,
@@ -56,11 +61,6 @@ export const STAGE_MAP_CHUNK_SIZE = 500;
 const CAMERA_SEA_CLEARANCE = 1.5;
 /** Squared metres in one frame beyond which the camera's subject was respawned, not flown. */
 const TELEPORT_DISTANCE_SQ = 60 * 60;
-/**
- * Death cam placeholder (the 3 s orbit is T-5.5): the camera holds its last pose this long
- * after the local dragon went down, then cuts to whoever got the takedown.
- */
-const DEATH_CAM_HOLD_S = 0.9;
 
 // --- Backdrop drift (title, lobby) -----------------------------------------------------------------
 const BACKDROP_FOV = 55;
@@ -103,8 +103,12 @@ export interface Stage {
   readonly matchSeed: number;
   /** What the map view draws: `ready` = the real assets; null with no match loaded. */
   readonly mapLoadState: MapLoadState | null;
-  /** Builds the map view, the dragons and the chase camera. Load-time: allocates. */
-  loadMatch(assets: MatchAssets): void;
+  /**
+   * Builds the map view, the dragons and the chase camera. Load-time: allocates. `riders` is the
+   * class of every dragon that is going to fly (one entry each): their rigs are built now, so
+   * the shader warm-up covers them and no frame of the match has to make one.
+   */
+  loadMatch(assets: MatchAssets, riders?: readonly DragonClassId[]): void;
   /** Frees what `loadMatch` built. Safe to call when nothing is loaded. */
   unloadMatch(): void;
   /** One title / lobby frame. */
@@ -127,8 +131,9 @@ export interface Stage {
   /** Next camera subject for a spectator (wraps round). */
   cycleSpectateTarget(): void;
   /**
-   * Whose dragon the camera is on this frame: the local rider's own, the rider a spectator
-   * watches, the killer during the death cam; NO_PLAYER while it holds still or drifts.
+   * Whose dragon the chase camera is on this frame: the local rider's own, the rider a
+   * spectator watches, the killer while the local rider is down; NO_PLAYER while it holds still
+   * or drifts.
    */
   readonly watchedId: PlayerId;
   /** The effects of the loaded match (cosmetic local shots); null with none loaded. */
@@ -157,6 +162,8 @@ export interface Stage {
   warmUp(): Promise<void>;
   /** True while a `warmUp` is still linking programs (the loading screen stays up). */
   readonly warming: boolean;
+  /** Warm-ups started since the stage was made (a diagnostic: each one after a load is a late asset). */
+  readonly warmUps: number;
   setAspect(aspect: number): void;
   /** Forwards a preset change to every view. Not per frame: sky and sea recompile a shader. */
   setQuality(id: QualityPresetId): void;
@@ -228,14 +235,32 @@ export function createStage(options: StageOptions): Stage {
   const sunYaw = Math.atan2(map.sky.sunDirection.x, map.sky.sunDirection.z);
 
   let match: MatchViews | null = null;
+  // The lobby set (the aerie) and the dragons perched on it. Hidden while a match is loaded:
+  // the map takes the same sky.
+  let lobbySet: Object3D | null = null;
+  let lobbyDragons: Dragons | null = null;
   const events = options.events ?? null;
   const webgl = options.webgl ?? null;
   const precompile = options.precompile ?? null;
   /** Warm-ups still waiting for the GPU. */
   let warmingCount = 0;
+  let warmUps = 0;
   const warmDone = (): void => {
     warmingCount--;
   };
+
+  // What the views had put in front of the GPU when the last warm-up ran. A rig or a map model
+  // that arrives later (a slow download, a class nobody listed) moves its view's revision, and
+  // the frame that sees that warms up again before the new programs are needed.
+  let warmDragons = -1;
+  let warmMap = -1;
+  let warmLobby = -1;
+
+  function noteRevisions(): void {
+    warmDragons = match !== null ? match.dragons.revision : -1;
+    warmMap = match !== null ? match.mapView.revision : -1;
+    warmLobby = lobbyDragons !== null ? lobbyDragons.revision : -1;
+  }
 
   function warmUp(): Promise<void> {
     if (disposed || precompile === null) return Promise.resolve();
@@ -244,11 +269,14 @@ export function createStage(options: StageOptions): Stage {
     const compile = (): void => {
       pending = precompile(scene, camera);
     };
-    // The effect meshes are hidden until first used; the compile skips what is not visible.
+    // The compile walks hidden objects too; the effects still show their meshes for it, so
+    // the programs are the ones a visible draw asks for.
     if (match !== null) match.vfx.warmUp(compile);
     else compile();
+    noteRevisions();
     const started: Promise<void> = pending ?? Promise.resolve();
     warmingCount++;
+    warmUps++;
     return started.then(warmDone, warmDone);
   }
   // Fetch and decode the map's GLBs and textures now, behind the title: a match that starts
@@ -269,16 +297,9 @@ export function createStage(options: StageOptions): Stage {
   let cameraShake = 1;
   let cameraReduceMotion = false;
   let watchedId: PlayerId = NO_PLAYER;
-  /** Seconds the local dragon has been down (the death cam's clock). */
-  let downForS = 0;
   let spectateId: PlayerId = NO_PLAYER;
   /** True on a frame where the chase camera had somebody to follow. */
   let chasing = false;
-
-  // The lobby set (the aerie) and the dragons perched on it. Hidden while a match is loaded:
-  // the map takes the same sky.
-  let lobbySet: Object3D | null = null;
-  let lobbyDragons: Dragons | null = null;
 
   function showLobby(visible: boolean): void {
     if (lobbySet !== null) lobbySet.visible = visible;
@@ -390,7 +411,6 @@ export function createStage(options: StageOptions): Stage {
     match = null;
     chasing = false;
     watchedId = NO_PLAYER;
-    downForS = 0;
     lastSubjectId = NO_PLAYER;
     showLobby(true);
   }
@@ -414,6 +434,9 @@ export function createStage(options: StageOptions): Stage {
     get warming() {
       return warmingCount > 0;
     },
+    get warmUps() {
+      return warmUps;
+    },
     setCameraDirector(next: CameraDirector | null): void {
       director = next;
       if (next === null) directed = false;
@@ -428,7 +451,7 @@ export function createStage(options: StageOptions): Stage {
       return match === null ? null : match.mapView.loadState;
     },
 
-    loadMatch(assets: MatchAssets): void {
+    loadMatch(assets: MatchAssets, riders?: readonly DragonClassId[]): void {
       if (disposed) return;
       if (match !== null) {
         if (match.seed === assets.seed) return;
@@ -438,9 +461,10 @@ export function createStage(options: StageOptions): Stage {
         chunkSize: STAGE_MAP_CHUNK_SIZE,
         renderer: webgl,
       });
-      // The dead are drawn: there is no death cam yet, so the fall is the only feedback.
-      // Skinned dragons from the GLBs; the placeholder shows while a class is still loading.
+      // The dead are drawn (they fall). Skinned dragons from the GLBs; the placeholder shows
+      // while a class is still loading.
       const dragons = createDragons(preset, { showDead: true, library: dragonAssets });
+      if (riders !== undefined && riders.length > 0) dragons.prewarm(riders);
       const rig = createCameraRig({
         terrain: assets.collision,
         minY: cloudSeaY + CAMERA_SEA_CLEARANCE,
@@ -465,8 +489,7 @@ export function createStage(options: StageOptions): Stage {
       showLobby(false);
       void warmUp();
       watchedId = NO_PLAYER;
-      downForS = 0;
-      spectateId = NO_PLAYER;
+        spectateId = NO_PLAYER;
       seenCount = 0;
       chasing = false;
       lastSubjectId = NO_PLAYER;
@@ -488,8 +511,13 @@ export function createStage(options: StageOptions): Stage {
       clearLobbySet();
       if (object === null) return;
       lobbySet = object;
-      // No dead dragons in a lobby; skinned dragons from the same library as the match.
-      lobbyDragons = createDragons(preset, { showDead: false, library: dragonAssets });
+      // No dead dragons in a lobby; skinned dragons from the same library as the match. All
+      // ten stay skinned on every preset: there is no map and no fight to pay for here.
+      lobbyDragons = createDragons(preset, {
+        showDead: false,
+        library: dragonAssets,
+        minSkinned: MAX_PLAYERS,
+      });
       scene.add(object, lobbyDragons.object);
       showLobby(match === null);
       if (match === null) void warmUp();
@@ -506,6 +534,7 @@ export function createStage(options: StageOptions): Stage {
       if (lobbyDragons !== null && match === null) {
         lobbyDragons.update(view, dtS, camera);
         lighting.setBlobCasters(view.dragons, view.dragonCount, camera.position);
+        if (lobbyDragons.revision !== warmLobby) void warmUp();
       }
     },
 
@@ -534,18 +563,15 @@ export function createStage(options: StageOptions): Stage {
 
       const local = findDragonView(view, view.localDragonId);
       if (local !== undefined && (local.flags & DRAGON_FLAG_ALIVE) !== 0) {
-        downForS = 0;
-        watchedId = local.id;
+            watchedId = local.id;
         rig.setAim(steerX, steerY);
         followSubject(rig, local, dtS);
       } else if (local !== undefined) {
-        // Down: hold the last pose for a beat, then watch whoever got the takedown. With no
-        // killer to show (terrain, storm, a veiled enemy) the camera stays where it was.
-        downForS += dtS;
-        const killer =
-          downForS >= DEATH_CAM_HOLD_S && view.local.valid
-            ? findDragonView(view, view.local.killerId)
-            : undefined;
+        // Down: the chase rig goes to whoever got the takedown at once. The death cam
+        // (src/cinematics) orbits that dragon on the directed camera meanwhile, and hands back
+        // to this rig when its time is up. With no killer to show (terrain, storm, a veiled
+        // enemy) the camera stays where it was.
+        const killer = view.local.valid ? findDragonView(view, view.local.killerId) : undefined;
         if (
           killer !== undefined &&
           killer.id !== local.id &&
@@ -567,8 +593,7 @@ export function createStage(options: StageOptions): Stage {
           }
         }
       } else {
-        downForS = 0;
-        const subject = spectateSubject(view);
+            const subject = spectateSubject(view);
         if (subject !== undefined) {
           watchedId = subject.id;
           rig.setAim(0, 0);
@@ -590,6 +615,10 @@ export function createStage(options: StageOptions): Stage {
       // Last: the effects read the placed camera (billboards, near fade).
       camera.updateMatrixWorld();
       views.vfx.update(view, timeS, dtS, camera);
+      // Something new reached the scene this frame (a late model, a rig nobody listed).
+      if (views.dragons.revision !== warmDragons || views.mapView.revision !== warmMap) {
+        void warmUp();
+      }
     },
 
     cycleSpectateTarget(): void {

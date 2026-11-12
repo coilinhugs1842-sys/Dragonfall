@@ -174,3 +174,26 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
 41. **`?bench` is a whole set-up, not a camera toggle.** It hosts a 5v5 bot Skirmish that cannot end, hands the
     camera to a fixed path round the map centre, skips 10 s of warm-up and measures the next 60 s
     (`?bench=20` for a shorter run). `node tools/capture/bench.mjs` runs it headless on all three presets.
+42. **Cinematics run on the host's clocks and put nothing extra on the wire.** The lobby has a `starting`
+    phase (3 s, `MATCH_TUNING.lobbyLaunchS`: the dragons take off) and a room's first round opens with an
+    `intro` phase (6 s) before the 3-2-1. Every browser plays the aerie launch, the flyby, the death cam and
+    the podium from `LobbyState.phase` and `WorldView.clock`, so all screens show the same moment (measured:
+    a guest is about 0.15 s behind the host, its interpolation delay). Combat damage is off outside `playing`.
+    The host may skip the intro from the room's second match on; guests cannot. `?nocine` (and `?bench`)
+    start matches at once. The MATCH_PHASE header tick now means "the tick play begins" during intro and
+    countdown, so `PROTOCOL_VERSION` is 3.
+43. **One directed camera, one owner per frame.** The stage has a single `CameraDirector` slot;
+    `src/game/show.ts` fills it and picks, in order: a dev tool (`?bench`), the aerie (lobby), the intro, the
+    podium, the death cam. The chase rig keeps following underneath, so handing back is seamless.
+44. **The podium is a puppet show.** During `results` the podium rewrites the frame's dragons in the
+    WorldView (pose, flags, health) and the ordinary dragon renderer draws them. The MVP lands last, at
+    9.5 s of the 12, after roaring in the air: a deliberate change from "all three land together".
+45. **Every scene cut goes through the cream, and waits there for the shaders.** A change of scene (title →
+    lobby, lobby → match, match → lobby) sets a full-screen fade in the sky's cream colour; it is held until
+    the new scene has a picture and its programs are linked, then fades over 0.45 s (a hold longer than 0.6 s
+    shows the loading card, and one longer than 6 s gives up and shows the scene). While it holds, the frame
+    is not drawn: drawing a scene whose programs are still linking makes the GPU finish them inside that
+    frame. Leaving to the title is not faded (errors must show at once).
+46. **The lobby keeps all ten dragons skinned on every preset.** Low's cap of six skinned dragons is for a
+    fight; the aerie has no map and no effects behind it, and a placeholder on a perch would be the first
+    thing a player sees. Measured in the aerie viewer with ten dragons: 23 draw calls / 38k triangles on Low.

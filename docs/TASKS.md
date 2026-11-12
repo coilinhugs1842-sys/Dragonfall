@@ -59,12 +59,12 @@ Ids are `T-<phase>.<n>`. Work top to bottom unless the user says otherwise. Each
 - [~] T-4.9 Perf pass with real assets on U-series: hit the budgets; record `?bench`. *`?bench` is built and recorded on the dev desktop, inside every budget. The U-series run is the user's gate.*
 
 ## Phase 5: Cinematics + lobby
-- [ ] T-5.1 Host-driven match phase timeline (intro → countdown → live → end → podium), synced to clients
-- [ ] T-5.2 Aerie lobby scene: two terraces × 5 perches, landing/ready animations, nameplates, camera drift + close-ups
-- [ ] T-5.3 Host panel in the aerie (mode, map, team size, uneven, limits, friendly fire, classes, assign/balance/shuffle/lock, kick, start)
-- [ ] T-5.4 Match intro: map flyby, title card, team gate reveal, countdown
-- [ ] T-5.5 Death cam orbit; results podium + formation pass; MVP stats
-- [ ] T-5.6 Scene transitions with proper dispose; loading screen with shader precompile
+- [x] T-5.1 Host-driven match phase timeline (intro → countdown → live → end → podium), synced to clients
+- [x] T-5.2 Aerie lobby scene: two terraces × 5 perches, landing/ready animations, nameplates, camera drift + close-ups
+- [x] T-5.3 Host panel in the aerie (mode, map, team size, uneven, limits, friendly fire, classes, assign/balance/shuffle/lock, kick, start)
+- [x] T-5.4 Match intro: map flyby, title card, team gate reveal, countdown
+- [x] T-5.5 Death cam orbit; results podium + formation pass; MVP stats
+- [x] T-5.6 Scene transitions with proper dispose; loading screen with shader precompile
 
 ## Phase 6: Scale + content
 - [ ] T-6.1 5v5 load tests (real laptops + bots) after a 10-min warm-up on the U-series host

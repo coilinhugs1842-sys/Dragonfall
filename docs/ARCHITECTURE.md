@@ -78,3 +78,12 @@ These are the seams between the sim/net side and the view side. View modules cod
 Scenes: Title (light), Aerie lobby, Match (map), Results (reuses the match map). Moving between them disposes
 whatever the next scene doesn't need. Shared assets such as dragons and VFX textures stay cached. The app keeps
 one `WebGLRenderer` for its whole life.
+
+As built (Phase 5): there is one `Stage` (`src/game/stage.ts`) with the sky, the sea and the clouds for the
+whole life of the page. A match adds the map, the dragons, the effects and the chase camera, and takes them
+away again. The aerie is a set the stage shows while no match is loaded; its dragon rigs are freed when a match
+loads and the set itself when the page leaves the room. The podium is built with each match and freed with it.
+`src/game/show.ts` owns the cinematics and decides which one places the camera on a frame (the stage has one
+`CameraDirector` slot; the chase rig keeps following underneath). Cinematics read only the host's clocks
+(`LobbyState.phase`, `WorldView.clock`), so nothing about them is sent over the network. A change of scene goes
+through a cream fade that is held until the new scene's shaders are compiled (DECISIONS 42 to 46).

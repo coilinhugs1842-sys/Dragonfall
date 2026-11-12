@@ -138,6 +138,12 @@ export interface DragonsOptions {
    * dragon is drawn as the placeholder.
    */
   readonly library?: DragonAssetLibrary | null;
+  /**
+   * At least this many dragons stay skinned whatever the preset's cap says. The aerie lobby
+   * asks for ten: its dragons sit still in a close shot with no map and no effects behind them,
+   * where a placeholder on a perch would be the first thing a player sees. Default: the preset.
+   */
+  readonly minSkinned?: number;
 }
 
 /** Live numbers for the perf HUD. One object, mutated in place by `update`. */
@@ -347,7 +353,13 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
   library?.setMaxTextureSize(preset.maxTextureSize);
 
   let quality = preset;
-  let policy: DragonLodPolicy = dragonLodPolicy(preset);
+  const minSkinned = options.minSkinned ?? 0;
+  /** The preset's policy, with the skinned cap raised to `minSkinned` where it is lower. */
+  function policyOf(of: QualityPreset): DragonLodPolicy {
+    const base = dragonLodPolicy(of);
+    return base.maxSkinned >= minSkinned ? base : { ...base, maxSkinned: minSkinned };
+  }
+  let policy: DragonLodPolicy = policyOf(preset);
   let castShadows = preset.shadowCasters !== 'none';
 
   // Linear team colours, by TeamId.
@@ -807,7 +819,7 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
     // Another preset is another shader variant: every material compiles again on its next use.
     if (next.id !== quality.id) revision++;
     quality = next;
-    policy = dragonLodPolicy(next);
+    policy = policyOf(next);
     castShadows = next.shadowCasters !== 'none';
     for (const rig of allRigs) {
       setDragonMaterialQuality(rig.material, next.id);

@@ -78,7 +78,9 @@ import {
   ABILITY_TABLE,
   DRAGON_FLAG_ALIVE,
   FALLBACK_PLAYER_NAME,
+  MAPS,
   MATCH_TUNING,
+  MODES,
   NO_PLAYER,
   QUALITY_PRESETS,
   TICK_DT_S,
@@ -93,6 +95,7 @@ import {
   resetInputFrame,
 } from '../shared';
 import type {
+  DragonClassId,
   GameEventBus,
   InputFrame,
   LobbyState,
@@ -100,6 +103,7 @@ import type {
   MatchPhaseEvent,
   MatchPlayerStats,
   MatchWinner,
+  ModeId,
   MutableWorldView,
   PlayerId,
   QualityPresetId,
@@ -130,6 +134,8 @@ import { createHudBuilder, createHudFrameInput } from './hud-builder';
 import type { HudBuilder } from './hud-builder';
 import { createMatchAssetsCache } from './match-assets';
 import type { MatchAssets } from './match-assets';
+import { createShow } from './show';
+import type { Show, ShowScene } from './show';
 import { createStage } from './stage';
 import type { CameraDirector, Stage } from './stage';
 import {
@@ -200,6 +206,11 @@ export interface GameFlags {
   readonly autostart: boolean;
   /** `?noworker`: run the host's sim on the main thread instead of in the host worker. */
   readonly noWorker: boolean;
+  /**
+   * False (`?nocine`, `?bench`): a hosted match starts at once, with no lobby launch and no
+   * intro. The aerie, the death cam and the podium are views and stay. Default true.
+   */
+  readonly cinematics?: boolean;
   /** Measure per-tick cost and keep a debug probe (`?perf`, `?debug`, dev builds). */
   readonly measure: boolean;
 }
@@ -239,6 +250,23 @@ export interface GameReport {
   readonly inMatch: boolean;
   readonly isRider: boolean;
   readonly phase: MatchPhase;
+  /** What the cinematics run on: the host's clocks, and what this page made of them. */
+  readonly show: {
+    /** Seconds into `phase`, from the frame's WorldView. */
+    readonly phaseTimeS: number;
+    readonly lobbyPhase: string;
+    /** The cream between scenes, 0..1. */
+    readonly fade: number;
+    /** The aerie is drawn behind the lobby. */
+    readonly aerie: boolean;
+    /** A cinematic placed this frame's camera. */
+    readonly directed: boolean;
+    readonly introCard: number;
+    /** A scene is held under the cream until its shaders are compiled. */
+    readonly warming: boolean;
+    /** Shader warm-ups since the page loaded. */
+    readonly warmUps: number;
+  };
   /** The match clock and score as the HUD shows them. */
   readonly match: {
     readonly mode: string;
@@ -443,13 +471,19 @@ interface MutableEffectsOptions {
 
 /** What the page remembers about the match on screen (set when its views load). */
 interface MatchFacts {
-  mode: string;
+  mode: ModeId;
   scoreLimit: number;
   /** Seconds a dead dragon waits; Infinity while the mode has no respawns (Duel). */
   respawnDelayS: number;
   round: number;
   results: ResultsState | null;
 }
+
+/**
+ * A cut held under the cream this long shows the loading card on top of it. Shorter loads (the
+ * usual case: everything was fetched behind the title) pass as a plain fade.
+ */
+const LOADING_CARD_AFTER_S = 0.6;
 
 const EVENT_TYPES = [
   'hit',
@@ -480,6 +514,13 @@ export function createGame(options: GameOptions): Game {
     webgl: renderer.webgl,
     precompile: (scene, camera) => renderer.precompile(scene, camera),
   });
+  /** The aerie, the intro, the death cam and the podium, and which of them has the camera. */
+  const show: Show = createShow({
+    stage,
+    map: assets.defaultMap,
+    quality: renderer.presetId,
+    webgl: renderer.webgl,
+  });
   const probe = flags.measure ? createDebugProbe() : null;
   const tokenStore: ReconnectTokenStore = createStorageTokenStore(storage.session);
   // One per browser, so a kick also keeps out a new tab that has no token.
@@ -509,6 +550,7 @@ export function createGame(options: GameOptions): Game {
 
   const facts = createSessionFacts();
   const uiState = createUiState(shownSettings);
+  uiState.lobbyPlates = show.plates;
   let lastError: UiError | null = null;
   let pauseOpen = false;
 
@@ -577,8 +619,12 @@ export function createGame(options: GameOptions): Game {
     altitude: AUTOPILOT_ALTITUDE,
   };
   const arenaFocus: Vec3 = { x: course.centerX, y: AUTOPILOT_ALTITUDE, z: course.centerZ };
-  /** A dev tool holds the camera (`setDevCameraDirector`). */
-  let devDirector: CameraDirector | null = null;
+  /** The rider classes of the match being loaded (the dragon rigs built at load). */
+  const riderClasses: DragonClassId[] = [];
+  /** The cover over a match that is still fetching or compiling (see `frame`). */
+  const loadingState = { progress: 0, label: '' };
+  /** The aerie is what this frame drew behind the lobby panels. */
+  let lobbyOnScreen = false;
   /** `buildView` gave a match picture this frame. */
   let matchOnScreen = false;
   /** The local player's latest steer, for the camera's look-ahead. */
@@ -700,6 +746,7 @@ export function createGame(options: GameOptions): Game {
   });
   const unsubscribePreset = renderer.onPresetChange((id) => {
     stage.setQuality(id);
+    show.setQuality(id);
     audio?.setQuality(id);
   });
 
@@ -739,6 +786,7 @@ export function createGame(options: GameOptions): Game {
     },
     setCamera(fovDeg, shake, reduceMotion): void {
       stage.setCameraSettings(fovDeg, shake, reduceMotion);
+      show.setReduceMotion(reduceMotion);
     },
     setInput(sensitivity, invertY, boostToggle): void {
       const inputOptions = input.state.options;
@@ -835,6 +883,8 @@ export function createGame(options: GameOptions): Game {
     }
     if (!keepRejoin) writeRejoin(storage.session, null);
     stage.unloadMatch();
+    show.endMatch();
+    show.leaveRoom();
     endMatchViews();
     bus.clear();
     matchAssets = null;
@@ -886,6 +936,7 @@ export function createGame(options: GameOptions): Game {
       autoSettings: kind === 'host' ? (flags.autoSettings ?? null) : null,
       autopilot: flags.autopilot && flags.autopilotBot !== true ? course : null,
       spawnWorker: !flags.noWorker && hostWorkerSupported() ? spawnHostWorker : null,
+      cinematics: flags.cinematics !== false,
       onWorkerFallback: (reason: string): void => {
         console.warn(`Host worker unavailable (${reason}); hosting on the main thread.`);
       },
@@ -1042,9 +1093,15 @@ export function createGame(options: GameOptions): Game {
         }
         return;
       case 'lobby.focusPlayer':
-      case 'match.skipIntro':
-        // Phase 5 (lobby camera, intro cinematic).
+        // Local only: which perch this player's camera frames.
+        show.focus(intent.playerId);
         return;
+      case 'match.skipIntro': {
+        // The host decides (and only from the room's second match on); a guest cannot ask.
+        const current = run;
+        if (current !== null && current.kind !== 'client') current.session.requestSkipIntro();
+        return;
+      }
       default: {
         // Lobby and host-panel intents: the host applies its own, a client asks the host.
         const current = run;
@@ -1147,7 +1204,15 @@ export function createGame(options: GameOptions): Game {
 
     if (inMatch && (!stage.matchLoaded || stage.matchSeed !== seed >>> 0)) {
       matchAssets = assets.get(seed);
-      stage.loadMatch(matchAssets);
+      // One rig per rider is built now, so the warm-up compiles them with the map.
+      riderClasses.length = 0;
+      if (facts.lobby !== null) {
+        for (const player of facts.lobby.players) {
+          if (player.side !== 'spectator') riderClasses.push(player.classId);
+        }
+      }
+      show.beginMatch(matchAssets);
+      stage.loadMatch(matchAssets, riderClasses);
       pauseOpen = false;
       beginMatchViews(current);
       if (current !== null && current.kind !== 'client' && current.snapOnLoad) {
@@ -1157,6 +1222,7 @@ export function createGame(options: GameOptions): Game {
       }
     } else if (!wantMatch && stage.matchLoaded) {
       stage.unloadMatch();
+      show.endMatch();
       matchAssets = null;
       pauseOpen = false;
       endMatchViews();
@@ -1342,6 +1408,7 @@ export function createGame(options: GameOptions): Game {
     info.reticleY = input.state.reticleY;
     info.pointerLocked = input.locked;
     info.watchedId = stage.watchedId;
+    info.canSkipIntro = current.kind !== 'client' && current.session.canSkipIntro;
     let phase: MatchPhase;
     if (current.kind === 'client') {
       const session = current.session;
@@ -1373,6 +1440,17 @@ export function createGame(options: GameOptions): Game {
       (scoreboardKeyHeld || (input.locked && isActionActive(input.state, 'scoreboard')));
     // The results panel is the headline of a finished match: no second banner behind it.
     if (phase === 'results') hudBuilder.hud.winner = null;
+    // The intro's title card: the map and the mode, at the opacity the cinematic gives it.
+    const cardOpacity = show.cardOpacity;
+    if (cardOpacity > 0) {
+      const card = hudBuilder.hud.introCardPool;
+      card.mapName = MAPS[facts.lobby?.settings.map ?? 'shattered-spires'].name;
+      card.modeName = MODES[matchFacts.mode].name;
+      card.opacity = cardOpacity;
+      hudBuilder.hud.introCard = card;
+    } else {
+      hudBuilder.hud.introCard = null;
+    }
     // The results table is made once, when the match is decided (allocates: once per match).
     if (phase === 'results' && info.winner !== null) {
       if (matchFacts.results === null) {
@@ -1397,6 +1475,9 @@ export function createGame(options: GameOptions): Game {
     }
     uiState.connection.error = lastError;
     uiState.pauseMenuOpen = pauseOpen && stage.matchLoaded;
+    uiState.aerie = lobbyOnScreen;
+    uiState.lobbyPlateCount = lobbyOnScreen ? show.plateCount : 0;
+    uiState.lobbyFocusId = show.focusId;
     const current = run;
     if (current === null) return;
     if (current.kind === 'client') {
@@ -1455,6 +1536,8 @@ export function createGame(options: GameOptions): Game {
     matchOnScreen = buildView(alpha, nowMs);
     if (matchOnScreen) {
       if (current !== null && current.kind === 'client') showLocalCasts(current.session);
+      // The results: the podium rewrites this frame's dragons before anything draws them.
+      show.matchFrame(worldView, matchFacts.results, dtS);
       stage.updateMatch(worldView, aimX, aimY, dtS);
       const camera = stage.camera;
       const e = camera.matrixWorld.elements;
@@ -1489,10 +1572,40 @@ export function createGame(options: GameOptions): Game {
           if (current.session.sample.starved) starvedFrames++;
         }
       }
+    } else if (
+      current !== null &&
+      current.kind !== 'solo' &&
+      facts.lobby !== null &&
+      !stage.matchLoaded
+    ) {
+      // The lobby: the room's riders on their perches in the aerie.
+      lobbyOnScreen = true;
+      show.lobbyFrame(facts.lobby, current.session.localPlayerId, dtS);
     } else {
       stage.updateBackdrop(dtS);
     }
-    renderer.render(stage.scene, stage.camera, frameMs);
+    if (matchOnScreen || stage.matchLoaded || current === null) lobbyOnScreen = false;
+    else if (current.kind === 'solo' || facts.lobby === null) lobbyOnScreen = false;
+
+    // Every change of scene goes through the cream: the cut is held there until the new scene
+    // has its picture and its shaders, then fades in.
+    const scene: ShowScene = stage.matchLoaded ? 'match' : lobbyOnScreen ? 'lobby' : 'title';
+    const sceneReady =
+      !stage.warming &&
+      (scene !== 'match' || (matchOnScreen && stage.mapLoadState !== 'loading'));
+    uiState.fade = show.updateFade(scene, sceneReady, matchOnScreen ? worldView : null, dtS);
+    if (show.holding && show.holdS > LOADING_CARD_AFTER_S) {
+      loadingState.progress = stage.mapLoadState === 'loading' ? 0.4 : matchOnScreen ? 0.85 : 0.6;
+      uiState.loading = loadingState;
+    } else {
+      uiState.loading = null;
+    }
+    // Under the full cream nothing of the picture is seen, and drawing a scene whose programs
+    // are still linking would make the GPU finish them inside this frame: the stall the
+    // warm-up exists to avoid. So the frame is not drawn until they are done.
+    if (!(show.holding && stage.warming)) {
+      renderer.render(stage.scene, stage.camera, frameMs);
+    }
 
     writeUiState();
     ui.update(uiState);
@@ -1662,8 +1775,7 @@ export function createGame(options: GameOptions): Game {
     },
 
     setDevCameraDirector(director: CameraDirector | null): void {
-      devDirector = director;
-      stage.setCameraDirector(director);
+      show.setDevDirector(director);
     },
 
     getNetText(): string {
@@ -1722,6 +1834,16 @@ export function createGame(options: GameOptions): Game {
       const host = current !== null && current.kind !== 'client' ? current : null;
       const client = current !== null && current.kind === 'client' ? current.session : null;
       return {
+        show: {
+          phaseTimeS: stage.matchLoaded ? view.clock.phaseTimeS : 0,
+          lobbyPhase: facts.lobby === null ? 'none' : facts.lobby.phase,
+          fade: uiState.fade,
+          aerie: lobbyOnScreen,
+          directed: stage.directed,
+          introCard: show.cardOpacity,
+          warming: stage.warming,
+          warmUps: stage.warmUps,
+        },
         app: app.state,
         screen: uiState.screen,
         kind: facts.kind,
@@ -1834,6 +1956,7 @@ export function createGame(options: GameOptions): Game {
       ui.dispose();
       input.dispose();
       watchOverlay.dispose();
+      show.dispose();
       stage.dispose();
     },
   };
