@@ -30,7 +30,7 @@
 
 import type { TeamId } from '../constants';
 import { MAX_TEAM_SIZE, TEAM_EMBER, TEAM_FROST } from '../constants';
-import type { MapPropSet, MapSky, MapVent, SpawnGate } from '../manifests';
+import type { MapPodium, MapPropSet, MapSky, MapVent, SpawnGate } from '../manifests';
 import type { Vec3 } from '../math-types';
 import type { ArenaMap } from './arena-map';
 import { mapAssetType, mapAssetTypes, placementPoint, rotatePlacementHalfTurn } from './placements';
@@ -72,7 +72,7 @@ export const CALDERA_CHUNK_SIZE = 250;
 /** Surface of the ash sea (the first map's cloud sea). */
 export const CALDERA_ASH_SEA_Y = 0;
 export const CALDERA_FLOOR_Y = -4;
-export const CALDERA_CEILING_Y = 700;
+export const CALDERA_CEILING_Y = 800;
 /** No collision geometry reaches beyond this radius: a lane stays free inside the storm wall. */
 export const CALDERA_SOLID_MAX_RADIUS = 965;
 
@@ -159,6 +159,20 @@ function buildVents(): readonly MapVent[] {
  * the main vent in the cone; then Ember's four and, in the same order, their half-turn twins.
  */
 export const EMBERFALL_VENTS: readonly MapVent[] = buildVents();
+
+/**
+ * The results podium stands on one of the caldera's own drifting ash islands. The island's
+ * dune is 2 m high in the middle at this scale, so it sits lower and the steps stand in the
+ * ash; the turns put the gap between its rim boulders toward the camera (found by eye in
+ * `?viewer=cine:podium&map=emberfall-caldera`).
+ */
+export const CALDERA_PODIUM: MapPodium = {
+  island: 'ash-island-small',
+  scale: 0.82,
+  y: -1.5,
+  yaw: 0,
+  yawMirrored: 0,
+};
 
 // --- Layout tuning (internal) ------------------------------------------------------------------------
 
@@ -746,6 +760,7 @@ export function createEmberfallCaldera(seed: number = EMBERFALL_CALDERA_DEFAULT_
     skyWell: { position: { x: 0, y: CALDERA_SKY_WELL_Y, z: 0 }, ringRadius },
     introSpline: INTRO_SPLINE,
     vents: EMBERFALL_VENTS,
+    podium: CALDERA_PODIUM,
     trenches: [trench, trench.map((p) => ({ x: -p.x, y: p.y, z: -p.z }))],
   };
 }

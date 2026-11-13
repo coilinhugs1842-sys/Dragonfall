@@ -5,13 +5,107 @@ up where the last one stopped.
 
 ## Current state
 
-- **Phase:** 5 (cinematics + lobby) is built and checked in headless browsers; Phase 6 (scale + content) is
-  next. The user asked (2026-11-11) for Phase 4 to be finished and Phases 5, 6 and 7 built, with the trailer
-  first in Phase 7. Gates for Phases 0-5 are still theirs to run on real laptops.
-- **Next:** T-6.4 (wire Emberfall Caldera; its data and assets are committed), then T-6.6, T-6.3, T-6.2, T-6.5.
-- **Open issues:** see the latest entry.
+- **Phase:** 7 (ship). Phases 5 and 6 code are in; trailer rough cut is complete from in-game captures.
+  Higgsfield mood boards / Seedance polish still need a paid plan or the 3-day trial (balance 10, free plan).
+- **Next for the user:** start the Higgsfield trial or upgrade if you want mood boards + Seedance trailer
+  polish; create an empty GitHub repo and say to push so Pages can deploy; run the U-series gates
+  (T-4.9 / T-6.1 / T-7.3).
+- **Next for Claude (after push / credits):** enable Pages on the repo, optional Seedance pass on trailer
+  stills, close T-7.1.
+- **Open issues:** spot-check nine-class lobby + inverted loops on U-series. Large uncommitted polish
+  (dragon riders/tags/hit-flash, etc.) may still sit in the working tree from a parallel pass.
 
 ## Log
+
+### 2026-11-12: ship to coilinhugs1842-sys GitHub Pages (T-7.1)
+
+- Repo: https://github.com/coilinhugs1842-sys/Dragonfall
+- Play URL: https://coilinhugs1842-sys.github.io/Dragonfall/
+- Workflow `.github/workflows/pages.yml` builds with LFS and publishes `dist/`.
+
+### 2026-11-12: Duel teammate spectate, light speed, higher ceiling
+
+- **Duel:** after the death cam, a downed rider follows living teammates (Space / click / A to cycle).
+- **Movement:** lighter classes get a bit more cruise speed and turn; Zephyr (scout) stays the fastest;
+  nobody was slowed.
+- **Ceiling:** flight ceiling raised 700 → 800 m on every map before the push-down starts.
+- **Verify:** typecheck + focused tests.
+
+### 2026-11-12: player kit pass (F / RMB abilities)
+
+- **Verdant:** RMB mending pod → heal bubble (ally regen + light enemy tick); F spur haste bubble.
+- **Aureate:** RMB flash orb (enemy whiteout with fade in/out); F drift haze (slow + steering nudge).
+- **Zephyr:** faster / tighter turn / quicker lighter primary; RMB blink teleport (~42 m).
+- **Granite:** magma spit cooks earlier; RMB proximity burst (falloff by range); wings raised in PARAMS + rebuild.
+- **Mirage:** RMB phantom double decoy flies straight 3 s.
+- **Controls:** Space unbound from flap; Space is a second primary fire.
+- **Bots:** lower cruise band (higher ceiling margin) so they stop hugging the push-down.
+- **Verify:** typecheck + 2945 tests green.
+
+### 2026-11-12: inverted bank + bank-free chase cam
+
+- Soft-up is now ±horizon for the heading (no dragon bank), so inverted turns no longer tip the camera.
+- Camera roll from bank is upright-only; inverted bank lean flipped again so the correct wing dips toward the screen turn.
+
+### 2026-11-12: inverted steer/cam polish + kit differentiation
+
+- **Screen-relative yaw when inverted:** `steerX` flips with `cos(pitch)` so mouse-right still
+  turns toward screen-right; bank follows that turn.
+- **Camera:** soft-up eases (`softUpRate`); Q/E dodge zeros camera roll (no spin-follow); lookAt
+  falls back when up∥view so upright recovery and barrel rolls do not whip.
+- **Kits:** Granite utility → Stone mend (regen, not Bastion shield); Aureate utility → Prism
+  skim (slowing dash, not Zephyr haste); Mirage/Granite glyphs rewritten so they no longer
+  match Wraith/Bastion icons.
+- **Verify:** typecheck + full tests green.
+
+### 2026-11-12: unique kits, distinct meshes, stall look-up fix
+
+- **Look-up force:** stall auto nose-drop only when `|steerY| < 0.2`, so a held climb / loop is
+  not yanked level (control still weakened; release recovers). Flight test updated.
+- **Unique abilities:** every class has its own kit fingerprint. New projectiles
+  (`bloomBolt`, `rootSeed`, `prismShard`, `galeBolt`, `magmaSpit`, `decoyBolt`) and zones
+  (`rootSnare`, `quakeField`, `crater`, `afterimage`, `phantasm`). Mirage no longer clones
+  Wraith (veil/phase/blind cone); Granite no longer clones Bastion (cone/knock wave).
+- **Distinct meshes:** rewritten PARAMS for verdant / aureate / zephyr / granite / mirage;
+  painted, Blender-built, finished into `public/assets/dragons/*`. Death-cam half-spans
+  refreshed from new wingspans.
+- **Verify:** `npm run typecheck` green; `npm test` 2941+ passed.
+
+### 2026-11-12: inverted flight, nine classes, anim polish, balance
+
+- **Inverted flight:** pitch wraps freely (full loops). Climb bleed / dive gain sharpened
+  (`gravityAccel`). Chase cam soft-up past ~90°. DECISIONS 47. Flight + camera tests updated.
+- **Five new classes:** Verdant / Aureate / Zephyr / Granite / Mirage (nine total). Procedural
+  PARAMS → paint → Blender → finish into `public/assets/dragons/*`. Lobby class grid wraps for
+  nine. Kits reuse existing ability kinds + new zones (`updraftGarden`, `canopy`, `solarLattice`,
+  `galeWall`).
+- **Anim polish:** stronger dive tuck / flap / bank in `dragonlib/anim.py`; snappier locomotion
+  blends and full dodge bank lean; roar→land no longer replays the land flare. All nine GLBs
+  rebuilt. Perch / death-cam spans refreshed from manifests.
+- **Balance:** Talon dash / HP up; Bastion shield/rally sustain down; role ladder across nine in
+  `CLASS_TUNING` / `ABILITY_TABLE`.
+- **Verify:** `npm run typecheck` green; `npm test` 2941 passed. `PROTOCOL_VERSION` 5 (`host.setAllowedClasses`
+  bitmask is u16 for nine classes).
+
+### 2026-11-12: Phase 7 trailer first; Phase 6 closed; ship docs (T-6.2–6.6, T-7.2, T-7.4)
+
+- **Higgsfield:** still free plan, 10 credits. GPT Image / Soul Location refuse; Seedance trailer polish
+  needs Plus/Ultra or the 3-day trial. Plans widget shown to the user. Phase 4 mood boards (T-4.1) stay
+  blocked; STYLE FORMULA remains provisional (DECISIONS 37, 39).
+- **Trailer (T-7.4, first in Phase 7 as asked):** unlocked the caldera-flyby and ember-relay shots in
+  `tools/trailer/shots.mjs` (no longer placeholders). Re-recorded both and rebuilt the cut:
+  `art-source/trailer/dragonfall-trailer.mp4` (~63 s / 86 MB, 1920×1080@60, game music under it). Contact
+  sheets: Caldera intro title card reads; Ember Relay waits for an objective then holds the carrier shot.
+  Rough also at `*-rough.*` (git-ignored). Seedance polish deferred until credits.
+- **Phase 6 status check:** T-6.2 / T-6.3 / T-6.4 / T-6.6 were already in `7bf0061`. T-6.5 verified with
+  `tools/capture/rejoin.mjs --only spectator-full,spectator-midmatch,reload-playing,reload-relay` — all
+  PASS (mid-match reload, Ember Relay shard state after rejoin, 11th player spectates full 5v5, mid-match
+  join then seat in lobby). T-6.1 remains the user's U-series 5v5 gate.
+- **Ship docs (T-7.2 / T-7.1 groundwork):** README rewritten (play, LAN with `peer:lan` + `dev:lan`,
+  deploy). `.github/workflows/pages.yml` builds with `lfs: true` and publishes `dist/` to GitHub Pages.
+  No remote yet — push waits on the user's empty repo.
+- **Phase 7 gate for the user (once Pages is live):** a friend who has never seen it hosts and plays from
+  the URL using only `README.md`. Until then: trailer at `art-source/trailer/dragonfall-trailer.mp4`.
 
 ### 2026-11-11: Phase 5 cinematics + lobby (T-5.1 to T-5.6)
 - The full flow now runs: title → aerie lobby → take-off → map flyby with title card → both gates → 3-2-1 →

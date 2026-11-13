@@ -107,6 +107,13 @@ function fire(dragon: DragonState, slot: number, def: AbilityDef, flight: Flight
   }
 
   // --- On the caster ----------------------------------------------------------------------------
+  if (def.teleportForward > 0) {
+    const cosPitch = Math.cos(dragon.pitch);
+    const dist = def.teleportForward;
+    dragon.position.x += Math.sin(dragon.yaw) * cosPitch * dist;
+    dragon.position.y += Math.sin(dragon.pitch) * dist;
+    dragon.position.z += Math.cos(dragon.yaw) * cosPitch * dist;
+  }
   if (def.impulseForward !== 0) {
     const cosPitch = Math.cos(dragon.pitch);
     dragon.burst.x += Math.sin(dragon.yaw) * cosPitch * def.impulseForward;

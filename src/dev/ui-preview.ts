@@ -36,7 +36,7 @@ import type {
   UiScreen,
   UiState,
 } from '../shared/ui';
-import { DEFAULT_SETTINGS } from '../shared/ui';
+import { DEFAULT_SETTINGS, HUD_DRAGON_TAGS } from '../shared/ui';
 import { createSettingsStore, handleSettingsIntent } from '../game/settings';
 import { createUi } from '../ui';
 import type { Ui } from '../ui';
@@ -71,6 +71,8 @@ export const UI_PREVIEW_SCREENS = [
   // T-6.3 (Ember Relay): the HUD of a rider carrying the enemy shard, and that mode's results.
   'relay-hud',
   'results-relay',
+  // T-6.6: the friend-or-foe markers over the dragons, drifting (`tags=0` shows the HUD without).
+  'hud-tags',
 ] as const;
 export type UiPreviewScreen = (typeof UI_PREVIEW_SCREENS)[number];
 
@@ -238,6 +240,24 @@ function buildScoreboard(): ScoreboardRow[] {
   return rows;
 }
 
+/**
+ * The `hud-tags` preview: where the nine other dragons' markers stand (picture fractions), by
+ * RIDERS index. Even indices are the local rider's team mates, odd ones the enemies: two mates
+ * near (named), one far, one far and aimed at; enemies near, far, and one fading at its range.
+ */
+const TAG_PREVIEW: readonly (readonly [x: number, y: number, near: boolean, opacity: number])[] = [
+  [0, 0, false, 0],
+  [0.62, 0.36, true, 1],
+  [0.3, 0.46, true, 1],
+  [0.74, 0.3, false, 1],
+  [0.2, 0.3, false, 0.85],
+  [0.8, 0.52, true, 1],
+  [0.5, 0.42, true, 1],
+  [0.56, 0.26, false, 0.35],
+  [0.4, 0.62, true, 1],
+  [0.68, 0.44, false, 1],
+];
+
 /** Shards captured per rider in the Ember Relay previews, in RIDERS order. */
 const RELAY_CAPTURES: readonly number[] = [2, 0, 0, 1, 1, 0, 0, 0, 0, 0];
 
@@ -345,6 +365,27 @@ export function startUiPreview(uiRoot: HTMLElement, params: URLSearchParams): Ui
       if (row !== undefined && out !== undefined) Object.assign(out, row);
     }
   };
+  /** `tags=<n>`: only the first n markers (0 = none), to compare the cost of the HUD with and without. */
+  const tagLimit = clampNumber(params.get('tags'), HUD_DRAGON_TAGS, 0, HUD_DRAGON_TAGS);
+  /** The markers of `hud-tags`, each drifting in a small circle like a dragon in flight. */
+  const placeTags = (timeS: number): void => {
+    for (let i = 0; i < hud.dragonTags.length; i++) {
+      const tag = hud.dragonTags[i];
+      const spot = TAG_PREVIEW[i];
+      const rider = RIDERS[i];
+      if (tag === undefined) continue;
+      tag.shown = i <= tagLimit && spot !== undefined && rider !== undefined && i !== localId && spot[3] > 0;
+      if (!tag.shown || spot === undefined || rider === undefined) continue;
+      const foe = i % 2 === 1;
+      tag.team = foe ? TEAM_FROST : TEAM_EMBER;
+      tag.foe = foe;
+      tag.near = spot[2];
+      tag.name = foe || !spot[2] ? '' : rider.name;
+      tag.x = spot[0] + Math.sin(timeS * 0.9 + i) * 0.03;
+      tag.y = spot[1] + Math.cos(timeS * 0.7 + i * 2) * 0.03;
+      tag.opacity = spot[3];
+    }
+  };
   const showIntroCard = (opacity: number): void => {
     hud.introCard = hud.introCardPool;
     hud.introCardPool.mapName = MAPS[hostSettings.map].name;
@@ -449,6 +490,10 @@ export function startUiPreview(uiRoot: HTMLElement, params: URLSearchParams): Ui
       }
       break;
     }
+    case 'hud-tags':
+      matchPhase('playing');
+      placeTags(0);
+      break;
     case 'results-relay': {
       matchPhase('results');
       hud.mode = 'emberRelay';
@@ -572,6 +617,7 @@ export function startUiPreview(uiRoot: HTMLElement, params: URLSearchParams): Ui
   const tick = (): void => {
     if (stopped) return;
     if (state.aerie) placePlates(still ? 0 : (performance.now() - startMs) / 1000);
+    if (screen === 'hud-tags') placeTags(still ? 0 : (performance.now() - startMs) / 1000);
     ui.update(state);
     panel?.update(state);
     clockAheadMs = aheadMs;

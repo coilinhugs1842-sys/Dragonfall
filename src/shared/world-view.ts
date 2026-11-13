@@ -118,7 +118,19 @@ export interface DragonView {
  * What kind of thing a projectile is, for picking its mesh/trail. The numbers of each kind are
  * in PROJECTILE_DEFS (./abilities.ts). Index = `u8` wire value (at most 16). Append only.
  */
-export const PROJECTILE_KINDS = ['fireBolt', 'meteorBomb', 'staticMine'] as const;
+export const PROJECTILE_KINDS = [
+  'fireBolt',
+  'meteorBomb',
+  'staticMine',
+  'bloomBolt',
+  'rootSeed',
+  'prismShard',
+  'galeBolt',
+  'magmaSpit',
+  'decoyBolt',
+  'flashOrb',
+  'mirageDecoy',
+] as const;
 
 export type ProjectileKind = (typeof PROJECTILE_KINDS)[number];
 
@@ -144,6 +156,15 @@ export const ZONE_KINDS = [
   'controlZone',
   'burnTrail',
   'rallyAura',
+  'updraftGarden',
+  'canopy',
+  'solarLattice',
+  'galeWall',
+  'rootSnare',
+  'quakeField',
+  'crater',
+  'afterimage',
+  'phantasm',
 ] as const;
 
 export type ZoneKind = (typeof ZONE_KINDS)[number];

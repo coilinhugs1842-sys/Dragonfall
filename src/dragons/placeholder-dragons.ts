@@ -137,7 +137,7 @@ interface MutableStats {
 }
 
 function createClassIndex(): Record<DragonClassId, number> {
-  const index: Record<DragonClassId, number> = { talon: 0, bastion: 0, tempest: 0, wraith: 0 };
+  const index: Record<DragonClassId, number> = { talon: 0, bastion: 0, tempest: 0, wraith: 0, verdant: 0, aureate: 0, zephyr: 0, granite: 0, mirage: 0 };
   for (let i = 0; i < DRAGON_CLASS_IDS.length; i++) {
     const id = DRAGON_CLASS_IDS[i];
     if (id !== undefined) index[id] = i;

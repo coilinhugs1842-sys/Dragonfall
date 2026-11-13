@@ -98,7 +98,7 @@ const MIN_AWAY_COS = 0.05;
 /** Nose angle given to a bounce off a floor or ceiling whose reflected path was clamped flat. */
 const VERTICAL_BOUNCE_PITCH = 0.1;
 /** Same hard limit as flight.ts: pitch never reaches straight up or down. */
-const PITCH_HARD_LIMIT = 1.5;
+const PITCH_HARD_LIMIT = Math.PI;
 const TWO_PI = Math.PI * 2;
 
 /** What the collision world needs from a map; a MapManifest (greybox or not) fits. */
@@ -652,11 +652,12 @@ export class MapCollisionWorld implements SimCollisionWorld, TerrainQuery {
     normalZ: number,
     flight: FlightTuning,
   ): void {
-    const pitch = clamp(
-      dragon.pitch,
-      -pitchLimit(flight.maxDivePitch),
-      pitchLimit(flight.maxClimbPitch),
-    );
+    const maxClimb = pitchLimit(flight.maxClimbPitch);
+    const maxDive = pitchLimit(flight.maxDivePitch);
+    const pitch =
+      maxClimb < Math.PI - 1e-6 || maxDive < Math.PI - 1e-6
+        ? clamp(dragon.pitch, -maxDive, maxClimb)
+        : dragon.pitch;
     const cosPitch = Math.cos(pitch);
     const sinPitch = Math.sin(pitch);
     const away =

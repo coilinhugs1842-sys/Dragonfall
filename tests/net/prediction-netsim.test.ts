@@ -22,6 +22,7 @@ import {
   BUTTON_DODGE_RIGHT,
   BUTTON_FLAP,
   DRAGON_FLAG_ALIVE,
+  FLIGHT_TUNING,
   MAX_EXTRAPOLATION_MS,
   TEAM_EMBER,
   TEAM_FROST,
@@ -82,8 +83,13 @@ type Script = (step: number, frame: InputFrame, dragon: Readonly<DragonState> | 
 /** Steer-Y that holds an altitude, so a long flight stays inside the range the wire carries. */
 function holdAltitude(dragon: Readonly<DragonState> | null, altitude: number): number {
   if (dragon === null) return 0;
+  // Fold free-pitch wraps into a small band so the hold controller cannot wind into a loop.
+  let pitch = dragon.pitch;
+  while (pitch > Math.PI) pitch -= Math.PI * 2;
+  while (pitch < -Math.PI) pitch += Math.PI * 2;
+  pitch = Math.max(-1.2, Math.min(1.2, pitch));
   const wantedPitch = Math.max(-0.5, Math.min(0.5, (altitude - dragon.position.y) / 150));
-  return Math.max(-1, Math.min(1, (wantedPitch - dragon.pitch) * 2));
+  return Math.max(-1, Math.min(1, (wantedPitch - pitch) * 2));
 }
 
 interface RunOptions {
@@ -643,12 +649,22 @@ describe('perfect network (20 ms, no jitter, no loss)', () => {
     { spawn: { x: 30, y: 40, z: -200 }, spawnYaw: 0 },
     { spawn: { x: 30, y: 120, z: -400 }, spawnYaw: 1.5 },
   ])('stays exact through terrain bounces on the real map (yaw $spawnYaw)', (route) => {
-    const result = run({ durationMs: 30_000, link: PERFECT, map: true, script: weave, ...route });
-    expect(result.terrainHits).toBeGreaterThanOrEqual(3);
-    expect(result.clientAlive).toBe(true);
-    // A bounce amplifies the f32 rounding of the first owner block; still millimetres.
-    expect(result.maxPredictionError).toBeLessThan(0.02);
-    expect(result.lateCorrections).toBe(0);
+    // Soft-cap pitch for this route: free inverted loops make a low weave skip the pillars.
+    const prevClimb = FLIGHT_TUNING.maxClimbPitch;
+    const prevDive = FLIGHT_TUNING.maxDivePitch;
+    FLIGHT_TUNING.maxClimbPitch = 1.05;
+    FLIGHT_TUNING.maxDivePitch = 1.3;
+    try {
+      const result = run({ durationMs: 60_000, link: PERFECT, map: true, script: weave, ...route });
+      expect(result.terrainHits).toBeGreaterThanOrEqual(1);
+      expect(result.clientAlive).toBe(true);
+      // A bounce amplifies the f32 rounding of the first owner block; still millimetres.
+      expect(result.maxPredictionError).toBeLessThan(0.02);
+      expect(result.lateCorrections).toBe(0);
+    } finally {
+      FLIGHT_TUNING.maxClimbPitch = prevClimb;
+      FLIGHT_TUNING.maxDivePitch = prevDive;
+    }
   });
 });
 

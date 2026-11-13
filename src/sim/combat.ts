@@ -863,8 +863,14 @@ export class CombatSystem {
       // What the gate lets through of the damage also decides the push and the status.
       if (!this.gate(target, caster, 0)) continue;
       const through = this.through;
+      // All-around proximity bursts fall off with distance; full-power waves (Bastion bulwark)
+      // keep flat damage when knockback is the main feel.
+      const falloff =
+        allAround && def.knockback < 30
+          ? 1 - 0.7 * (distance / Math.max(reach, EPSILON))
+          : 1;
       if (def.damage > 0) {
-        this.amount = def.damage;
+        this.amount = def.damage * falloff * through;
         this.deal(target, caster, slot, 0);
       }
       if (def.status !== null) {
@@ -873,10 +879,21 @@ export class CombatSystem {
         this.inflict(target, def.status, caster, slot, 0);
       }
       if (def.knockback > 0) {
-        const push = def.knockback * through;
+        const push = def.knockback * through * falloff;
         target.burst.x += toX * push;
         target.burst.y += toY * push;
         target.burst.z += toZ * push;
+        const maxBurst = this.tables.flight.maxBurstSpeed;
+        if (maxBurst > 0) {
+          const burst = target.burst;
+          const mag = Math.sqrt(burst.x * burst.x + burst.y * burst.y + burst.z * burst.z);
+          if (mag > maxBurst) {
+            const scale = maxBurst / mag;
+            burst.x *= scale;
+            burst.y *= scale;
+            burst.z *= scale;
+          }
+        }
       }
     }
   }
@@ -945,7 +962,7 @@ export class CombatSystem {
       // Terrain along this tick's segment.
       let stopAt = travel;
       let stopped = false;
-      if (collision.raycastRay !== undefined && travel > EPSILON) {
+      if (!pdef.passThrough && collision.raycastRay !== undefined && travel > EPSILON) {
         ray.originX = position.x;
         ray.originY = position.y;
         ray.originZ = position.z;
@@ -962,7 +979,7 @@ export class CombatSystem {
 
       // Dragons along the segment up to there: the nearest one wins.
       let victim: DragonState | null = null;
-      for (let i = 0; i < dragons.length; i++) {
+      for (let i = 0; !pdef.passThrough && i < dragons.length; i++) {
         const target = dragons[i];
         if (target === undefined || !target.active) continue;
         if ((target.flags & DRAGON_FLAG_ALIVE) === 0 || target.id === projectile.ownerId) continue;
@@ -1042,16 +1059,30 @@ export class CombatSystem {
         this.origin.x = point.x;
         this.origin.y = point.y;
         this.origin.z = point.z;
-        this.amount = projectile.damage * (1 - (1 - edge) * fraction);
-        this.deal(target, owner, projectile.slot, 0);
+        if (projectile.damage > 0) {
+          this.amount = projectile.damage * (1 - (1 - edge) * fraction);
+          this.deal(target, owner, projectile.slot, 0);
+        }
+        if (pdef.status !== null) {
+          this.statusS = pdef.statusS;
+          this.statusPower = pdef.statusPower;
+          this.inflict(target, pdef.status, owner, projectile.slot, 0);
+        }
       }
     } else if (victim !== null) {
       // From where the projectile came, so a shield facing the shooter blocks it.
       this.origin.x = point.x - projectile.velocity.x;
       this.origin.y = point.y - projectile.velocity.y;
       this.origin.z = point.z - projectile.velocity.z;
-      this.amount = projectile.damage;
-      this.deal(victim, owner, projectile.slot, 0);
+      if (projectile.damage > 0) {
+        this.amount = projectile.damage;
+        this.deal(victim, owner, projectile.slot, 0);
+      }
+      if (pdef.status !== null) {
+        this.statusS = pdef.statusS;
+        this.statusPower = pdef.statusPower;
+        this.inflict(victim, pdef.status, owner, projectile.slot, 0);
+      }
     }
 
     if (pdef.zoneOnEnd !== null) {
@@ -1156,7 +1187,18 @@ export class CombatSystem {
 
   private pulseZone(zone: ZoneState, zdef: ZoneDef, owner: DragonState | null): void {
     const dragons = this.state.dragons;
-    const helpful = zdef.status === 'regen';
+    const allyStatus =
+      zdef.allyStatus !== null
+        ? zdef.allyStatus
+        : zdef.status === 'regen' || zdef.status === 'haste'
+          ? zdef.status
+          : null;
+    const allyS = zdef.allyStatus !== null ? zdef.allyStatusS : zdef.statusS;
+    const allyPower = zdef.allyStatus !== null ? zdef.allyStatusPower : zdef.statusPower;
+    const enemyStatus =
+      zdef.status !== null && zdef.status !== 'regen' && zdef.status !== 'haste'
+        ? zdef.status
+        : null;
     this.origin.x = zone.position.x;
     this.origin.y = zone.position.y;
     this.origin.z = zone.position.z;
@@ -1164,10 +1206,6 @@ export class CombatSystem {
       const target = dragons[i];
       if (target === undefined || !target.active) continue;
       if ((target.flags & DRAGON_FLAG_ALIVE) === 0) continue;
-      if (helpful) {
-        if (target.team !== zone.team) continue;
-      } else if (target.id === zone.ownerId) continue;
-      else if (target.team === zone.team && !this.rules.friendlyFire) continue;
       const dx = target.position.x - zone.position.x;
       const dy = target.position.y - zone.position.y;
       const dz = target.position.z - zone.position.z;
@@ -1175,15 +1213,35 @@ export class CombatSystem {
         zone.radius +
         this.tables.classes[target.classId].hitRadius * this.tables.combat.hitRadiusScale;
       if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+
+      if (target.team === zone.team) {
+        if (allyStatus !== null) {
+          this.statusS = allyS;
+          this.statusPower = allyPower;
+          this.inflict(target, allyStatus, owner, zone.slot, DAMAGE_IGNORE_SHIELD);
+        }
+        continue;
+      }
+      if (target.id === zone.ownerId) continue;
       // A zone is all around its victim: no shield helps.
       if (zdef.damage > 0) {
         this.amount = zdef.damage;
         this.deal(target, owner, zone.slot, DAMAGE_IGNORE_SHIELD);
       }
-      if (zdef.status !== null) {
+      if (enemyStatus !== null) {
         this.statusS = zdef.statusS;
         this.statusPower = zdef.statusPower;
-        this.inflict(target, zdef.status, owner, zone.slot, DAMAGE_IGNORE_SHIELD);
+        this.inflict(target, enemyStatus, owner, zone.slot, DAMAGE_IGNORE_SHIELD);
+      }
+      if (zdef.driftPower > 0) {
+        // Deterministic nudge from id + tick so host and predicted clients stay aligned.
+        const seed = ((this.tick * 1103515245 + target.id * 12345) >>> 0) & 0xffff;
+        const ang = (seed / 0xffff) * Math.PI * 2;
+        const lift = (((seed >> 8) & 0xff) / 255) * 2 - 1;
+        const push = zdef.driftPower;
+        target.burst.x += Math.cos(ang) * push;
+        target.burst.y += lift * push * 0.65;
+        target.burst.z += Math.sin(ang) * push;
       }
     }
   }

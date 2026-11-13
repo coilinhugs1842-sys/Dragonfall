@@ -278,7 +278,7 @@ describe('GameEventBus', () => {
 
 describe('classes and tuning', () => {
   it('has info and tuning for every class', () => {
-    expect(DRAGON_CLASS_IDS).toHaveLength(4);
+    expect(DRAGON_CLASS_IDS).toHaveLength(9);
     for (const id of DRAGON_CLASS_IDS) {
       expect(DRAGON_CLASSES[id].id).toBe(id);
       expect(CLASS_TUNING[id].maxHp).toBeGreaterThan(0);

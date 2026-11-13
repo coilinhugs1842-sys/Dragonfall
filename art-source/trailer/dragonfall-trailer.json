@@ -1,0 +1,141 @@
+{
+ "file": "art-source/trailer/dragonfall-trailer-rough.mp4",
+ "seconds": 62.55,
+ "frames": 3753,
+ "framesPlanned": 3753,
+ "size": "1920x1080",
+ "frameRate": "60/1",
+ "video": "h264 yuv420p",
+ "audio": "aac 48000 Hz 2 ch",
+ "megabytes": 86.1,
+ "frameSource": "jpeg",
+ "base": "http://localhost:5199",
+ "cut": [
+  {
+   "atS": 0,
+   "lengthS": 3.633,
+   "shot": "title-open",
+   "inS": 0,
+   "join": "cut",
+   "what": "Opening card: the wordmark over the live sky and cloud sea"
+  },
+  {
+   "atS": 3.633,
+   "lengthS": 3.633,
+   "shot": "aerie-arrive",
+   "inS": 0,
+   "join": "cross-fade 0.5 s",
+   "what": "Aerie lobby: riders land on their perches and ready up (the braziers light)"
+  },
+  {
+   "atS": 7.267,
+   "lengthS": 3.65,
+   "shot": "aerie-closeup",
+   "inS": 0,
+   "join": "cut",
+   "what": "Aerie lobby: close-up of one rider and dragon"
+  },
+  {
+   "atS": 10.917,
+   "lengthS": 3.633,
+   "shot": "aerie-launch",
+   "inS": 0.5,
+   "join": "cut",
+   "what": "Aerie lobby: the host starts, everyone takes off"
+  },
+  {
+   "atS": 14.55,
+   "lengthS": 6,
+   "shot": "intro",
+   "inS": 0.5,
+   "join": "cross-fade 0.3 s",
+   "what": "Live room: intro flyby with the map title card, then the two team gates"
+  },
+  {
+   "atS": 20.55,
+   "lengthS": 4,
+   "shot": "caldera-flyby",
+   "inS": 0.5,
+   "join": "cut",
+   "what": "Intro flyby over Emberfall Caldera with its map title card"
+  },
+  {
+   "atS": 24.55,
+   "lengthS": 4,
+   "shot": "skim",
+   "inS": 0,
+   "join": "cut",
+   "what": "A flight of three low over the cloud sea, through the canyon (new scene cine:skim)"
+  },
+  {
+   "atS": 28.55,
+   "lengthS": 2,
+   "shot": "fight-wide",
+   "inS": 0,
+   "join": "cut",
+   "what": "Live 5v5 bot fight from the bench camera path (the wide orbit round the centre)"
+  },
+  {
+   "atS": 30.55,
+   "lengthS": 4,
+   "shot": "fight-orbit",
+   "inS": 0.2,
+   "join": "cut",
+   "what": "Live 5v5: a slow orbit round whichever two enemies are closest (camera fightOrbit)"
+  },
+  {
+   "atS": 34.55,
+   "lengthS": 6,
+   "shot": "chase",
+   "inS": 0,
+   "join": "cut",
+   "what": "Live 5v5, HUD on: the chase camera in a dogfight, then the takedown and the death cam"
+  },
+  {
+   "atS": 40.55,
+   "lengthS": 2,
+   "shot": "fight-orbit",
+   "inS": 21,
+   "join": "cut",
+   "what": "Live 5v5: a slow orbit round whichever two enemies are closest (camera fightOrbit)"
+  },
+  {
+   "atS": 42.55,
+   "lengthS": 4,
+   "shot": "ember-relay",
+   "inS": 0,
+   "join": "cut",
+   "what": "Ember Relay: a carrier runs the ember home with the HUD on"
+  },
+  {
+   "atS": 46.55,
+   "lengthS": 4,
+   "shot": "chase",
+   "inS": 6,
+   "join": "cut",
+   "what": "Live 5v5, HUD on: the chase camera in a dogfight, then the takedown and the death cam"
+  },
+  {
+   "atS": 50.55,
+   "lengthS": 6,
+   "shot": "podium",
+   "inS": 0,
+   "join": "cut",
+   "what": "Results: the winners fly their formation pass and land on the podium"
+  },
+  {
+   "atS": 56.55,
+   "lengthS": 6,
+   "shot": "title-close",
+   "inS": 0,
+   "join": "cross-fade 0.4 s",
+   "what": "Closing card: the wordmark and \"Play in your browser\""
+  }
+ ],
+ "skippedPlaceholders": [],
+ "music": {
+  "matchAtS": 14.55,
+  "battleAtS": 28.55,
+  "stingAtS": 56.55
+ }
+}

@@ -326,7 +326,7 @@ describe('lobby permissions', () => {
 describe('rules helpers', () => {
   it('limits team sizes per mode', () => {
     expect(teamSizeRange('skirmish')).toEqual({ min: 1, max: 5 });
-    expect(teamSizeRange('duel')).toEqual({ min: 1, max: 2 });
+    expect(teamSizeRange('duel')).toEqual({ min: 1, max: 5 });
     expect(teamSizeRange('emberRelay')).toEqual({ min: 2, max: 5 });
     expect(teamSizeRange('duel')).toBe(teamSizeRange('duel'));
   });

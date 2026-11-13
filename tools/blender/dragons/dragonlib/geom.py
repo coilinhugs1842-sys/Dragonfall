@@ -38,11 +38,20 @@ RECTS = {
     'mouth': (384, 928, 96, 96),
     'extra': (480, 832, 272, 192),
     'extra2': (752, 832, 272, 192),
+    # The rider's limbs, armour and cloth: the top half of 'extra'. None of them may touch the
+    # 'cloak' rect: the runtime makes every Membrane vertex inside it flutter (dragon-assets.ts).
+    'rider_arm': (480, 832, 136, 48),
+    'rider_leg': (616, 832, 136, 48),
+    'rider_mantle': (480, 880, 136, 56),
+    'rider_pauldron': (616, 880, 68, 56),
+    'rider_grip': (684, 880, 68, 28),
+    'rider_crest': (684, 908, 68, 28),
 }
 
-# Paint kinds (per vertex), used by the texture painter.
+# Paint kinds (per vertex), used by the texture painter. Append only: the index is the key.
 KINDS = ['body', 'jaw', 'leg', 'arm', 'membrane', 'horn', 'spike', 'plate', 'claw', 'tooth', 'eye',
-         'fin', 'rider', 'cloak', 'saddle', 'mouth', 'club']
+         'fin', 'rider', 'cloak', 'saddle', 'mouth', 'club', 'rider_limb', 'rider_gear',
+         'rider_cloth']
 KIND = {k: i for i, k in enumerate(KINDS)}
 
 # Paint attribute columns.

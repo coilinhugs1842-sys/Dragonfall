@@ -49,6 +49,7 @@ PARAMS = dict(
         accent=(0.02, 0.17, 0.17), horn=(0.95, 0.90, 0.72), horn_dark=(0.42, 0.34, 0.26),
         memb_dark=(0.03, 0.22, 0.22), memb_light=(0.20, 0.62, 0.50), memb_warm=(0.80, 0.80, 0.45),
         spike=(0.03, 0.24, 0.2), spike_tip=(0.80, 0.86, 0.60), eye=(1.0, 0.92, 0.55), pattern='stripes',
-        saddle=(0.36, 0.24, 0.16), rider=(0.40, 0.31, 0.24),
+        # rider: umber leather; the armour takes the horn's ivory (the painter's default)
+        saddle=(0.36, 0.24, 0.16), rider=(0.40, 0.27, 0.17),
     ),
 )

@@ -142,15 +142,16 @@
   );
 }
 
-/* Night terror: the dark closes in and leaves a dim well in the middle. */
+/* Blind / flashbang: whiteout that the HUD opacity fades in and out. */
 .dfh-blind {
   background: radial-gradient(
     circle at center,
-    rgb(8 8 14 / 62%) 0,
-    rgb(8 8 14 / 90%) 14%,
-    rgb(8 8 14 / 98%) 34%,
-    #08080e 60%
+    rgb(255 252 245 / 96%) 0,
+    rgb(255 250 240 / 88%) 28%,
+    rgb(255 248 235 / 55%) 62%,
+    rgb(255 255 255 / 0%) 100%
   );
+  pointer-events: none;
 }
 
 /* --- Centre ------------------------------------------------------------------------------------- */
@@ -492,7 +493,8 @@
 /* The compass: a hairline with a centre notch; markers hang under it. */
 .dfh-compass {
   position: relative;
-  height: 2.4em;
+  /* Room for a second line of distance figures (markers close together stagger theirs). */
+  height: 3.2em;
   margin: 0.5em -4em 0;
   border-top: 1px solid var(--dfh-line-strong);
 }
@@ -554,6 +556,20 @@
 
 .dfh-mark-dist::after {
   content: ' m';
+}
+
+/*
+ * Two markers close together used to print their figures over each other. The second of them
+ * now drops its figure one line (data-lane 1); with both lines taken, or when the neighbour
+ * shows the same number, it prints none (data-lane 2). See compassLabelLanes in hud-model.ts.
+ */
+.dfh-mark[data-lane='1'] .dfh-mark-dist {
+  /* A full line and a bit: a shard's larger mark puts its own figure a little lower. */
+  transform: translateY(1.4em);
+}
+
+.dfh-mark[data-lane='2'] .dfh-mark-dist {
+  visibility: hidden;
 }
 
 /* Behind you: pinned to the end and faded. A downed teammate is hollowed out. */
@@ -658,6 +674,11 @@
 
 .dfh-chip-harm > .dfh-glyph {
   color: var(--dfh-harm);
+}
+
+/* "Carrying the shard": the carrier's own burden, not harm done to it, so no warning colour. */
+.dfh-chip-carry {
+  border-color: var(--dfh-line-strong);
 }
 
 .dfh-vitals-head {
@@ -1620,13 +1641,9 @@
   max-width: 11.5em;
 }
 
-/* In this mode the distances that matter are to the shards. Team mates and the brazier keep
-   their shape but lose their figure: escorts fly beside the carrier and a dropped shard often
-   lies on the way home, and two figures printed over each other could not be read. The
-   carrier's call-out gives the distance to the brazier when it matters. */
-.dfh-relay:not([hidden]) ~ .dfh-compass .dfh-mark:not([data-kind='shard']) .dfh-mark-dist {
-  display: none;
-}
+/* In this mode the distances that matter are to the shards, so they get their figure first;
+   the brazier and team mates fit theirs in beside or a line below (compassLabelLanes). This
+   replaces a rule that hid every figure but the shards' to stop them printing over each other. */
 
 .dfh-relay-calls {
   display: flex;
@@ -1747,4 +1764,139 @@
 .df-reduce-motion .dfh-carry-mark,
 [data-df-motion='reduced'] .dfh-carry-mark {
   animation: none;
+}
+
+/* --- Friend-or-foe markers over the dragons (T-6.6) ---------------------------------------------- */
+
+/*
+ * The layer is the size of the picture and a size container: a marker's place arrives in
+ * container units (`translate` for x and `transform` for y, which add up), so nothing
+ * here knows a pixel size and moving a marker never lays anything out. It is the HUD's first
+ * child: every panel, veil and banner draws over it.
+ */
+.dfh-tags {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+}
+
+.dfh-tag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  will-change: transform, translate;
+}
+
+/* Stands on its point: centred over it, growing upwards (the name above the shape). */
+.dfh-tag-in {
+  position: absolute;
+  /* A little air over the point: at long range the marker must not sit on the dragon itself. */
+  bottom: 0.3em;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1em;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.dfh-tag-name {
+  /* Room for the longest name the lobby allows in the heavier "stronger markers" face. */
+  max-width: 13em;
+  overflow: hidden;
+  font-size: 0.72em;
+  letter-spacing: 0.05em;
+  text-overflow: ellipsis;
+  /* Tight shadows instead of a plate: readable on a bright sky. They are painted once, when the
+     name changes: a marker that only moves is not painted again. */
+  text-shadow:
+    0 1px 1px rgb(20 24 36),
+    0 0 2px rgb(20 24 36),
+    0 0 3px rgb(20 24 36 / 90%);
+}
+
+.dfh-tag-name:empty {
+  display: none;
+}
+
+.dfh-tag-mark {
+  display: flex;
+  box-sizing: content-box;
+}
+
+.dfh-tag-mark > .dfh-shape {
+  width: 0.95em;
+  height: 0.95em;
+  overflow: visible;
+  /* A dark edge a full pixel wide, so the shape holds against a bright sky and against a dragon
+     of its colour: with red-green colour blindness the Ember orange is close to a sunset sky,
+     and then the edge is what is seen. */
+  stroke: rgb(20 24 36);
+  stroke-width: 2.8;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+
+.dfh-tag-in[data-team='ember'] .dfh-shape {
+  color: var(--dfh-ember);
+}
+
+.dfh-tag-in[data-team='frost'] .dfh-shape {
+  color: var(--dfh-frost);
+}
+
+/* Far away: the shape alone, smaller. */
+.dfh-tag-in[data-size='far'] .dfh-shape {
+  width: 0.62em;
+  height: 0.62em;
+}
+
+/*
+ * An enemy: the same team shape, on a dark disc with a light rim. "Enemy" is then a different
+ * OUTLINE (a round badge) as well as the other team's shape and colour, so it does not depend
+ * on remembering which shape is yours, or on telling the two colours apart.
+ */
+.dfh-tag-in[data-foe='1'] .dfh-tag-mark {
+  padding: 0.24em;
+  border: 1px solid rgb(255 246 232 / 55%);
+  border-radius: 50%;
+  background: rgb(20 24 36 / 82%);
+}
+
+.dfh-tag-in[data-foe='1'][data-size='far'] .dfh-tag-mark {
+  padding: 0.16em;
+}
+
+/* Stronger markers: a size up and the parchment edge, like the other team shapes. */
+[data-df-markers='strong'] .dfh-tag-mark > .dfh-shape {
+  width: 1.25em;
+  height: 1.25em;
+  stroke: var(--dfh-text);
+  stroke-width: 1.8;
+}
+
+/* A team mate's shape has no disc behind it, and a parchment edge alone is lost on a bright
+   cloud: a hard dark rim outside the light one (four unblurred shadows, one to each side).
+   Painted when the marker changes, not when it moves. */
+[data-df-markers='strong'] .dfh-tag-in[data-foe='0'] .dfh-shape {
+  filter: drop-shadow(1px 0 0 rgb(20 24 36)) drop-shadow(-1px 0 0 rgb(20 24 36))
+    drop-shadow(0 1px 0 rgb(20 24 36)) drop-shadow(0 -1px 0 rgb(20 24 36));
+}
+
+[data-df-markers='strong'] .dfh-tag-in[data-size='far'] .dfh-shape {
+  width: 0.85em;
+  height: 0.85em;
+}
+
+[data-df-markers='strong'] .dfh-tag-in[data-foe='1'] .dfh-tag-mark {
+  border: 2px solid var(--dfh-text);
+  background: var(--dfh-ink);
+}
+
+[data-df-markers='strong'] .dfh-tag-name {
+  font-size: 0.8em;
+  font-weight: 600;
 }

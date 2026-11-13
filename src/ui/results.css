@@ -366,6 +366,28 @@
   color: var(--dfu-text);
 }
 
+/*
+ * The captures column: Ember Relay only (`data-captures` is written by results.ts). It never
+ * holds more than two digits, so it is narrower than the others and the name keeps its room.
+ * There the match is decided by captures, so that figure stands out like the takedowns do.
+ */
+.dfr-table[data-captures='0'] .dfr-cell-cap {
+  display: none;
+}
+
+.dfr-team th.dfr-cell-cap {
+  width: 2.7em;
+}
+
+/* The panel grows by that column (2.7em of the caption's smaller type), so names keep their room. */
+.dfr-table[data-captures='1'] {
+  width: 26.5em;
+}
+
+.dfr-team td.dfr-cell-cap {
+  color: var(--dfu-text);
+}
+
 /* Your own row: a wash, a bar at its left end and the "You" badge (never colour alone). */
 .dfr-row[data-me='1'] > * {
   background: rgb(255 246 232 / 12%);

@@ -50,6 +50,36 @@ export const ABILITY_SOUNDS: Readonly<
     utility: 'phaseDive',
     ultimate: 'nightTerror',
   },
+  verdant: {
+    primary: 'healShimmer',
+    secondary: 'mineLaunch',
+    utility: 'updraft',
+    ultimate: 'healShimmer',
+  },
+  aureate: {
+    primary: 'lightningCrack',
+    secondary: 'blast',
+    utility: 'dashWhoosh',
+    ultimate: 'thunder',
+  },
+  zephyr: {
+    primary: 'updraft',
+    secondary: 'dashWhoosh',
+    utility: 'dashWhoosh',
+    ultimate: 'afterburn',
+  },
+  granite: {
+    primary: 'meteorDrop',
+    secondary: 'blast',
+    utility: 'healShimmer',
+    ultimate: 'bulwarkWave',
+  },
+  mirage: {
+    primary: 'shadeHiss',
+    secondary: 'veil',
+    utility: 'dashWhoosh',
+    ultimate: 'nightTerror',
+  },
 };
 
 /**
@@ -61,6 +91,11 @@ export const SUSTAIN_SOUNDS: Readonly<Record<DragonClassId, SoundId | null>> = {
   bastion: 'flameLoop',
   tempest: null,
   wraith: 'shadeLoop',
+  verdant: null,
+  aureate: null,
+  zephyr: null,
+  granite: null,
+  mirage: null,
 };
 
 /** Played when a dragon starts winding up (DRAGON_FLAG_CHARGING goes on). */
@@ -69,6 +104,11 @@ export const CHARGE_SOUNDS: Readonly<Record<DragonClassId, SoundId | null>> = {
   bastion: 'windup',
   tempest: 'lightningCharge',
   wraith: 'windup',
+  verdant: null,
+  aureate: null,
+  zephyr: null,
+  granite: 'windup',
+  mirage: 'windup',
 };
 
 /** A dragon's roar, on top of its ultimate's own sound: the "something big just happened" cue. */
@@ -77,6 +117,11 @@ export const ROAR_SOUNDS: Readonly<Record<DragonClassId, SoundId>> = {
   bastion: 'roarBastion',
   tempest: 'roarTempest',
   wraith: 'roarWraith',
+  verdant: 'roarTempest',
+  aureate: 'roarTalon',
+  zephyr: 'roarTalon',
+  granite: 'roarBastion',
+  mirage: 'roarWraith',
 };
 
 /** Wing beats by build: the lean classes beat fast and light, Bastion slow and heavy. */
@@ -85,6 +130,11 @@ export const FLAP_SOUNDS: Readonly<Record<DragonClassId, SoundId>> = {
   bastion: 'flapLarge',
   tempest: 'flap',
   wraith: 'flapSmall',
+  verdant: 'flap',
+  aureate: 'flap',
+  zephyr: 'flapSmall',
+  granite: 'flapLarge',
+  mirage: 'flapSmall',
 };
 
 /** Seconds between wing beats, as a multiple of AUDIO_TUNING.flapPeriodS. */
@@ -93,6 +143,11 @@ export const FLAP_PERIOD_SCALE: Readonly<Record<DragonClassId, number>> = {
   bastion: 1.35,
   tempest: 1,
   wraith: 0.9,
+  verdant: 1.05,
+  aureate: 0.95,
+  zephyr: 0.75,
+  granite: 1.4,
+  mirage: 0.88,
 };
 
 /** `hit`, by what dealt the damage. */
@@ -138,6 +193,14 @@ export const IMPACT_SOUNDS: Readonly<Record<ProjectileKind, SoundId | null>> = {
   fireBolt: null,
   meteorBomb: 'blast',
   staticMine: 'mineArm',
+  bloomBolt: null,
+  rootSeed: 'mineArm',
+  prismShard: null,
+  galeBolt: null,
+  magmaSpit: 'blast',
+  decoyBolt: null,
+  flashOrb: 'blast',
+  mirageDecoy: 'veil',
 };
 
 /** `objective` (T-6.x fills in distinct ones). */

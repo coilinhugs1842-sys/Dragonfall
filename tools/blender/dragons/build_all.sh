@@ -4,7 +4,7 @@
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"; REPO="$(cd "$HERE/../../.." && pwd)"
 BL="${BLENDER:-/c/Program Files/Blender Foundation/Blender 5.2/blender.exe}"
-CLASSES="${*:-talon bastion tempest wraith}"
+CLASSES="${*:-talon bastion tempest wraith verdant aureate zephyr granite mirage}"
 SCR="$REPO/art-source/_scratch/dragons"; PREV="$REPO/art-source/dragons/previews"
 mkdir -p "$SCR" "$PREV"
 STILLS="front34,side,top,back34,below,head"

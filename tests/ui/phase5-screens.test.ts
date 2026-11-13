@@ -595,6 +595,47 @@ describe('Phase 5 screens', () => {
       expect(one('.dfh-root').dataset['chrome']).toBe('cine');
     });
 
+    it('adds the captures column and the captures award in Ember Relay only', () => {
+      const hud = matchHud('results');
+      const state = matchState(hud, { results: resultsState(TEAM_EMBER) });
+      ui.update(state);
+      const titles = (): (string | undefined)[] =>
+        cards().map((card) => card.querySelector('.dfr-award-title')?.textContent);
+      expect(one('.dfr-table').dataset['captures']).toBe('0');
+      expect(titles()).toEqual(['MVP', 'Most takedowns', 'Most damage']);
+
+      const base = resultsState(TEAM_EMBER);
+      state.results = {
+        ...base,
+        mode: 'emberRelay',
+        scores: [3, 1],
+        mostCapturesId: 2,
+        scoreboard: base.scoreboard.map((row) => ({ ...row, captures: row.playerId === 2 ? 3 : 0 })),
+      };
+      ui.update(state);
+      expect(one('.dfr-table').dataset['captures']).toBe('1');
+      expect(titles()).toEqual(['MVP', 'Most captures', 'Most damage']);
+      const second = cards()[1];
+      expect(second?.querySelector('.dfr-award-name')?.textContent).toBe('Miro');
+      expect(second?.querySelector('.dfr-award-value')?.textContent).toBe('3');
+      const miro = all('.dfr-row').find(
+        (row) => !row.hidden && row.querySelector('.dfr-row-name')?.textContent === 'Miro',
+      );
+      expect(miro?.querySelector('.dfr-cell-cap')?.textContent).toBe('3');
+      expect(miro?.querySelector('.dfr-row-marks')?.textContent).toBe('CAP');
+      // Kestrel's nine takedowns earn no mark here.
+      const kestrel = all('.dfr-row').find(
+        (row) => !row.hidden && row.querySelector('.dfr-row-name')?.textContent === 'Kestrel',
+      );
+      expect(kestrel?.querySelector('.dfr-row-marks')?.textContent).toBe('DMG');
+
+      // The next match in another mode: the column and the title go back.
+      state.results = resultsState(TEAM_FROST);
+      ui.update(state);
+      expect(one('.dfr-table').dataset['captures']).toBe('0');
+      expect(titles()).toEqual(['MVP', 'Most takedowns', 'Most damage']);
+    });
+
     it('shows no card for an award nobody earned, and a draw as a draw', () => {
       const hud = matchHud('results');
       const state = matchState(hud, { results: resultsState('draw', { mvpId: NO_PLAYER }) });

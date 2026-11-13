@@ -898,6 +898,14 @@ class Builder:
 
     # --- rider -----------------------------------------------------------------------------------
     def build_rider(self):
+        """Saddle, rider and cape, all skinned to the bone under the seat.
+
+        The rider is ours: a sky-rider in lamellar leather with a swept-back horned helm (its
+        visor slit glows in the Runes slot, like the dragon's eyes), angular shoulder plates, a
+        cowl, a helm crest and a swallow-tailed cape. Cowl, crest and cape are in the Membrane
+        slot, so the rider carries the team colour like the wings do. Detail per LOD:
+          LOD0  everything; LOD1 the same parts with fewer sides; LOD2 body, helm and cape only.
+        """
         p = self.p
         r = p.get('rider', {})
         level = self.L['rider']
@@ -915,6 +923,11 @@ class Builder:
         def loc(df, du):
             # offsets along the spine tangent / normal at the seat -> (fwd, up)
             return (f0 + (-T[1]) * df + (-N[1]) * du, u0 + T[2] * df + N[2] * du)
+
+        def seat(x, df, du):
+            """A point x to the left of the centre line, df ahead of and du above the seat."""
+            f, u = loc(df * sc, du * sc)
+            return P(x * sc, u, f)
         # saddle: a low blocky seat with a raised cantle and a pommel horn
         K = 8 if level else 4
         rows = []
@@ -925,39 +938,131 @@ class Builder:
         sst = Stations(rows)
         ts = np.linspace(0, 5, 6 if level == 0 else 9)
         self.add(self.loft(sst, ts, K, 'saddle', 'saddle', weight_fn=lambda t: w, crease=40, name='saddle'))
-        # rider: torso with broad shoulders and a helmet, leaning into the wind
+
+        # The rider leans into the wind. `body(h, b, x)`: h up the spine from the seat, b behind
+        # it (square to the spine), x to the left.
         lean = np.radians(r.get('lean', 30))
         sd, cd = np.sin(lean), np.cos(lean)
+
+        def body(h, b=0.0, x=0.0):
+            return seat(x, -0.12 + h * sd - b * cd, 0.1 + h * cd + b * sd)
+        axis = norm(body(1.0) - body(0.0))
+        back = norm(body(0.0, 1.0) - body(0.0))
+
+        # body and helm in one loft. Stations: 0 hips, 1 belt, 2 ribs, 3 chest, 4 shoulder top,
+        # 5 neck, 6 helm rim, 7 brow, 8 crown, 9 the helm's swept-back point.
         rows = []
-        for hgt, rx, rf, rbk in ((0.0, 0.19, 0.14, 0.15), (0.22, 0.17, 0.12, 0.13), (0.46, 0.27, 0.15, 0.16),
-                                 (0.56, 0.25, 0.13, 0.14), (0.63, 0.075, 0.07, 0.08), (0.74, 0.135, 0.15, 0.15),
-                                 (0.88, 0.13, 0.15, 0.17), (0.99, 0.05, 0.07, 0.12)):
-            f, u = loc((-0.12 + hgt * sd) * sc, (0.1 + hgt * cd) * sc)
+        for h, b, rx, rf, rbk, sq in ((0.0, 0.0, 0.2, 0.15, 0.16, 2.6), (0.14, 0.0, 0.17, 0.125, 0.13, 2.6),
+                                      (0.30, 0.0, 0.215, 0.15, 0.15, 2.8), (0.46, 0.0, 0.29, 0.165, 0.17, 3.0),
+                                      (0.555, 0.0, 0.24, 0.125, 0.14, 2.8), (0.615, 0.0, 0.085, 0.075, 0.085, 2.2),
+                                      (0.675, 0.0, 0.118, 0.125, 0.12, 2.6), (0.79, 0.01, 0.128, 0.15, 0.15, 2.7),
+                                      (0.90, 0.05, 0.1, 0.1, 0.15, 2.4), (0.99, 0.16, 0.03, 0.035, 0.06, 2.2)):
+            c = body(h, b)
             # for a vertical path "up" of the profile points backward; rt=back, rb=front
-            rows.append((f, u, rx * sc, rbk * sc, rf * sc, 2.5, 0))
+            rows.append((-c[1], c[2], rx * sc, rbk * sc, rf * sc, sq, 0))
         rst = Stations(rows)
-        ts = np.linspace(0, 7, 15 if level == 2 else 8)
+        if level == 2:
+            ts = np.array([0, 1, 2, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 9], float)
+        elif level == 1:
+            ts = np.arange(10.0)
+        else:
+            ts = np.array([0, 3, 4, 5, 7, 9], float)
+
+        def visor(ta, tb, aa, ab):
+            # the front of the helm between its rim and its brow glows through the emissive mask
+            return (ta >= 6 - 1e-6) & (tb <= 7 + 1e-6) & (ab <= 0.5 + 1e-6)
         self.add(self.loft(rst, ts, 8 if level == 2 else 6 if level == 1 else 4, 'rider', 'rider',
-                           weight_fn=lambda t: w, crease=50, name='rider'))
-        sh = np.array(loc((-0.12 + 0.5 * sd) * sc, (0.1 + 0.5 * cd) * sc))
+                           weight_fn=lambda t: w, cap0=False, crease=50, name='rider',
+                           rune_fn=visor if level >= 1 else None))
         if level >= 1:
             sides = 5 if level == 2 else 4
-            # arms reach to the pommel
-            hand = loc(0.36 * sc, 0.34 * sc)
-            elbow = loc(0.12 * sc, 0.36 * sc)
-            ap = np.array([P(0.24 * sc, sh[1] - 0.02, sh[0]), P(0.33 * sc, elbow[1], elbow[0]),
-                           P(0.1 * sc, hand[1], hand[0])])
-            self.add(tube(ap, np.array([0.085, 0.07, 0.075]) * sc, sides, rect=(0, 832 + 150, 80, 42),
-                          kind='rider', weights=w, tip_end=False, crease=60, name='rider_arm'), mirror=True)
-            hip = loc(-0.1 * sc, 0.12 * sc)
-            knee = loc(0.22 * sc, -0.02 * sc)
-            foot = loc(0.05 * sc, -0.48 * sc)
-            lp = np.array([P(0.14 * sc, hip[1], hip[0]), P(min(0.4 * sc, bw + 0.08), knee[1], knee[0]),
-                           P(min(0.46 * sc, bw + 0.12), foot[1], foot[0])])
-            self.add(tube(lp, np.array([0.11, 0.09, 0.075]) * sc, sides, rect=(80, 832 + 150, 80, 42),
-                          kind='rider', weights=w, tip_end=False, crease=60, name='rider_leg'), mirror=True)
-        # cloak: a sheet streaming back from the shoulders (team-tinted, Membrane slot)
-        nr, nc = (6, 5) if level == 2 else (4, 3) if level == 1 else (3, 3)
+            # arms: shoulder, elbow, wrist, then a fist closed round the saddle grip
+            shoulder, elbow = body(0.5, 0.0, 0.27), seat(0.36, 0.06, 0.25)
+            if level == 2:
+                ap = np.array([shoulder, elbow, seat(0.17, 0.3, 0.335), seat(0.135, 0.36, 0.335),
+                               seat(0.11, 0.41, 0.33)])
+                ar = np.array([0.085, 0.066, 0.055, 0.07, 0.0]) * sc
+            else:
+                ap = np.array([shoulder, elbow, seat(0.13, 0.38, 0.335)])
+                ar = np.array([0.085, 0.066, 0.07]) * sc
+            arm = tube(ap, ar, sides, rect='rider_arm', kind='rider_limb', weights=w,
+                       tip_end=level == 2, crease=60, name='rider_arm')
+            arm.pa[:, PA_AUX] = 1
+            self.add(arm, mirror=True)
+            # legs: hip, knee against the flank, ankle, toe
+            hip, knee, foot = loc(-0.1 * sc, 0.12 * sc), loc(0.22 * sc, -0.02 * sc), loc(0.05 * sc, -0.48 * sc)
+            kx, fx = min(0.4 * sc, bw + 0.08), min(0.46 * sc, bw + 0.12)
+            lp = [P(0.14 * sc, hip[1], hip[0]), P(kx, knee[1], knee[0]), P(fx, foot[1], foot[0])]
+            lr = [0.115, 0.095, 0.075]
+            if level == 2:
+                toe = loc(0.25 * sc, -0.53 * sc)
+                lp.append(P(fx, toe[1], toe[0]))
+                lr.append(0.0)
+            leg = tube(np.array(lp), np.array(lr) * sc, sides, rect='rider_leg', kind='rider_limb',
+                       weights=w, tip_end=level == 2, crease=60, name='rider_leg')
+            leg.pa[:, PA_AUX] = 2
+            self.add(leg, mirror=True)
+            # the grip: a hoop standing on the pommel, one fist on each corner
+            gp = np.array([seat(0.1, 0.37, 0.07), seat(0.125, 0.4, 0.33), seat(-0.125, 0.4, 0.33),
+                           seat(-0.1, 0.37, 0.07)])
+            grip = tube(gp, np.full(4, 0.03 * sc), 4 if level == 2 else 3, up_hint=LEFT,
+                        rect='rider_grip', kind='rider_gear', weights=w, tip_end=False, crease=50,
+                        name='rider_grip')
+            grip.pa[:, PA_AUX] = 2
+            self.add(grip)
+            # shoulder plates: a swept-back point each, like the dragon's own scutes
+            sh = body(0.5, 0.0, 0.27)
+            base = [sh - back * 0.13 * sc - axis * 0.03 * sc, sh + LEFT * 0.13 * sc - axis * 0.11 * sc,
+                    sh + back * 0.15 * sc - axis * 0.02 * sc, sh - LEFT * 0.1 * sc + axis * 0.07 * sc]
+            apex = sh + (LEFT * 0.16 + axis * 0.13 + back * 0.15) * sc
+            verts = np.array(base + [apex] * 4)
+            tris = orient(verts, np.array([(0, 1, 4), (1, 2, 5), (2, 3, 6), (3, 0, 7)]), centers=sh)
+            lu = np.array([0.0, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5])
+            lv = np.array([1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+            pa = np.zeros((8, NPA))
+            pa[:, PA_ALONG] = 1 - lv
+            pa[:, PA_AROUND] = lu
+            pa[:, PA_AUX] = 1
+            self.add(Part('rider_gear', verts, tris, rect_uv('rider_pauldron', lu, lv), w, pa=pa,
+                          crease=30, name='rider_pauldron'), mirror=True)
+            # cowl: a collar of cloth from the neck out over the shoulders (team-tinted, no flutter)
+            km = 8 if level == 2 else 6
+            # rings: (height, half width, reach to the front, reach to the back), neck to hem
+            ring_rows = ((0.605, 0.1, 0.095, 0.095), (0.585, 0.2, 0.165, 0.175), (0.5, 0.3, 0.215, 0.225)) \
+                if level == 2 else ((0.605, 0.1, 0.095, 0.095), (0.5, 0.3, 0.215, 0.225))
+            grid = np.zeros((len(ring_rows), km + 1, 3))
+            pa = np.zeros((len(ring_rows), km + 1, NPA))
+            for i, (h, rx, rfr, rbk) in enumerate(ring_rows):
+                for j in range(km + 1):
+                    a = 2 * PI * j / km
+                    c = np.cos(a)
+                    # the hem hangs lower over the chest and the back than on the shoulders
+                    drop = 0.1 * c * c * (i / (len(ring_rows) - 1))
+                    grid[i, j] = body(h - drop, -c * (rfr if c > 0 else rbk), np.sin(a) * rx)
+                    pa[i, j, PA_ALONG] = i / (len(ring_rows) - 1)
+                    pa[i, j, PA_AROUND] = j / km
+            pa[..., PA_AUX] = 1
+            verts = grid.reshape(-1, 3)
+            tris = clean_tris(verts, grid_tris(len(ring_rows), km + 1))
+            tris = orient(verts, tris, centers=body(0.4))
+            LU, LV = np.meshgrid(np.linspace(0, 1, km + 1), np.linspace(0, 1, len(ring_rows)))
+            self.add(Part('rider_cloth', verts, tris, rect_uv('rider_mantle', LU.reshape(-1), LV.reshape(-1)),
+                          w, mat=MAT_MEMBRANE, pa=pa.reshape(-1, NPA), crease=180, name='rider_mantle'))
+            # crest: a blade swept back from the brow over the crown (team-tinted, no flutter)
+            cp = [(0.8, -0.13), (0.95, -0.05), (1.12, 0.2), (1.0, 0.36), (0.86, 0.17)]
+            verts = np.array([body(h, b) for h, b in cp])
+            tris = orient(verts, np.array([(0, 1, 4), (1, 2, 4), (2, 3, 4)]), direction=LEFT)
+            lu = np.array([0.0, 0.3, 0.75, 1.0, 0.55])
+            lv = np.array([1.0, 0.35, 0.0, 0.45, 1.0])
+            pa = np.zeros((5, NPA))
+            pa[:, PA_ALONG] = [0.0, 0.5, 1.0, 1.0, 0.0]
+            pa[:, PA_AROUND] = lu
+            pa[:, PA_AUX] = 2
+            self.add(Part('rider_cloth', verts, tris, rect_uv('rider_crest', lu, lv), w, mat=MAT_MEMBRANE,
+                          pa=pa, crease=180, name='rider_crest'))
+        # cape: a swallow-tailed sheet streaming back from the shoulders (team-tinted, Membrane
+        # slot; the runtime makes it flutter by its UV inside the 'cloak' rect)
+        nr, nc = (7, 5) if level == 2 else (4, 3) if level == 1 else (3, 3)
         cl = r.get('cloak_len', 2.1) * sc
         grid = np.zeros((nr, nc, 3))
         pa = np.zeros((nr, nc, NPA))
@@ -965,14 +1070,14 @@ class Builder:
             fi = i / (nr - 1)
             for j in range(nc):
                 fj = j / (nc - 1) - 0.5
-                width = (0.46 + 0.5 * fi ** 0.8) * sc
-                df = (-0.14 + 0.5 * sd) * sc - 0.1 * sc - cl * fi
+                width = (0.4 + 0.56 * fi ** 0.8) * sc
+                # the middle of the free end stops short of the two tails
+                notch = 0.3 * (1 - (abs(fj) * 2) ** 1.3) * smoothstep(0.45, 1.0, fi)
+                df = (-0.14 + 0.5 * sd) * sc - 0.1 * sc - cl * fi * (1 - notch)
                 du = (0.1 + 0.5 * cd) * sc + 0.02 - 0.22 * sc * np.sin(fi * 2.4) + 0.16 * sc * fi ** 2 \
                     - 0.3 * sc * abs(fj) ** 1.5 * (1 - 0.5 * fi) + 0.07 * sc * np.sin(fi * 5.5 + fj * 3.0) * fi
                 f, u = loc(df, du)
-                tip = 1 - 0.35 * (abs(fj) * 2) ** 2 * smoothstep(0.6, 1.0, fi)
-                f2, u2 = loc(df * tip + (1 - tip) * (df + cl * 0.2), du)
-                grid[i, j] = P(fj * width, u2, f2)
+                grid[i, j] = P(fj * width, u, f)
                 pa[i, j, PA_ALONG] = fi
                 pa[i, j, PA_AROUND] = fj + 0.5
         verts = grid.reshape(-1, 3)

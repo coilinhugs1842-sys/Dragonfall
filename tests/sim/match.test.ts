@@ -247,7 +247,7 @@ describe('createModeConfig: lobby settings -> match rules', () => {
     expect(isClassAllowed(config, 'bastion')).toBe(false);
   });
 
-  it('makes a Duel best of five: three round wins, no respawns, a shrinking storm, 1-2 a side', () => {
+  it('makes a Duel best of five: three round wins, no respawns, a shrinking storm, up to 5 a side', () => {
     const config = createModeConfig({
       ...DEFAULT_HOST_SETTINGS,
       mode: 'duel',
@@ -256,13 +256,19 @@ describe('createModeConfig: lobby settings -> match rules', () => {
       timeLimitS: 900,
     });
     expect(config.mode).toBe('duel');
-    expect(config.teamSize).toBe(2);
+    expect(config.teamSize).toBe(5);
     expect(config.scoreLimit).toBe(3);
     expect(roundsToWin(MATCH_TUNING.duelRounds)).toBe(3);
     expect(config.timeLimitS).toBe(MODE_TUNING.duel.roundTimeS);
     expect(config.maxRounds).toBe(MODE_TUNING.duel.maxRounds);
     expect(config.respawns).toBe(false);
     expect(config.stormShrinks).toBe(true);
+    expect(createModeConfig({ ...DEFAULT_HOST_SETTINGS, mode: 'duel', teamSize: 3 }).teamSize).toBe(
+      3,
+    );
+    expect(createModeConfig({ ...DEFAULT_HOST_SETTINGS, mode: 'duel', teamSize: 4 }).teamSize).toBe(
+      4,
+    );
   });
 
   it('forces broken values into range instead of starting a broken match', () => {
@@ -841,6 +847,24 @@ describe('Duel', () => {
     expect(match.director.scores).toEqual([1, 0]);
     // Still down during the beat after the round.
     expect(match.alive(10)).toBe(false);
+  });
+
+  it('eliminates 3v3, 4v4 and 5v5 the same way as 1v1 / 2v2', () => {
+    for (const size of [3, 4, 5] as const) {
+      const match = duel({ ember: size, frost: size, settings: { teamSize: size } });
+      match.runTo('playing');
+      expect(match.director.config.teamSize).toBe(size);
+      // Frost ids are 10..10+size-1 in this rig.
+      for (let i = 0; i < size - 1; i++) match.kill(10 + i, 0);
+      match.step();
+      expect(match.director.phase, `${size}v${size} mid`).toBe('playing');
+      match.kill(10 + size - 1, 0);
+      match.step();
+      expect(match.director.phase, `${size}v${size} end`).toBe('roundEnd');
+      expect(match.director.winner).toBe(TEAM_EMBER);
+      expect(match.director.endReason).toBe('elimination');
+      expect(match.director.scores).toEqual([1, 0]);
+    }
   });
 
   it('between rounds: full health, effects cleared, ultimate charge kept', () => {

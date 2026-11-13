@@ -152,7 +152,7 @@ describe('createLobby', () => {
     expect(lobby.state.settings.map).toBe(
       MAPS['emberfall-caldera'].available ? 'emberfall-caldera' : 'shattered-spires',
     );
-    expect(lobby.state.settings.teamSize).toBe(2);
+    expect(lobby.state.settings.teamSize).toBe(5);
     expect(lobby.state.settings.scoreLimit).toBe(1);
     expect(lobby.state.settings.allowedClasses).toEqual(DRAGON_CLASS_IDS);
     expect(lobby.state.players[0]?.name).toBe('Rider');
@@ -763,12 +763,14 @@ describe('host settings', () => {
     expect(reasonOf(setMode(lobby, HOST, 'skyCrown'))).toBe('unavailable');
     expect(reasonOf(setMode(lobby, HOST, 'toString' as never))).toBe('invalidValue');
     lobby = must(setMode(lobby, HOST, 'duel'));
-    expect(lobby.state.settings).toMatchObject({ mode: 'duel', teamSize: 2 });
-    expect(sides(lobby.state)).toEqual({ ember: 2, frost: 2, spectator: 2 });
-    // Duel caps the size at 2.
-    expect(setTeamSize(lobby, HOST, 5).lobby).toBe(lobby);
+    // Host + five riders fit a 5v5 Duel; nobody is spilled to spectators.
+    expect(lobby.state.settings).toMatchObject({ mode: 'duel', teamSize: 5 });
+    expect(sides(lobby.state)).toEqual({ ember: 3, frost: 3, spectator: 0 });
+    lobby = must(setTeamSize(lobby, HOST, 3));
+    expect(lobby.state.settings.teamSize).toBe(3);
+    expect(sides(lobby.state)).toEqual({ ember: 3, frost: 3, spectator: 0 });
     lobby = must(setMode(lobby, HOST, 'skirmish'));
-    expect(lobby.state.settings.teamSize).toBe(2);
+    expect(lobby.state.settings.teamSize).toBe(3);
   });
 
   it('sets map, limits and friendly fire with clamping', () => {

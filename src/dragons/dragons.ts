@@ -93,6 +93,8 @@ import {
 import type { DragonMaterial } from './dragon-material';
 import { writeInstanceMatrix } from './instance-matrix';
 import { createPlaceholderDragons } from './placeholder-dragons';
+import { advanceHitFlash, createHitFlashState, hitFlashStrength, resetHitFlash } from './hit-flash';
+import type { HitFlashState } from './hit-flash';
 import { bodyAngularVelocity, createPoseAccumulator, ease, saturate } from './pose-math';
 import type { PoseAccumulator } from './pose-math';
 
@@ -104,11 +106,10 @@ const MAX_ANIMATION_DT_S = 0.1;
 const VEILED_FADE = 0.38;
 /** The same for a dragon passing through terrain (phase dive). */
 const PHASING_FADE = 0.55;
-const HIT_FLASH_S = 0.16;
 /** Health below this fraction starts to grey the hide; fully grey this much lower. */
 const HURT_START = 0.38;
 const HURT_RANGE = 0.28;
-/** A health drop of at least this fraction is a hit worth a flinch and a flash. */
+/** A health drop of at least this fraction is a hit worth a flinch and a flash (hit-flash.ts). */
 const HIT_THRESHOLD = 0.004;
 /** Dragons nearer than this keep animating when off screen: their shadow is still visible. */
 const SHADOW_ANIMATION_RANGE = 60;
@@ -209,6 +210,8 @@ export interface Dragons {
   ): void;
   setQuality(preset: QualityPreset): void;
   setDebug(debug: DragonsDebug | null): void;
+  /** The reduce-motion setting: hit flashes at half strength. Off by default. */
+  setReduceMotion(on: boolean): void;
   /**
    * Wing-beat phase (0..1, 0 = top of the up-stroke) of a dragon drawn skinned this frame and
    * actually beating its wings; -1 otherwise. For syncing the flap sound.
@@ -251,7 +254,7 @@ interface Actor {
   yawRate: number;
   rollRate: number;
   prevHealth: number;
-  flash: number;
+  readonly flash: HitFlashState;
   cast: number;
   spawn: number;
   shield: number;
@@ -411,6 +414,7 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
   let debugClip = -1;
   let debugPhase = -1;
   let debugSlots = false;
+  let reduceMotion = false;
 
   const stats: MutableStats = {
     dragons: 0,
@@ -442,7 +446,7 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
         yawRate: 0,
         rollRate: 0,
         prevHealth: 1,
-        flash: 0,
+        flash: createHitFlashState(),
         cast: 0,
         spawn: 0,
         shield: 0,
@@ -678,7 +682,7 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
           actor.pitchRate = 0;
           actor.yawRate = 0;
           actor.rollRate = 0;
-          actor.flash = 0;
+          resetHitFlash(actor.flash);
           actor.cast = 0;
           actor.spawn = (flags & DRAGON_FLAG_SPAWN_PROTECTED) !== 0 ? 1 : 0;
           actor.shield = (flags & DRAGON_FLAG_SHIELDED) !== 0 ? 1 : 0;
@@ -759,8 +763,7 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
       }
 
       // --- Look ---------------------------------------------------------------------------------
-      if (hit) actor.flash = 1;
-      else actor.flash = Math.max(0, actor.flash - dt / HIT_FLASH_S);
+      advanceHitFlash(actor.flash, hit, dt);
       const charging = alive && (flags & DRAGON_FLAG_CHARGING) !== 0;
       actor.cast = ease(actor.cast, charging ? 1 : 0, 10, dt);
       actor.spawn = ease(actor.spawn, (flags & DRAGON_FLAG_SPAWN_PROTECTED) !== 0 ? 1 : 0, 8, dt);
@@ -781,7 +784,12 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
       const teamGlow = teamGlows[dragon.team] ?? fallbackColor;
       uniforms.uTeam.value.set(team.r, team.g, team.b, 1);
       uniforms.uTeamGlow.value.set(teamGlow.r, teamGlow.g, teamGlow.b, 1);
-      uniforms.uFx.value.set(MEMBRANE_GLOW * glow * boost, RUNE_GLOW * glow, actor.flash, fade);
+      uniforms.uFx.value.set(
+        MEMBRANE_GLOW * glow * boost,
+        RUNE_GLOW * glow,
+        hitFlashStrength(actor.flash, reduceMotion),
+        fade,
+      );
       uniforms.uFx2.value.set(
         alive ? saturate((HURT_START - dragon.health) / HURT_RANGE) : 1,
         actor.shield,
@@ -838,6 +846,10 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
     for (const rig of allRigs) rig.material.uniforms.uDebug.value.r = debugSlots ? 1 : 0;
   }
 
+  function setReduceMotion(on: boolean): void {
+    reduceMotion = on;
+  }
+
   function flapPhase(id: PlayerId): number {
     const actor = actors[id & (ID_SLOTS - 1)];
     if (actor === undefined || actor.lastSeenFrame !== frame || actor.rig === null) return -1;
@@ -880,6 +892,7 @@ export function createDragons(preset: QualityPreset, options: DragonsOptions = {
     update,
     setQuality,
     setDebug,
+    setReduceMotion,
     flapPhase,
     muzzleWorld,
     dispose,

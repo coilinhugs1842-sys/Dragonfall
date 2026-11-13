@@ -20,7 +20,7 @@ import {
 import type { Camera, WebGLRenderer } from 'three';
 import type { ArenaMap, QualityPreset, Vec3 } from '../../shared';
 import { useWorldLight } from '../../world/light';
-import { createPropField, loadMapAssets } from '../../world/props';
+import { GLOW_MODE_CARVED, createPropField, glowModeOf, loadMapAssets } from '../../world/props';
 import type { MapAssetBundle, PropField } from '../../world/props';
 import { createAerieGlow } from './aerie-glow';
 import type { AerieLayout } from './aerie-layout';
@@ -55,6 +55,15 @@ export interface AerieSetViewOptions {
   readonly quality: QualityPreset;
   /** Null = no assets are loaded (tests): the stand-in stays. */
   readonly webgl: WebGLRenderer | null;
+}
+
+/**
+ * The perch stones' runes are carved here, not lit: on a map their magenta says "objective",
+ * and in a close-up the top bar of one showed above the terrace as a flat pink bar. A perch's
+ * own light is its team-coloured shards (./aerie-glow.ts).
+ */
+export function aerieGlowModeOf(typeId: string): number {
+  return typeId === 'standing-stone' ? GLOW_MODE_CARVED : glowModeOf(typeId);
 }
 
 /** Stand-in post: metres across, and how far it reaches below the perch. */
@@ -122,7 +131,7 @@ export function createAerieSetView(options: AerieSetViewOptions): AerieSetView {
     const placements = aeriePlacements(layout, preset.id);
     let built: PropField;
     try {
-      built = createPropField(placements, bundle, preset);
+      built = createPropField(placements, bundle, preset, undefined, aerieGlowModeOf);
     } catch (error) {
       console.warn('[aerie] the loaded map assets do not fit the aerie; keeping the stand-in.', error);
       stats.state = 'fallback';

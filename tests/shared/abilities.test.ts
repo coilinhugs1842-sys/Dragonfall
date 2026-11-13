@@ -9,7 +9,7 @@ import {
   ABILITY_KINDS,
   ABILITY_SLOTS,
   ABILITY_TABLE,
-  ABILITY_TAG_ATTACK,
+  ABILITY_TAG_ALLIES, ABILITY_TAG_ATTACK,
   ABILITY_TAG_AUTO,
   BUTTON_ABILITY_MASK,
   BUTTON_AIM,
@@ -132,7 +132,11 @@ describe('ability table', () => {
       expect(defs.secondary.ultCost, classId).toBe(0);
       expect(defs.utility.ultCost, classId).toBe(0);
       expect(defs.primary.tags & ABILITY_TAG_AUTO, classId).toBe(ABILITY_TAG_AUTO);
-      expect(defs.primary.tags & ABILITY_TAG_ATTACK, classId).toBe(ABILITY_TAG_ATTACK);
+      expect(
+        (defs.primary.tags & ABILITY_TAG_ATTACK) !== 0 ||
+          (defs.primary.tags & ABILITY_TAG_ALLIES) !== 0,
+        classId,
+      ).toBe(true);
       expect(defs.primary.staminaCost, classId).toBe(0);
     }
   });

@@ -7,21 +7,21 @@
  * (`applyHeatVents` is part of the middle step on a map that has vents.)
  *
  * THE MODEL
- * - Heading is three plain angles (yaw, pitch, bank), not an integrated quaternion. Pitch is
- *   limited to `maxClimbPitch`/`maxDivePitch`, both below a quarter turn. DECISION: no loops.
- *   Mouse aim steers toward a reticle with the camera behind the dragon, and going over the top
- *   would flip "up" for both; a hard limit also keeps yaw/pitch free of gimbal trouble. The
- *   barrel-roll dodge is the aerobatic move.
+ * - Heading is three plain angles (yaw, pitch, bank). Pitch is wrapped into (-PI, PI] and may
+ *   pass ±PI/2 so the dragon can loop and fly inverted (DECISIONS: inverted flight). The chase
+ *   camera soft-lerps its "up" toward the dragon's local up when inverted. The barrel-roll dodge
+ *   remains the quick lateral aerobatic.
  * - The dragon always moves along its nose at `speed`, the managed resource: climbing bleeds it
- *   and diving gains it (`gravityAccel * sin(pitch)`), while drag above cruise and wingbeats
- *   below it pull it back to cruise (`speedReturnRate`). Boost adds `boostAccel`.
+ *   and diving gains it (`gravityAccel * sin(pitch)` / nose·world-up), while drag above cruise
+ *   and wingbeats below it pull it back to cruise (`speedReturnRate`). Boost adds `boostAccel`.
  * - Everything that is not forward flight (dodge burst, flap kick, folded-wing sink, knock-back
  *   from a collision) lives in `burst`, a world-space velocity that decays by itself.
- * - Below stall speed the nose drops and steering is weak until gravity has given the speed
- *   back (recover by diving). `minSpeedFraction` keeps the dragon moving even then.
+ * - Below stall speed the nose drops (toward the ground in world space) and steering is weak
+ *   until gravity has given the speed back. `minSpeedFraction` keeps the dragon moving even then.
  *
  * CONVENTIONS: Y up, yaw 0 faces +Z, +X is the dragon's LEFT (right-handed), so a right turn
- * lowers yaw. Positive pitch = nose up, positive roll = right wing down.
+ * lowers yaw. Positive pitch = nose up, positive roll = right wing down. Pitch near ±PI is
+ * inverted level flight (nose along -heading, belly toward the sky).
  *
  * DETERMINISM: no randomness, no clocks, fixed TICK_DT_S, timers in whole ticks. Same state and
  * inputs give the same result on the same JS engine. `Math.sin/cos` are not guaranteed to be
@@ -89,8 +89,8 @@ export { secondsToTicks };
 
 const TWO_PI = Math.PI * 2;
 const EPSILON = 1e-6;
-/** Pitch can never reach straight up/down whatever the tuning says (keeps cos(pitch) > 0). */
-const PITCH_HARD_LIMIT = 1.5;
+/** Pitch may reach ±PI (inverted); never beyond, so wrap stays one full turn. */
+const PITCH_HARD_LIMIT = Math.PI;
 /** The flag bits `writeStatusFlags` owns. */
 const STATUS_FLAG_MASK =
   DRAGON_FLAG_DODGING |
@@ -132,10 +132,12 @@ export function minFlightSpeed(flight: FlightTuning, cls: ClassTuning): number {
   return flight.stallSpeed * cls.speedScale * flight.minSpeedFraction;
 }
 
-/** Highest airspeed this class can reach (in a full dive, where `diveSpeedScale` applies). */
+/**
+ * Highest airspeed this class can reach. Dive-specialists (`diveSpeedScale` > 1) peak in a full
+ * dive; classes with a dive penalty peak in level flight.
+ */
 export function maxFlightSpeed(flight: FlightTuning, cls: ClassTuning): number {
-  const dive = cls.diveSpeedScale > 1 ? cls.diveSpeedScale : 1;
-  return flight.maxSpeed * cls.speedScale * dive;
+  return flight.maxSpeed * cls.speedScale * Math.max(1, cls.diveSpeedScale);
 }
 
 /**
@@ -149,9 +151,9 @@ function speedCapAt(
   sinPitch: number,
 ): number {
   let cap = flight.maxSpeed * cls.speedScale * moveScaleOf(dragon);
+  // Nose below the horizon: fade in the class dive bonus (full at straight down).
   if (sinPitch < 0) {
-    const sinLimit = Math.sin(pitchLimit(flight.maxDivePitch));
-    const diveFraction = sinLimit > EPSILON ? clamp(-sinPitch / sinLimit, 0, 1) : 1;
+    const diveFraction = clamp(-sinPitch, 0, 1);
     cap *= 1 + (cls.diveSpeedScale - 1) * diveFraction;
   }
   return cap;
@@ -293,38 +295,58 @@ export function integrateDragon(
   const speedFraction =
     speedSpan > EPSILON ? clamp((dragon.speed - stallSpeed) / speedSpan, 0, 1) : 0;
   const turnScale =
-    flight.turnScaleSlow + (flight.turnScaleFast - flight.turnScaleSlow) * speedFraction;
+    (flight.turnScaleSlow + (flight.turnScaleFast - flight.turnScaleSlow) * speedFraction) *
+    (cls.turnScale > 0 ? cls.turnScale : 1);
   const authority = turnScale * (stalled ? flight.stallControlScale : 1);
   const rollInput =
     ((buttons & BUTTON_ROLL_RIGHT) !== 0 ? 1 : 0) - ((buttons & BUTTON_ROLL_LEFT) !== 0 ? 1 : 0);
 
-  // Right turn = negative yaw rate (see CONVENTIONS).
-  const yawTarget = -(steerX * flight.maxYawRate + rollInput * flight.rollInputYawRate) * authority;
+  // Screen-relative yaw when inverted: mouse/stick right keeps turning toward screen-right.
+  // Cos(pitch) < 0 means the belly faces the sky; flip yaw (and the bank that follows it).
+  const screenYaw = Math.cos(dragon.pitch) >= 0 ? 1 : -1;
+
+  // Right turn = negative yaw rate when upright (see CONVENTIONS).
+  const yawTarget =
+    -(steerX * screenYaw * flight.maxYawRate + rollInput * flight.rollInputYawRate) * authority;
   let pitchTarget = steerY * flight.maxPitchRate * authority;
-  if (diveHeld) pitchTarget -= flight.divePitchRate;
-  if (stalled) pitchTarget -= flight.stallNoseDropRate;
+  // Folded dive aims at straight down, not through inverted (steer still loops freely).
+  if (diveHeld && dragon.pitch > -Math.PI * 0.5 + 0.02) pitchTarget -= flight.divePitchRate;
+  // Stall recovery drops the nose toward the ground only when the rider is not commanding
+  // pitch. Fighting a held climb made sustained look-up / loops feel yanked level; control is
+  // already weakened by `stallControlScale`, and speed still bleeds.
+  if (stalled && Math.abs(steerY) < 0.2) {
+    pitchTarget += (Math.cos(dragon.pitch) >= 0 ? -1 : 1) * flight.stallNoseDropRate;
+  }
 
   const steerBlend = clamp(flight.steerResponse * dt, 0, 1);
   dragon.yawRate += (yawTarget - dragon.yawRate) * steerBlend;
   dragon.pitchRate += (pitchTarget - dragon.pitchRate) * steerBlend;
 
   dragon.yaw = wrapAngle(dragon.yaw + dragon.yawRate * dt);
+  // Loops allowed: pitch wraps through ±PI. Soft caps in tuning only stop the nose if set
+  // below PI (legacy / accessibility); at PI the wrap is the only bound.
   const maxClimb = pitchLimit(flight.maxClimbPitch);
   const maxDive = pitchLimit(flight.maxDivePitch);
   let pitch = dragon.pitch + dragon.pitchRate * dt;
-  if (pitch > maxClimb) {
+  if (maxClimb < Math.PI - EPSILON && pitch > maxClimb) {
     pitch = maxClimb;
     if (dragon.pitchRate > 0) dragon.pitchRate = 0;
-  } else if (pitch < -maxDive) {
+  } else if (maxDive < Math.PI - EPSILON && pitch < -maxDive) {
     pitch = -maxDive;
     if (dragon.pitchRate < 0) dragon.pitchRate = 0;
+  } else {
+    pitch = wrapAngle(pitch);
   }
   dragon.pitch = pitch;
 
-  // --- Bank: lean into the turn, plus the roll buttons ------------------------------------------
+  // --- Bank: lean into the screen-space turn, plus the roll buttons -----------------------------
+  // Yaw already flipped when inverted (`screenYaw`). Bank needs the same flip again: with a
+  // horizon-stable inverted camera, body roll that merely follows yawRate leans the wrong wing
+  // toward the turn on screen.
   const turnFraction =
     flight.maxYawRate > EPSILON ? clamp(-dragon.yawRate / flight.maxYawRate, -1, 1) : 0;
-  const bankTarget = turnFraction * flight.maxBankAngle + rollInput * flight.rollInputBank;
+  const bankTarget =
+    turnFraction * screenYaw * flight.maxBankAngle + rollInput * flight.rollInputBank;
   const maxBankStep = flight.maxRollRate * dt;
   dragon.roll += clamp(
     (bankTarget - dragon.roll) * clamp(flight.bankResponse * dt, 0, 1),
@@ -433,8 +455,8 @@ function integrateDeathFall(dragon: DragonState, flight: FlightTuning): void {
   dragon.pitchRate = 0;
   dragon.boostLocked = false;
 
-  const maxDive = pitchLimit(flight.maxDivePitch);
-  dragon.pitch = clamp(dragon.pitch - flight.maxPitchRate * dt, -maxDive, maxDive);
+  const towardDown = Math.cos(dragon.pitch) >= 0 ? -1 : 1;
+  dragon.pitch = wrapAngle(dragon.pitch + towardDown * flight.maxPitchRate * dt);
   dragon.speed -= dragon.speed * clamp(flight.speedReturnRate * dt, 0, 1);
 
   const burstKeep = clamp(1 - flight.burstDamping * dt, 0, 1);
@@ -526,7 +548,12 @@ export function finalizeDragon(
   if (!Number.isFinite(dragon.roll)) dragon.roll = 0;
   const maxClimb = pitchLimit(flight.maxClimbPitch);
   const maxDive = pitchLimit(flight.maxDivePitch);
-  dragon.pitch = Number.isFinite(dragon.pitch) ? clamp(dragon.pitch, -maxDive, maxClimb) : 0;
+  if (!Number.isFinite(dragon.pitch)) dragon.pitch = 0;
+  else if (maxClimb < Math.PI - EPSILON || maxDive < Math.PI - EPSILON) {
+    dragon.pitch = clamp(dragon.pitch, -maxDive, maxClimb);
+  } else {
+    dragon.pitch = wrapAngle(dragon.pitch);
+  }
 
   const sinPitch = Math.sin(dragon.pitch);
   const cosPitch = Math.cos(dragon.pitch);
@@ -624,7 +651,10 @@ export function finalizeDragon(
     dragon.anim = dragon.dodgeDir < 0 ? DRAGON_ANIM_BANK_L : DRAGON_ANIM_BANK_R;
   } else if (dragon.flapCooldownTicks > 0) dragon.anim = DRAGON_ANIM_FLAP;
   else if ((flags & DRAGON_FLAG_BOOSTING) !== 0) dragon.anim = DRAGON_ANIM_BOOST;
-  else if ((dragon.prevButtons & BUTTON_DIVE) !== 0 || dragon.pitch < -flight.diveAnimPitch) {
+  else if (
+    (dragon.prevButtons & BUTTON_DIVE) !== 0 ||
+    Math.sin(dragon.pitch) < -Math.sin(flight.diveAnimPitch)
+  ) {
     dragon.anim = DRAGON_ANIM_DIVE;
   } else if (dragon.roll > flight.bankAnimAngle) dragon.anim = DRAGON_ANIM_BANK_R;
   else if (dragon.roll < -flight.bankAnimAngle) dragon.anim = DRAGON_ANIM_BANK_L;
@@ -687,8 +717,8 @@ export function damageDragon(
 /**
  * Points the flight path along a world-space velocity (e.g. the reflected velocity of a terrain
  * bounce): sets `yaw`, `pitch` and `speed` and stops the current turn. `burst` is left alone.
- * Pitch and speed are clamped to the flight limits by `finalizeDragon`, so a bounce can never
- * leave the dragon looping or below its minimum speed. Ignored if the velocity is ~zero or NaN.
+ * Pitch from a bounce stays in [-PI/2, PI/2] (asin); loops are for steered flight. Speed is
+ * clamped by `finalizeDragon`. Ignored if the velocity is ~zero or NaN.
  */
 export function setDragonVelocity(dragon: DragonState, vx: number, vy: number, vz: number): void {
   const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);

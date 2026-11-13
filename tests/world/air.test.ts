@@ -26,8 +26,11 @@ import {
   ventCardCount,
   ventCardWeight,
 } from '../../src/world/air';
+import { aerieGlowModeOf } from '../../src/cinematics/aerie/aerie-set-view';
 import { createMapView } from '../../src/world/map';
 import {
+  GLOW_MODE_CARVED,
+  GLOW_MODE_CRYSTAL,
   GLOW_MODE_FLAME,
   GLOW_MODE_MARKER,
   GLOW_MODE_STEADY,
@@ -252,10 +255,43 @@ describe('the world material on another map', () => {
   it('knows a flame from a "fly here" marker from a crystal', () => {
     expect(glowModeOf('brazier')).toBe(GLOW_MODE_FLAME);
     expect(glowModeOf('vent-marker')).toBe(GLOW_MODE_MARKER);
-    expect(glowModeOf('crystal-core')).toBe(GLOW_MODE_STEADY);
+    expect(glowModeOf('crystal-core')).toBe(GLOW_MODE_CRYSTAL);
+    expect(glowModeOf('crystal-cluster')).toBe(GLOW_MODE_CRYSTAL);
+    expect(glowModeOf('crown-base')).toBe(GLOW_MODE_CRYSTAL);
+    // lava cracks and runes keep the steady glow they had
     expect(glowModeOf('vent-chimney')).toBe(GLOW_MODE_STEADY);
+    expect(glowModeOf('ash-island-small')).toBe(GLOW_MODE_STEADY);
+    expect(glowModeOf('standing-stone')).toBe(GLOW_MODE_STEADY);
     // every marker the caldera places is one the field recognises
     const markers = (CALDERA.placements ?? []).filter((p) => glowModeOf(p.type) === GLOW_MODE_MARKER);
     expect(markers.length).toBeGreaterThan(0);
+    // both maps float a sky-well crystal that takes the crystal look
+    for (const map of [SPIRES, CALDERA]) {
+      expect((map.placements ?? []).some((p) => glowModeOf(p.type) === GLOW_MODE_CRYSTAL)).toBe(true);
+    }
+  });
+
+  it('shades crystals and markers as cut stones, cheaper on Low, and carves the aerie runes', () => {
+    const modes = [GLOW_MODE_STEADY, GLOW_MODE_FLAME, GLOW_MODE_MARKER, GLOW_MODE_CRYSTAL, GLOW_MODE_CARVED];
+    expect(modes).toEqual([0, 1, 2, 3, 4]);
+    const materials = createWorldMaterials(textures, farState, QUALITY_PRESETS.low);
+    const fragment = materials.rock.fragmentShader;
+    // one tone per facet and the run along the length on every preset ...
+    expect(fragment).toContain('gemBody');
+    expect(fragment).toContain('vLift');
+    // ... the slanted edge and the sun flash only behind the Medium / High switch
+    const extras = fragment.slice(fragment.indexOf('float slant'), fragment.indexOf('ember = mix(ember, gemBody, gem)'));
+    expect(extras).toContain('flash');
+    expect(fragment.lastIndexOf('#if WM_QUALITY >= 1', fragment.indexOf('float slant'))).toBeGreaterThan(
+      fragment.indexOf('vec3 gemBody'),
+    );
+    // the merged far meshes read their glow mode from the colour's fourth byte
+    expect(materials.far.vertexShader).toContain('aColor.a * 255.0');
+    expect(materials.far.vertexShader).toContain('vLift = 0.0');
+    // the aerie's perch stones: carved, everything else as on a map
+    expect(aerieGlowModeOf('standing-stone')).toBe(GLOW_MODE_CARVED);
+    expect(aerieGlowModeOf('brazier')).toBe(GLOW_MODE_FLAME);
+    expect(aerieGlowModeOf('island-large')).toBe(GLOW_MODE_STEADY);
+    materials.dispose();
   });
 });

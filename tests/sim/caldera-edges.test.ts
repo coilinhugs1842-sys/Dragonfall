@@ -59,10 +59,10 @@ function openSpot(y: number, clear: number): { x: number; z: number } {
 }
 
 describe('the edges of Emberfall Caldera', () => {
-  it('has the same envelope as the first map: sea at 0, floor just under it, ceiling 700, storm 1000 m', () => {
+  it('has the same envelope as the first map: sea at 0, floor just under it, ceiling 800, storm 1000 m', () => {
     expect(MAP.colliders.cloudSeaY).toBe(0);
     expect(FLOOR_Y).toBeLessThan(0);
-    expect(CEILING_Y).toBe(700);
+    expect(CEILING_Y).toBe(800);
     expect(RADIUS).toBe(1000);
     expect(WORLD.stormRadius).toBe(RADIUS);
   });
@@ -104,7 +104,7 @@ describe('the edges of Emberfall Caldera', () => {
 
   it('a boosted climb is stopped a little over the ceiling', () => {
     const spot = openSpot(660, 60);
-    const rig = spawn(spot.x, 650, spot.z, 0);
+    const rig = spawn(spot.x, 750, spot.z, 0);
     const input = createInputFrame();
     input.steerY = 1;
     input.buttons = BUTTON_BOOST | BUTTON_FLAP;

@@ -151,8 +151,21 @@ export const CLIENT_CONNECT_TIMEOUT_MS = 25_000;
 export const CLIENT_RECONNECT_DELAY_MS = 2000;
 /** Pause between failed reconnect attempts. */
 export const CLIENT_RECONNECT_RETRY_MS = 1500;
-/** This many "room not found" answers in a row while reconnecting mean the host is gone. */
+/**
+ * This many "room not found" answers while reconnecting, with no sign of the host in between,
+ * mean the host is gone. An attempt that got no answer at all does not count either way.
+ */
 export const CLIENT_ROOM_GONE_ATTEMPTS = 3;
+/**
+ * One "room not found" answer and no sign of the host for this long after it also mean the
+ * host is gone. The public signaling server does not answer every attempt to reach a host
+ * whose browser has died (measured: an answer at once, then an attempt that hangs until the
+ * transport times it out 15 s later, then an answer again), so three answers in a row never
+ * come; counting them, the 30 s window ran out first and the player was told to check their
+ * own network. A host that is only away for a moment answers a later attempt well inside
+ * this time, which clears the count.
+ */
+export const CLIENT_ROOM_GONE_MS = 10_000;
 /**
  * Nothing heard from the host for this long while connected (it answers every ping, so that is
  * a dozen missed pongs) means the link is dead: it is dropped and the reconnect starts. WebRTC
@@ -166,6 +179,12 @@ export const CLIENT_LINK_TIMEOUT_MS = 6000;
  * background timer: that is the page running slowly, not the page being away.
  */
 export const CLIENT_STALL_MS = 2000;
+/**
+ * Nothing heard from the host for this long (four missed pongs, forty snapshots) and the ping
+ * shown is the silence itself: see `pingMs`. Not below `CLIENT_STALL_MS`: a shorter gap
+ * between two updates of this page is not told apart from the host being quiet.
+ */
+export const CLIENT_QUIET_MS = CLIENT_STALL_MS;
 /** Pings are sent this often until the clock is synced, then at PING_HZ. */
 export const CLIENT_SYNC_PING_INTERVAL_MS = 100;
 /** Fixed ticks run by one `advance` at most (a longer stall drops sim time). */
@@ -398,7 +417,9 @@ export class ClientSession {
   private reconnectDeadlineMs = 0;
   /** When the next reconnect attempt may start; Infinity while one is in flight. */
   private nextAttemptMs = Infinity;
+  /** "Room not found" answers since the host last showed a sign of life, and when the first came. */
   private roomGoneStreak = 0;
+  private roomGoneSinceMs = 0;
   private nextPingMs = 0;
 
   // Reference for expanding wire ticks before the first pong.
@@ -515,9 +536,17 @@ export class ClientSession {
     return this.lobbyState;
   }
 
-  /** Smoothed round trip to the host in ms (0 before the first pong). */
+  /**
+   * Smoothed round trip to the host in ms (0 before the first pong). Once the host has been
+   * silent for `CLIENT_QUIET_MS` the silence is the figure: a ping sent that long ago has not
+   * come back, so the number and the bars on screen fall at once instead of showing the last
+   * good round trip until the link times out (six seconds of a frozen sky under "7 ms").
+   */
   get pingMs(): number {
-    return this.clock.rttMs;
+    const rtt = this.clock.rttMs;
+    if (this.sessionStatus !== 'connected') return rtt;
+    const silentMs = this.nowMs - this.lastHeardMs;
+    return silentMs >= CLIENT_QUIET_MS && silentMs > rtt ? silentMs : rtt;
   }
 
   /** Share of snapshots that did not arrive over the last second, 0..100. */
@@ -732,6 +761,7 @@ export class ClientSession {
       this.lastHeardMs += gap;
       this.reconnectDeadlineMs += gap;
       this.connectStartedMs += gap;
+      this.roomGoneSinceMs += gap;
       if (this.helloSentMs >= 0) this.helloSentMs += gap;
       // `nextAttemptMs` stays: an attempt that fell due while away is made at once.
     }
@@ -752,7 +782,16 @@ export class ClientSession {
     if (status === 'reconnecting') {
       if (nowMs >= this.reconnectDeadlineMs) {
         this.endMatchLocal(true);
-        this.fail('disconnected', { kind: 'connectionLost' });
+        // The last word from the signaling server was that the room is not there: the host
+        // went, not this page's network ("check your network" would send the player the
+        // wrong way).
+        if (this.roomGoneStreak > 0) this.fail('hostLeft', { kind: 'hostLeft' });
+        else this.fail('disconnected', { kind: 'connectionLost' });
+        this.transport.close();
+      } else if (this.roomGoneStreak > 0 && nowMs - this.roomGoneSinceMs >= CLIENT_ROOM_GONE_MS) {
+        // Told the room is not there, and nothing from the host since (see the constant).
+        this.endMatchLocal(true);
+        this.fail('hostLeft', { kind: 'hostLeft' });
         this.transport.close();
       } else if (this.helloSentMs >= 0 && nowMs - this.helloSentMs >= this.handshakeTimeoutMs) {
         // The link opened but the host never answered: try again from scratch.
@@ -988,12 +1027,19 @@ export class ClientSession {
       this.helloSentMs = -1;
       if (error.reason === 'roomNotFound') {
         // The host no longer holds the room code: it closed its page without a goodbye.
-        if (++this.roomGoneStreak >= CLIENT_ROOM_GONE_ATTEMPTS) {
+        if (this.roomGoneStreak === 0) this.roomGoneSinceMs = this.nowMs;
+        this.roomGoneStreak++;
+        if (
+          this.roomGoneStreak >= CLIENT_ROOM_GONE_ATTEMPTS ||
+          this.nowMs - this.roomGoneSinceMs >= CLIENT_ROOM_GONE_MS
+        ) {
           this.endMatchLocal(true);
           this.fail('hostLeft', { kind: 'hostLeft' });
           return;
         }
-      } else {
+      } else if (error.reason !== 'timeout') {
+        // Anything but silence is news: the host answered and closed the link, or the
+        // signaling server cannot be reached (then nothing is known about the room).
         this.roomGoneStreak = 0;
       }
       this.nextAttemptMs = this.nowMs + this.reconnectRetryMs;

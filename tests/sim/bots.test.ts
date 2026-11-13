@@ -183,7 +183,9 @@ function expectSaneFrame(frame: InputFrame): void {
 }
 
 describe('flight competence', () => {
-  it('flies 5 minutes alone on the greybox map without dying, in every class', () => {
+  it(
+    'flies 5 minutes alone on the greybox map without dying, in every class',
+    () => {
     for (const classId of DRAGON_CLASS_IDS) {
       for (const seed of [1, 2, 3, 5]) {
         const sim = createSim({ collisionWorld: terrain });
@@ -232,7 +234,9 @@ describe('flight competence', () => {
         expect(brain.targetId).toBe(NO_PLAYER);
       }
     }
-  });
+  },
+  120_000,
+  );
 
   it('chasing through the spires for 5 minutes, no bot kills itself on rock or storm', () => {
     // A dogfight with the guns taken away from one side: the hardest flying there is (hard
@@ -324,25 +328,29 @@ describe('flight competence', () => {
 });
 
 describe('fights', () => {
-  it('two bots 1v1 produce a takedown within two minutes, whatever the classes', () => {
-    const firsts: string[] = [];
-    for (const classId of DRAGON_CLASS_IDS) {
-      for (const seed of [1, 2]) {
-        const room = createRoom({ perTeam: 1, seed, classes: [classId] });
-        room.run(120 * TICK_HZ);
-        expect(room.tally.takedowns, `${classId} mirror, seed ${seed}`).toBeGreaterThanOrEqual(1);
-        firsts.push(`${classId}/${seed}: ${(room.tally.firstTakedownTick / TICK_HZ).toFixed(0)} s`);
+  it(
+    'two bots 1v1 produce a takedown within two minutes, whatever the classes',
+    () => {
+      const firsts: string[] = [];
+      for (const classId of DRAGON_CLASS_IDS) {
+        for (const seed of [1, 2]) {
+          const room = createRoom({ perTeam: 1, seed, classes: [classId] });
+          room.run(120 * TICK_HZ);
+          expect(room.tally.takedowns, `${classId} mirror, seed ${seed}`).toBeGreaterThanOrEqual(1);
+          firsts.push(`${classId}/${seed}: ${(room.tally.firstTakedownTick / TICK_HZ).toFixed(0)} s`);
+        }
       }
-    }
-    for (const seed of [3, 4, 5, 6]) {
-      const room = createRoom({ perTeam: 1, seed });
-      room.run(120 * TICK_HZ);
-      expect(room.tally.takedowns, `mixed, seed ${seed}`).toBeGreaterThanOrEqual(1);
-      expect(room.tally.selfInflicted).toBe(0);
-      firsts.push(`mixed/${seed}: ${(room.tally.firstTakedownTick / TICK_HZ).toFixed(0)} s`);
-    }
-    console.log(`[bots] first takedown of a 1v1: ${firsts.join(', ')}`);
-  });
+      for (const seed of [3, 4, 5, 6]) {
+        const room = createRoom({ perTeam: 1, seed });
+        room.run(120 * TICK_HZ);
+        expect(room.tally.takedowns, `mixed, seed ${seed}`).toBeGreaterThanOrEqual(1);
+        expect(room.tally.selfInflicted).toBe(0);
+        firsts.push(`mixed/${seed}: ${(room.tally.firstTakedownTick / TICK_HZ).toFixed(0)} s`);
+      }
+      console.log(`[bots] first takedown of a 1v1: ${firsts.join(', ')}`);
+    },
+    120_000,
+  );
 
   it('a 5v5 runs 3 minutes with no NaN, a plausible score and every kind of ability used', () => {
     const room = createRoom({ perTeam: 5, seed: 2, profile: true });

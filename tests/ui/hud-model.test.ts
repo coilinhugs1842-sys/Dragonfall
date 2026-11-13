@@ -22,6 +22,11 @@ import {
   BANNER_VICTORY,
   BLIND_FADE_S,
   COMPASS_HALF_SPAN_RAD,
+  COMPASS_LABEL_GAP,
+  COMPASS_LABEL_GAP_BACK,
+  COMPASS_LANE_FIRST,
+  COMPASS_LANE_NONE,
+  COMPASS_LANE_SECOND,
   COMPASS_STEPS,
   DAMAGE_ARC_LIFE_S,
   DEGREE_STRINGS,
@@ -49,6 +54,8 @@ import {
   clockMinutesString,
   clockSecondsString,
   clockTotalSeconds,
+  compassLabelLanes,
+  compassLabelRank,
   compassOffset,
   compassPinned,
   compassStep,
@@ -407,6 +414,101 @@ describe('compass', () => {
     expect(UNIT_STRINGS[compassStep(0.4)]).toBeDefined();
   });
 
+  describe('distance figures of markers that are close together', () => {
+    const lanesFor = (
+      steps: number[],
+      ranks: number[],
+      figures: number[],
+      before: number[] = [],
+    ): number[] => {
+      const lanes = new Uint8Array(8);
+      lanes.set(before);
+      compassLabelLanes(lanes, steps, ranks, figures, steps.length);
+      return Array.from(lanes.subarray(0, steps.length));
+    };
+
+    it('leaves markers with room between them on the first line', () => {
+      expect(lanesFor([20, 100, 180], [1, 2, 3], [280, 300, 90])).toEqual([0, 0, 0]);
+      expect(lanesFor([100, 100 + COMPASS_LABEL_GAP], [1, 2], [280, 300])).toEqual([0, 0]);
+      expect(lanesFor([], [], [])).toEqual([]);
+    });
+
+    it('staggers the second of two close markers onto the second line', () => {
+      // "280 m" and "300 m" two steps apart: the nearer one keeps its place.
+      expect(lanesFor([100, 102], [280, 300], [280, 300])).toEqual([
+        COMPASS_LANE_FIRST,
+        COMPASS_LANE_SECOND,
+      ]);
+      // Whatever order they arrive in, the rank decides.
+      expect(lanesFor([102, 100], [300, 280], [300, 280])).toEqual([
+        COMPASS_LANE_SECOND,
+        COMPASS_LANE_FIRST,
+      ]);
+    });
+
+    it('shares one figure between close markers that show the same number', () => {
+      expect(lanesFor([100, 103], [1, 2], [280, 280])).toEqual([COMPASS_LANE_FIRST, COMPASS_LANE_NONE]);
+    });
+
+    it('prints nothing for a third marker in a crowd, and never overlaps on a line', () => {
+      const steps = [100, 102, 104, 110, 150];
+      const lanes = lanesFor(steps, [1, 2, 3, 4, 5], [100, 120, 140, 160, 180]);
+      expect(lanes).toEqual([
+        COMPASS_LANE_FIRST,
+        COMPASS_LANE_SECOND,
+        COMPASS_LANE_NONE,
+        COMPASS_LANE_NONE,
+        COMPASS_LANE_FIRST,
+      ]);
+      // A stack of team mates behind you (all pinned to the same end): two figures, not five.
+      const stack = lanesFor([0, 0, 0, 0, 0], [5, 4, 3, 2, 1], [50, 60, 70, 80, 90]);
+      expect(stack.filter((lane) => lane !== COMPASS_LANE_NONE)).toHaveLength(2);
+      for (const result of [lanes, stack]) {
+        const used = result === lanes ? steps : [0, 0, 0, 0, 0];
+        for (let a = 0; a < used.length; a++) {
+          for (let b = a + 1; b < used.length; b++) {
+            if (result[a] === COMPASS_LANE_NONE || result[a] !== result[b]) continue;
+            expect(Math.abs((used[a] ?? 0) - (used[b] ?? 0))).toBeGreaterThanOrEqual(COMPASS_LABEL_GAP);
+          }
+        }
+      }
+    });
+
+    it('needs a little more room to come back to the first line than to stay on it', () => {
+      const apart = [100, 100 + COMPASS_LABEL_GAP + 1];
+      expect(lanesFor(apart, [1, 2], [280, 300])).toEqual([0, 0]);
+      // It was staggered a moment ago: one step past the gap is not enough yet.
+      expect(lanesFor(apart, [1, 2], [280, 300], [0, COMPASS_LANE_SECOND])).toEqual([
+        COMPASS_LANE_FIRST,
+        COMPASS_LANE_SECOND,
+      ]);
+      expect(
+        lanesFor([100, 100 + COMPASS_LABEL_GAP_BACK], [1, 2], [280, 300], [0, COMPASS_LANE_SECOND]),
+      ).toEqual([0, 0]);
+    });
+
+    it('resets the lanes of markers that are gone', () => {
+      const lanes = new Uint8Array([2, 1, 2, 1, 0, 0, 0, 0]);
+      compassLabelLanes(lanes, [100], [1], [50], 1);
+      expect(Array.from(lanes)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+    });
+
+    it('gives shards their figure first, then the brazier, then riders; what is ahead before what is behind', () => {
+      const shard = compassLabelRank('shard', false, 600);
+      const brazier = compassLabelRank('brazier', false, 300);
+      const objective = compassLabelRank('objective', false, 200);
+      const mate = compassLabelRank('ally', false, 40);
+      const nearer = compassLabelRank('ally', false, 20);
+      const behind = compassLabelRank('shard', true, 10);
+      expect(shard).toBeLessThan(brazier);
+      expect(brazier).toBeLessThan(objective);
+      expect(objective).toBeLessThan(mate);
+      expect(nearer).toBeLessThan(mate);
+      expect(mate).toBeLessThan(behind);
+      expect(compassLabelRank('ally', false, Number.NaN)).toBe(compassLabelRank('ally', false, 0));
+    });
+  });
+
   it('rounds distances so they do not flicker', () => {
     expect(distanceShown(42.4)).toBe(40);
     expect(distanceShown(43)).toBe(45);
@@ -435,7 +537,7 @@ describe('killfeed', () => {
     expect(takedownGlyph(undefined, 'wraith')).toBe(takedownGlyph('primary', null));
   });
 
-  it('has a distinct glyph for all 16 abilities', () => {
+  it('has a distinct glyph for every class ability', () => {
     const seen = new Set<string>();
     for (const classGlyphs of Object.values(ABILITY_GLYPHS)) {
       for (const d of Object.values(classGlyphs)) {
@@ -443,7 +545,7 @@ describe('killfeed', () => {
         seen.add(d);
       }
     }
-    expect(seen.size).toBe(16);
+    expect(seen.size).toBe(Object.keys(ABILITY_GLYPHS).length * 4);
   });
 });
 

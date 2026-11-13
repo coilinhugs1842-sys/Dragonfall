@@ -12,7 +12,7 @@ import type { PlayerId, TeamId } from '../../shared/constants';
 import { NO_PLAYER, TEAM_EMBER, TEAM_FROST } from '../../shared/constants';
 import type { ObjectiveKind } from '../../shared/events';
 import type { MatchPhase, MatchWinner, ModeId } from '../../shared/match';
-import type { HudDamageArc, ScoreboardRow } from '../../shared/ui';
+import type { HudCompassKind, HudDamageArc, ScoreboardRow } from '../../shared/ui';
 
 // --- Timings and thresholds (display only; gameplay numbers live in src/shared) ------------------
 
@@ -27,8 +27,12 @@ export const DAMAGE_ARC_LIFE_S = 1.1;
 export const DAMAGE_ARC_MERGE_RAD = Math.PI / 7;
 export const KILLFEED_LIFE_S = 6;
 export const KILLFEED_FADE_S = 1;
-/** The blind veil lifts over this many seconds at the end of the effect. */
-export const BLIND_FADE_S = 0.4;
+/** The blind / flashbang veil lifts over this many seconds at the end of the effect. */
+export const BLIND_FADE_OUT_S = 0.35;
+/** Flashbang / blind ramp-up so the screen does not slam to full white. */
+export const BLIND_FADE_IN_S = 0.12;
+/** @deprecated use BLIND_FADE_OUT_S */
+export const BLIND_FADE_S = BLIND_FADE_OUT_S;
 /** Half the angle the compass strip spans; markers further round sit on its edge. */
 export const COMPASS_HALF_SPAN_RAD = (Math.PI * 100) / 180;
 /** Duel pips drawn per side at most. */
@@ -233,10 +237,15 @@ export function lowHealthLevel(health: number, alive: boolean): number {
   return 1 - health / LOW_HEALTH_THRESHOLD;
 }
 
-/** Veil opacity 0..1 for `blindS` seconds of blindness left. */
-export function blindLevel(blindS: number): number {
+/**
+ * Veil opacity 0..1 for blindness left. `fadeIn` is 0..1 progress since the latest application
+ * (the HUD tracks when `blindS` jumps up). Fade-out uses the remaining time.
+ */
+export function blindLevel(blindS: number, fadeIn: number = 1): number {
   if (!(blindS > 0)) return 0;
-  return blindS >= BLIND_FADE_S ? 1 : blindS / BLIND_FADE_S;
+  const out = blindS >= BLIND_FADE_OUT_S ? 1 : blindS / BLIND_FADE_OUT_S;
+  const inn = fadeIn > 0 ? (fadeIn < 1 ? fadeIn : 1) : 0;
+  return out * inn;
 }
 
 // --- Angles: damage arcs and the compass ---------------------------------------------------------
@@ -341,6 +350,90 @@ export const COMPASS_STEPS = UNIT_STEPS;
 /** 0..COMPASS_STEPS along the strip for a screen angle. */
 export function compassStep(angle: number): number {
   return Math.round((compassOffset(angle) * 0.5 + 0.5) * COMPASS_STEPS);
+}
+
+/** Where a marker's distance figure is printed: under it, a line lower, or not at all. */
+export const COMPASS_LANE_FIRST = 0;
+export const COMPASS_LANE_SECOND = 1;
+export const COMPASS_LANE_NONE = 2;
+/**
+ * Two figures on one line need this many strip steps between them ("280 m" is about eleven
+ * steps wide). A figure that was moved off the first line needs a little more room before it
+ * comes back, so two markers drifting at the limit do not make their figures jump.
+ */
+export const COMPASS_LABEL_GAP = 12;
+export const COMPASS_LABEL_GAP_BACK = 15;
+
+/** Order in which markers get their figure: shards, the brazier, objectives, then riders. */
+export function compassLabelRank(
+  kind: HudCompassKind,
+  pinned: boolean,
+  distanceM: number,
+): number {
+  const kindRank = kind === 'shard' ? 0 : kind === 'brazier' ? 1 : kind === 'objective' ? 2 : 3;
+  // What is behind you (pinned to an end of the strip) waits for what is in front; then nearer first.
+  return (pinned ? 4 : 0) * 10000 + kindRank * 10000 + (distanceM > 0 ? Math.min(distanceM, 9999) : 0);
+}
+
+const lanePlaced = new Uint8Array(64);
+
+/**
+ * Keeps the distance figures under the compass markers apart. Two markers closer than a figure
+ * is wide used to print their figures over each other ("280 m 300 m" as one smear). Now, in
+ * the order of `ranks` (lowest first), each marker takes the first line if no figure already
+ * stands there within reach; otherwise it SHARES (prints nothing) when that neighbour shows the
+ * very same number, STAGGERS onto the second line when that is free, and prints nothing when
+ * both lines are taken (a crowd: the shapes still show where everybody is).
+ *
+ * `lanes` is kept between calls (the last answer is the hysteresis) and receives the result
+ * for markers 0..count-1; the rest are reset. No allocation.
+ */
+export function compassLabelLanes(
+  lanes: Uint8Array,
+  steps: ArrayLike<number>,
+  ranks: ArrayLike<number>,
+  figures: ArrayLike<number>,
+  count: number,
+): void {
+  const total = count < lanePlaced.length ? count : lanePlaced.length;
+  for (let i = 0; i < lanes.length; i++) {
+    if (i >= total) lanes[i] = COMPASS_LANE_FIRST;
+    if (i < lanePlaced.length) lanePlaced[i] = 0;
+  }
+  for (let round = 0; round < total; round++) {
+    let best = -1;
+    let bestRank = 0;
+    for (let i = 0; i < total; i++) {
+      if (lanePlaced[i] === 1) continue;
+      const rank = ranks[i] ?? 0;
+      if (best < 0 || rank < bestRank) {
+        best = i;
+        bestRank = rank;
+      }
+    }
+    if (best < 0) return;
+    const step = steps[best] ?? 0;
+    const firstGap = lanes[best] === COMPASS_LANE_FIRST ? COMPASS_LABEL_GAP : COMPASS_LABEL_GAP_BACK;
+    let firstFree = true;
+    let secondFree = true;
+    let shared = false;
+    for (let i = 0; i < total; i++) {
+      if (lanePlaced[i] !== 1) continue;
+      const gap = Math.abs((steps[i] ?? 0) - step);
+      if (lanes[i] === COMPASS_LANE_FIRST && gap < firstGap) {
+        firstFree = false;
+        if (figures[i] === figures[best]) shared = true;
+      } else if (lanes[i] === COMPASS_LANE_SECOND && gap < COMPASS_LABEL_GAP) {
+        secondFree = false;
+      }
+    }
+    lanes[best] = firstFree
+      ? COMPASS_LANE_FIRST
+      : shared || !secondFree
+        ? COMPASS_LANE_NONE
+        : COMPASS_LANE_SECOND;
+    lanePlaced[best] = 1;
+  }
 }
 
 /** Metres printed under a marker: to 5 m up close, 10 m beyond 100 m, capped at 990. */

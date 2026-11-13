@@ -471,6 +471,28 @@ export interface HudRelayState {
   readonly noticeAgeS: number;
 }
 
+/**
+ * A friend-or-foe marker floating over a dragon in the 3D picture: the team's shape in the
+ * team's colour, so team identity never rests on the dragon's tint alone. `src/game` projects
+ * the dragons with the frame's camera and decides who gets one (never an enemy the local player
+ * may not see). A fixed pool of HUD_DRAGON_TAGS entries mutated in place: `shown` false = unused.
+ */
+export interface HudDragonTag {
+  readonly shown: boolean;
+  readonly team: TeamId;
+  /** An enemy of whoever is looking. Always false for a spectator (on neither side). */
+  readonly foe: boolean;
+  /** Close enough for the full-size shape; false draws the small one. */
+  readonly near: boolean;
+  /** The rider's name, or '' where none is shown (enemies, far team mates not aimed at). */
+  readonly name: string;
+  /** Picture fractions, 0..1 from the top-left corner: the point the marker stands on. */
+  readonly x: number;
+  readonly y: number;
+  /** 0..1: markers fade out towards the end of their range. */
+  readonly opacity: number;
+}
+
 export interface HudState {
   readonly mode: ModeId;
   readonly phase: MatchPhase;
@@ -521,6 +543,8 @@ export interface HudState {
   readonly introCard?: IntroCardState | null;
   /** Ember Relay (T-6.3): both shards and the carry call-out. Absent or null in other modes. */
   readonly relay?: HudRelayState | null;
+  /** Markers over the dragons in view (HUD_DRAGON_TAGS entries). Absent = none. */
+  readonly dragonTags?: readonly HudDragonTag[];
 }
 
 /** The title card of the match intro flyby. `src/game` may mutate one object in place. */
@@ -553,6 +577,8 @@ export const HUD_DAMAGE_ARCS = 4;
 export const HUD_KILLFEED_ROWS = 5;
 /** Four team mates plus Ember Relay's two shards and own brazier, with one to spare. */
 export const HUD_COMPASS_MARKERS = 8;
+/** One per dragon of a full 5v5 room: a rider sees at most nine others, a spectator ten. */
+export const HUD_DRAGON_TAGS = 10;
 
 /** TBD in T-5.x (results podium): awards beyond the three named in GAME_DESIGN.md. */
 export interface ResultsState {

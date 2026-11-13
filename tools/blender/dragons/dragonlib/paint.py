@@ -416,39 +416,128 @@ def paint(P, size=ATLAS, log=print):
         emis[m] = np.clip((1 - pupil) * (1 - sm(0.7, 0.98, r)), 0, 1)
         light_k[m] = 0.0
 
-    # ---- rider, saddle, cloak ------------------------------------------------------------------------
+    # ---- rider, saddle, cape ------------------------------------------------------------------------
+    # The rider wears the dragon's own colours: leather per class, armour in the horn tones, gilt
+    # trim, and dark cloth that the team colour lights up through the emissive mask.
+    leather = col(pal.get('rider', (0.42, 0.33, 0.25)))
+    armor = col(pal.get('rider_armor', mix(pal['horn_dark'], pal['horn'], 0.62)))
+    trim = col(pal.get('rider_trim', (0.80, 0.70, 0.45)))
+    dark = col(pal.get('rider_dark', (0.13, 0.115, 0.125)))
+    cloth = col(pal.get('cloak', (0.15, 0.14, 0.16)))
     m = kind == KIND['rider']
     if m.any():
-        al = pa[m, PA_ALONG]
-        py_, px_ = idx[0][m], idx[1][m]
-        limb = py_ >= 832 + 150
-        c = np.tile(col(pal.get('rider', (0.42, 0.33, 0.25))), (m.sum(), 1))
-        c = c * (0.82 + 0.4 * brush2[m])[:, None]
-        c = mix(c, col(pal.get('rider_trim', (0.80, 0.70, 0.45))), ((np.abs(al - 0.2) < 0.022) & ~limb) * 0.95)
-        helm = sm(0.6, 0.63, al) * ~limb
-        c = mix(c, col(pal.get('rider_helm', (0.72, 0.70, 0.66))), helm)
-        visor = helm * (np.abs(al - 0.78) < 0.03) * (pa[m, PA_AROUND] < 0.45)
-        c = mix(c, col((0.08, 0.08, 0.1)), visor)
-        c = mix(c, col(pal.get('rider_dark', (0.16, 0.14, 0.15))), limb * sm(0.55, 0.7, al))  # gloves, boots
+        t, a = pa[m, PA_AUX], pa[m, PA_AROUND]      # station (see build_rider); 0 front .. 1 back
+        b1, b2 = brush[m], brush2[m]
+        # lamellar cuirass: rows of leather plates with a lit rim, like the dragon's scales
+        c = leather[None] * (0.74 + 0.3 * sm(0.0, 4.0, t) + 0.3 * (b2 - 0.5))[:, None]
+        on_torso = sm(1.25, 1.4, t) * (1 - sm(3.75, 3.95, t))
+        fb = np.mod(t * 2.6 + 0.12 * np.sin(a * 9.0), 1.0)
+        plate = 0.84 + 0.24 * sm(0.0, 0.4, fb) - 0.1 * sm(0.8, 1.0, fb)
+        seam = 1 - 0.5 * (1 - sm(0.0, 0.09, fb))
+        c = c * (1 + on_torso * (plate * seam - 1))[:, None]
+        c = mix(c, c * 1.3 + 0.035, sm(0.12, 0.2, fb) * (1 - sm(0.24, 0.34, fb)) * on_torso * 0.55)
+        # the rows are split down the sides and down the front
+        split = np.maximum(1 - sm(0.0, 0.035, np.abs(a - 0.5)), 1 - sm(0.0, 0.02, a))
+        c = c * (1 - 0.45 * split * on_torso)[:, None]
+        # belt with gilt edges and a buckle, a dark skirt below it
+        belt = sm(0.72, 0.8, t) * (1 - sm(1.2, 1.28, t))
+        c = mix(c, dark * 1.5, belt)
+        edges = np.maximum(1 - sm(0.03, 0.06, np.abs(t - 0.78)), 1 - sm(0.03, 0.06, np.abs(t - 1.22)))
+        c = mix(c, trim, belt * edges * 0.85)
+        c = mix(c, trim * 1.05, belt * (1 - sm(0.07, 0.1, a)) * sm(0.84, 0.88, t) * (1 - sm(1.12, 1.16, t)))
+        c = mix(c, dark[None] * (0.9 + 0.5 * b2)[:, None], (1 - sm(0.6, 0.74, t)) * 0.8)
+        # shoulder yoke and neck: dark cloth under the cowl
+        c = mix(c, dark[None] * (0.9 + 0.5 * b1)[:, None], sm(3.8, 4.1, t) * (1 - sm(5.55, 5.7, t)))
+        # helm: burnished plate, darker toward the rim, a lit brow and comb, a gilt rim and point
+        helm = sm(5.6, 5.72, t)
+        hc = mix(armor * 0.5, armor * 1.08, sm(5.7, 8.3, t + 0.5 * (b1 - 0.5)))
+        hc = hc * (0.88 + 0.26 * b2)[:, None]
+        hc = mix(hc, hc * 1.35 + 0.05, np.exp(-((t - 7.08) / 0.09) ** 2) * (1 - sm(0.55, 0.75, a)) * 0.7)
+        hc = mix(hc, hc * 1.3 + 0.04, (1 - sm(0.0, 0.05, np.minimum(a, 1 - a))) * sm(7.2, 7.6, t) * 0.6)
+        cheek = np.exp(-((a - 0.5) / 0.05) ** 2) * sm(5.9, 6.2, t) * (1 - sm(6.9, 7.1, t))
+        hc = hc * (1 - 0.35 * cheek)[:, None]
+        hc = mix(hc, trim, np.maximum(1 - sm(0.06, 0.11, np.abs(t - 5.86)), sm(8.45, 8.7, t)) * 0.9)
+        # visor: a slit under the brow and a notch down to the rim. The slit glows (Runes slot).
+        slit = (1 - sm(0.1, 0.17, np.abs(t - 6.62))) * (1 - sm(0.36, 0.43, a))
+        gap = (1 - sm(0.035, 0.07, a)) * sm(5.95, 6.05, t) * (1 - sm(6.5, 6.6, t))
+        hc = mix(hc, col((0.035, 0.03, 0.045)), np.maximum(slit, gap))
+        c = mix(c, hc, helm)
         rgb[m] = c
+        emis[m] = np.clip((1 - sm(0.03, 0.11, np.abs(t - 6.62))) * (1 - sm(0.28, 0.4, a)) * 0.9, 0, 1)
+        light_k[m] = 0.75
+    m = kind == KIND['rider_limb']
+    if m.any():
+        al, b2 = pa[m, PA_ALONG], brush2[m]
+        is_arm = pa[m, PA_AUX] < 1.5
+        # arm: sleeve, bracer, glove.  leg: breeches, knee plate, boot with a gilt cuff
+        p0, p1 = np.where(is_arm, 0.42, 0.3), np.where(is_arm, 0.7, 0.47)
+        c = mix(leather * 0.8, dark * 1.3, np.where(is_arm, 0.55, 0.25)) * (0.8 + 0.4 * b2)[:, None]
+        on_plate = sm(p0 - 0.02, p0 + 0.02, al) * (1 - sm(p1 - 0.02, p1 + 0.02, al))
+        pc = mix(armor * 0.6, armor * 1.1, sm(p0, p1, al)) * (0.88 + 0.26 * b2)[:, None]
+        rim = np.maximum(1 - sm(0.0, 0.03, np.abs(al - p0 - 0.035)), 1 - sm(0.0, 0.03, np.abs(al - p1 + 0.035)))
+        pc = mix(pc, pc * 1.3 + 0.05, rim * 0.7)
+        c = mix(c, pc, on_plate)
+        c = mix(c, dark[None] * (0.85 + 0.5 * b2)[:, None], sm(p1 + 0.01, p1 + 0.05, al))
+        c = mix(c, trim * 0.9, (1 - sm(0.0, 0.03, np.abs(al - p1 - 0.07))) * ~is_arm * 0.8)
+        rgb[m] = c
+        light_k[m] = 0.75
+    m = kind == KIND['rider_gear']
+    if m.any():
+        al, b2 = pa[m, PA_ALONG], brush2[m]
+        is_plate = pa[m, PA_AUX] < 1.5
+        # shoulder plate: dark at the base, pale at the point, a worn gilt rim (like the scutes)
+        c = mix(armor * 0.58, armor * 1.12, sm(0.05, 0.95, al))
+        c = mix(c, trim, (1 - sm(0.1, 0.18, al)) * 0.85)
+        scratch = np.abs(fbm(pos[m] * np.array([3.0, 0.6, 3.0]), 5.0, 2, seed + 43) - 0.5)
+        c = c * (0.86 + 0.28 * b2)[:, None] * (1 + 0.2 * (1 - sm(0.0, 0.03, scratch)))[:, None]
+        # grip: dark iron uprights, gilt corners, a leather wrap where the hands are
+        g = dark[None] * 1.2 * (0.8 + 0.5 * b2)[:, None]
+        g = mix(g, leather * 0.9, sm(0.37, 0.4, al) * (1 - sm(0.6, 0.63, al)) * 0.9)
+        corners = np.maximum(1 - sm(0.0, 0.025, np.abs(al - 0.34)), 1 - sm(0.0, 0.025, np.abs(al - 0.66)))
+        g = mix(g, trim, corners * 0.8)
+        rgb[m] = np.where(is_plate[:, None], c, g)
         light_k[m] = 0.7
+    m = kind == KIND['rider_cloth']
+    if m.any():
+        al, ar = pa[m, PA_ALONG], pa[m, PA_AROUND]
+        is_cowl = pa[m, PA_AUX] < 1.5
+        # cowl: folds falling from the collar, a gilt hem.  crest: streaks running to the tip
+        fold = 0.5 + 0.5 * np.sin(ar * 2 * PI * 6 + 2.5 * brush[m] + al * 2)
+        streak = 0.5 + 0.5 * np.sin(ar * 21 + al * 5 + 3 * brush2[m])
+        f = np.where(is_cowl, fold, streak)
+        c = cloth[None] * (0.7 + 0.5 * f)[:, None]
+        hem = np.where(is_cowl, sm(0.84, 0.9, al), 0.0)
+        collar = np.where(is_cowl, 1 - sm(0.04, 0.12, al), 0.0)
+        c = mix(c, trim * 0.85, hem * 0.9)
+        c = c * (1 - 0.5 * collar)[:, None]
+        rgb[m] = c
+        emis[m] = np.clip(np.where(is_cowl, (0.5 + 0.5 * f) * (1 - hem) * (1 - 0.6 * collar),
+                                   0.45 + 0.55 * al * (0.6 + 0.4 * f)), 0, 1)
+        light_k[m] = 0.5
     m = kind == KIND['saddle']
     if m.any():
         c = np.tile(col(pal.get('saddle', (0.36, 0.24, 0.16))), (m.sum(), 1))
         c = c * (0.75 + 0.5 * brush2[m])[:, None]
-        trim = 1 - sm(0.03, 0.06, np.abs(pa[m, PA_AROUND] - 0.42))
-        c = mix(c, col(pal.get('rider_trim', (0.80, 0.70, 0.45))), trim * 0.9)
+        trim_k = 1 - sm(0.03, 0.06, np.abs(pa[m, PA_AROUND] - 0.42))
+        c = mix(c, trim, trim_k * 0.9)
         rgb[m] = c
     m = kind == KIND['cloak']
     if m.any():
         al, ar = pa[m, PA_ALONG], pa[m, PA_AROUND]
-        fold = 0.5 + 0.5 * np.sin(ar * 15 + al * 3 + 2 * brush[m])
-        c = np.tile(col(pal.get('cloak', (0.34, 0.33, 0.34))), (m.sum(), 1))
-        c = c * (0.7 + 0.45 * fold)[:, None]
-        hem = np.clip(sm(0.9, 0.95, al) + (1 - sm(0.03, 0.07, np.minimum(ar, 1 - ar))), 0, 1)
-        c = mix(c, col(pal.get('rider_trim', (0.80, 0.70, 0.45))) * 0.8, hem * 0.85)
+        edge = np.minimum(ar, 1 - ar)
+        fold = 0.5 + 0.5 * np.sin(ar * 17 + al * 3 + 2.5 * brush[m])
+        c = cloth[None] * (0.62 + 0.6 * fold)[:, None]
+        # a gilt hem round the sides and both tails, a dark line inside it, two gilt chevrons
+        hem = np.clip(sm(0.925, 0.96, al) + (1 - sm(0.035, 0.065, edge)), 0, 1)
+        inner = np.clip(sm(0.87, 0.9, al) + (1 - sm(0.085, 0.11, edge)), 0, 1) * (1 - hem)
+        s_ = al + 0.22 * np.abs(ar - 0.5)
+        chev = np.maximum(1 - sm(0.0, 0.02, np.abs(s_ - 0.6) - 0.012),
+                          1 - sm(0.0, 0.02, np.abs(s_ - 0.68) - 0.012)) * (1 - hem) * (1 - inner)
+        c = mix(c, trim * 0.85, hem * 0.9)
+        c = c * (1 - 0.45 * inner)[:, None]
+        c = mix(c, trim * 0.7, chev * 0.75)
         rgb[m] = c
-        emis[m] = np.clip((0.62 + 0.38 * fold) * (1 - 0.8 * hem), 0, 1)
+        emis[m] = np.clip((0.4 + 0.6 * fold) * (1 - hem) * (1 - 0.75 * inner) * (1 - 0.85 * chev), 0, 1)
         light_k[m] = 0.5
 
     # ---- baked light: sky from above, cool bounce from below, AO --------------------------------

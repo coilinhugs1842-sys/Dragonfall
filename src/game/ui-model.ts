@@ -11,6 +11,7 @@ import type {
   ConnectFailureReason,
   ConnectionStatus,
   ControlsUiState,
+  GamepadUiState,
   HudState,
   LoadingState,
   LobbyPlate,
@@ -96,6 +97,8 @@ export interface MutableUiState {
   settingsTab: SettingsTab;
   /** Absent until `src/game` has a binding table to show. */
   controls?: ControlsUiState;
+  /** What the Controls tab shows of the pad. Absent until the gamepad link hands its object over. */
+  gamepad?: GamepadUiState;
   /** The aerie is drawn behind the lobby (the panels dock to the sides). */
   aerie: boolean;
   /** Name-card anchors over the perches: the show's own pool, `lobbyPlateCount` live entries. */

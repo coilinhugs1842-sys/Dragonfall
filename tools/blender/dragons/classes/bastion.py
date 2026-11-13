@@ -63,6 +63,7 @@ PARAMS = dict(
         plate=(0.36, 0.30, 0.25), plate_edge=(0.96, 0.82, 0.46),
         memb_dark=(0.15, 0.14, 0.13), memb_light=(0.50, 0.46, 0.30), memb_warm=(0.86, 0.80, 0.52),
         spike=(0.26, 0.21, 0.18), spike_tip=(0.94, 0.86, 0.62), eye=(1.0, 0.95, 0.7), pattern='blotch',
-        saddle=(0.24, 0.2, 0.2), rider=(0.36, 0.33, 0.34),
+        # rider: slate-blue leather against the bronze hide, brass armour like the scute rims
+        saddle=(0.24, 0.2, 0.2), rider=(0.24, 0.28, 0.38), rider_armor=(0.78, 0.64, 0.36),
     ),
 )

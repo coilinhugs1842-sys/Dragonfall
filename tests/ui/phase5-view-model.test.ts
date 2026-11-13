@@ -359,6 +359,49 @@ describe('results', () => {
     expect(awardMarks(state, 2)).toBe('TKD');
   });
 
+  it('gives the second award for captures in Ember Relay', () => {
+    const state = results(TEAM_EMBER, {
+      mode: 'emberRelay',
+      scores: [3, 1],
+      mostCapturesId: 3,
+      scoreboard: [
+        row(1, TEAM_EMBER, { name: 'Aman', takedowns: 9, deaths: 4, assists: 6, captures: 1 }),
+        row(2, TEAM_FROST, { name: 'Kestrel', takedowns: 11, deaths: 3, captures: 1 }),
+        row(3, TEAM_EMBER, { name: 'Miro', takedowns: 1, deaths: 6, captures: 2 }),
+        row(4, TEAM_FROST, { name: 'Juno' }),
+      ],
+    });
+    const view = computeResultsView(createResultsView(), state, 3);
+    expect(view.captures).toBe(true);
+    const second = view.awards[AWARD_TAKEDOWNS];
+    expect(second).toMatchObject({
+      shown: true,
+      title: 'Most captures',
+      name: 'Miro',
+      value: '2',
+      unit: 'captures',
+      isLocal: true,
+    });
+    expect(second?.detail).toContain('1 takedown ');
+    expect(view.awards[AWARD_MVP]?.title).toBe('MVP');
+    expect(view.awards[AWARD_MVP]?.detail).toContain('1 capture ');
+    expect(view.awards[AWARD_DAMAGE]?.title).toBe('Most damage');
+    // The rider with the most takedowns holds no award for it in this mode.
+    expect(awardMarks(state, 2)).toBe('');
+    expect(awardMarks(state, 3)).toBe('CAP · DMG');
+    expect(awardMarks({ ...state, mvpId: 3 }, 3)).toBe('MVP · CAP · DMG');
+
+    // Nobody brought a shard home (a match the clock ended): no card, no mark.
+    const none = { ...state, mostCapturesId: NO_PLAYER };
+    expect(computeResultsView(view, none, 3).awards[AWARD_TAKEDOWNS]?.shown).toBe(false);
+    expect(awardMarks(none, 3)).toBe('DMG');
+
+    // The same view refilled for another mode goes back to takedowns.
+    computeResultsView(view, results(TEAM_EMBER), 3);
+    expect(view.captures).toBe(false);
+    expect(view.awards[AWARD_TAKEDOWNS]).toMatchObject({ title: 'Most takedowns', name: 'Kestrel' });
+  });
+
   it('forgets the previous match when the view is refilled', () => {
     const view = computeResultsView(createResultsView(), results(TEAM_EMBER), 1);
     computeResultsView(view, results('draw', { mvpId: NO_PLAYER }), 1);

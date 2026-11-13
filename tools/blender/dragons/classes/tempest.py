@@ -60,6 +60,7 @@ PARAMS = dict(
         accent=(0.03, 0.06, 0.27), horn=(0.90, 0.95, 1.0), horn_dark=(0.20, 0.27, 0.5),
         memb_dark=(0.05, 0.10, 0.40), memb_light=(0.20, 0.56, 0.90), memb_warm=(0.72, 0.93, 0.97),
         spike=(0.05, 0.1, 0.36), spike_tip=(0.75, 0.9, 1.0), eye=(0.95, 0.98, 1.0), pattern='dapple',
-        saddle=(0.2, 0.2, 0.26), rider=(0.30, 0.31, 0.38),
+        # rider: tan leather against the sapphire hide; pale steel armour from the horn tones
+        saddle=(0.2, 0.2, 0.26), rider=(0.50, 0.36, 0.24),
     ),
 )

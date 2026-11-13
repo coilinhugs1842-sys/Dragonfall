@@ -55,6 +55,7 @@ import {
 import type { PropLodSettings, TierFades } from './prop-lod';
 import { fitTextureToLimit } from './texture-mips';
 import {
+  GLOW_MODE_CRYSTAL,
   GLOW_MODE_FLAME,
   GLOW_MODE_MARKER,
   GLOW_MODE_STEADY,
@@ -215,7 +216,10 @@ class ClusterBuilder {
     this.indices = next;
   }
 
-  /** Appends `geometry` under the column-major 4x4 at `matrices[offset..]`. */
+  /**
+   * Appends `geometry` under the column-major 4x4 at `matrices[offset..]`. `glowMode` goes
+   * into the colour's spare fourth byte (the far shader reads it from there).
+   */
   add(
     geometry: BufferGeometry,
     matrices: Float32Array,
@@ -224,6 +228,7 @@ class ClusterBuilder {
     placementIndex: number,
     fogScale: number,
     tint: readonly number[] | null,
+    glowMode: number,
   ): void {
     const position = geometry.getAttribute('position');
     const normal = geometry.getAttribute('normal');
@@ -268,7 +273,7 @@ class ClusterBuilder {
       this.colors[v * 4] = Math.round(Math.min(1, color.getX(i) * tr) * 255);
       this.colors[v * 4 + 1] = Math.round(Math.min(1, color.getY(i) * tg) * 255);
       this.colors[v * 4 + 2] = Math.round(Math.min(1, color.getZ(i) * tb) * 255);
-      this.colors[v * 4 + 3] = 255;
+      this.colors[v * 4 + 3] = glowMode;
       this.masks[v * 4] = Math.round(Math.min(1, Math.max(0, masks.getX(i))) * 255);
       this.masks[v * 4 + 1] = Math.round(Math.min(1, Math.max(0, masks.getY(i))) * 255);
       this.masks[v * 4 + 2] = Math.round(Math.min(1, Math.max(0, masks.getZ(i))) * 255);
@@ -319,23 +324,30 @@ function fitTextures(bundle: MapAssetBundle, preset: QualityPreset): void {
   }
 }
 
-/** How an asset type's glowing parts behave (world-material.ts): flame, marker, or steady. */
+/**
+ * How an asset type's glowing parts behave (world-material.ts): flame, marker, crystal, or
+ * steady. The crystal types are the ones whose only glow is magenta crystal: the sky-well core,
+ * the clusters, and the first map's crown rocks with crystals grown into them.
+ */
 export function glowModeOf(typeId: string): number {
   if (typeId.startsWith('brazier')) return GLOW_MODE_FLAME;
   if (typeId.startsWith('vent-marker')) return GLOW_MODE_MARKER;
+  if (typeId.startsWith('crystal') || typeId.startsWith('crown')) return GLOW_MODE_CRYSTAL;
   return GLOW_MODE_STEADY;
 }
 
 /**
  * Builds the meshes for `placements` from a loaded bundle. Throws when the bundle lacks a type
  * the map places (the caller keeps its stand-in), leaving nothing allocated. Load-time:
- * allocates everything here.
+ * allocates everything here. `glowMode` left out = `glowModeOf`; a set that is not a map (the
+ * aerie) passes its own.
  */
 export function createPropField(
   placements: readonly MapPlacement[],
   bundle: MapAssetBundle,
   preset: QualityPreset,
   palette?: WorldPalette,
+  glowMode: (typeId: string) => number = glowModeOf,
 ): PropField {
   const stone = bundle.textures.get('stone');
   const masonry = bundle.textures.get('masonry') ?? stone;
@@ -472,7 +484,12 @@ export function createPropField(
         });
       }
 
-      // Far tier: the last LOD of every instance into its cluster's builder.
+      // Far tier: the last LOD of every instance into its cluster's builder. A crystal or a
+      // marker keeps its look there (it is seen from afar more than from close by); a far flame
+      // or rune stays the steady glow it always was.
+      const typeGlow = glowMode(type.id);
+      const farGlow =
+        typeGlow === GLOW_MODE_MARKER || typeGlow === GLOW_MODE_CRYSTAL ? typeGlow : GLOW_MODE_STEADY;
       const clusters = new Uint16Array(set.count);
       for (let i = 0; i < set.count; i++) {
         const key = farClusterKey(
@@ -493,13 +510,13 @@ export function createPropField(
         const scale = set.scales[i] ?? 1;
         const fogScale = isBackdrop ? BACKDROP_FOG_SCALE : 1;
         if (farLod.stone !== null) {
-          builder.add(farLod.stone, set.matrices, i * 16, scale, placementIndex, fogScale, null);
+          builder.add(farLod.stone, set.matrices, i * 16, scale, placementIndex, fogScale, null, farGlow);
         }
         if (farLod.tint !== null) {
           const team = set.teams[i] ?? PLACEMENT_TEAM_NEUTRAL;
           const tint =
             teamLinear[team === PLACEMENT_TEAM_NEUTRAL ? TINT_NEUTRAL_INDEX : team] ?? null;
-          builder.add(farLod.tint, set.matrices, i * 16, scale, placementIndex, fogScale, tint);
+          builder.add(farLod.tint, set.matrices, i * 16, scale, placementIndex, fogScale, tint, farGlow);
         }
       }
 
@@ -510,7 +527,7 @@ export function createPropField(
         buckets,
         isRock,
         cullable: type.kind === 'prop' && type.radius < CULLABLE_PROP_RADIUS,
-        glowMode: glowModeOf(type.id),
+        glowMode: typeGlow,
         clusters,
         farTriangles: farLod.triangles,
       });

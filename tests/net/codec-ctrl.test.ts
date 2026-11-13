@@ -135,7 +135,7 @@ describe('message table', () => {
   });
 
   it('uses the protocol version of the shared constants', () => {
-    expect(PROTOCOL_VERSION).toBe(3);
+    expect(PROTOCOL_VERSION).toBe(5);
   });
 });
 
@@ -457,7 +457,7 @@ describe('INTENT', () => {
       ['lobby.switchSide', [3]],
       ['host.setMode', [40]],
       ['host.setMap', [2]],
-      ['host.setAllowedClasses', [0x10]],
+      ['host.setAllowedClasses', [0x00, 0x02]],
       ['host.movePlayer', [NO_PLAYER, 0]],
       ['host.movePlayer', [1, 3]],
       ['host.lockTeams', [255]],

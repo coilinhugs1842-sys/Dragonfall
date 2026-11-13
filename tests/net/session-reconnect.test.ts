@@ -9,6 +9,10 @@ import { Writer, encodeHello, encodePing } from '../../src/net/codec';
 import { CTRL_MAX_BYTES, createHelloMessage, createPingMessage } from '../../src/net/protocol';
 import {
   CLIENT_LINK_TIMEOUT_MS,
+  CLIENT_QUIET_MS,
+  CLIENT_RECONNECT_DELAY_MS,
+  CLIENT_RECONNECT_RETRY_MS,
+  CLIENT_ROOM_GONE_MS,
   ClientSession,
   HOST_MAX_PINGS_PER_S,
   createMemoryTokenStore,
@@ -45,6 +49,12 @@ class BlockableTransport implements ClientTransport {
   /** Nothing the host sends arrives, and the link does not close: a host that just vanished. */
   deaf = false;
   attempts = 0;
+  /**
+   * What each blocked attempt gets, in order (the last entry repeats); `silent` is an attempt
+   * nobody answers. Empty = `blockReason` every time.
+   */
+  script: (TransportErrorReason | 'silent')[] = [];
+  private scriptAt = 0;
   private handlers: ClientTransportHandlers | null = null;
 
   constructor(private readonly inner: ClientTransport) {}
@@ -70,7 +80,14 @@ class BlockableTransport implements ClientTransport {
   connect(roomCode: string): void {
     this.attempts++;
     if (this.blocked) {
-      this.handlers?.onError(transportError(this.blockReason, 'blocked by the test'));
+      let reason: TransportErrorReason | 'silent' = this.blockReason;
+      if (this.script.length > 0) {
+        reason = this.script[Math.min(this.scriptAt, this.script.length - 1)] ?? reason;
+        this.scriptAt++;
+      }
+      if (reason !== 'silent') {
+        this.handlers?.onError(transportError(reason, 'blocked by the test'));
+      }
       return;
     }
     this.inner.connect(roomCode);
@@ -524,6 +541,141 @@ describe('giving up', () => {
     drive(6000);
     expect(session.status).toBe('hostLeft');
     expect(session.error).toEqual({ kind: 'hostLeft' });
+    rig.dispose();
+  });
+
+  /** A connected lone client on a transport the test can cut, and a way to run both ends. */
+  function lonely(): {
+    rig: Rig;
+    blockable: BlockableTransport;
+    session: ClientSession;
+    drive: (ms: number) => void;
+  } {
+    const rig = new Rig().open();
+    const blockable = new BlockableTransport(rig.hub.createClient());
+    const session = new ClientSession({ transport: blockable, recycledBuffers: true });
+    session.connect(ROOM, 'Lonely', rig.now);
+    const drive = (ms: number): void => {
+      const end = rig.now + ms;
+      while (rig.now < end) {
+        rig.run(1);
+        session.update(rig.now);
+      }
+    };
+    drive(300);
+    expect(session.status).toBe('connected');
+    return { rig, blockable, session, drive };
+  }
+
+  it('reports the host gone when the signaling server answers only every other attempt', () => {
+    // Measured against the public server after the host's browser was killed: "no such
+    // room" at once, then an attempt nobody answers, then "no such room" again. Three answers
+    // in a row never come; this used to end after 36 s in "connection lost, check your network".
+    const { rig, blockable, session, drive } = lonely();
+    blockable.deaf = true;
+    blockable.blocked = true;
+    blockable.script = ['roomNotFound', 'silent'];
+    drive(CLIENT_LINK_TIMEOUT_MS + 100);
+    expect(session.status).toBe('reconnecting');
+    // The answer comes after the reconnect delay; the next attempt hangs.
+    drive(CLIENT_RECONNECT_DELAY_MS + 500);
+    expect(session.status).toBe('reconnecting');
+    expect(blockable.attempts).toBe(2);
+    // Nothing from the host for CLIENT_ROOM_GONE_MS after that one answer settles it.
+    drive(CLIENT_ROOM_GONE_MS - 1500);
+    expect(blockable.attempts).toBe(3);
+    expect(session.status).toBe('reconnecting');
+    drive(1500);
+    expect(session.status).toBe('hostLeft');
+    expect(session.error).toEqual({ kind: 'hostLeft' });
+    rig.dispose();
+  });
+
+  it('a "no such room" answer is forgotten when the host then answers', () => {
+    const { rig, blockable, session, drive } = lonely();
+    const id = session.localPlayerId;
+    // The host's signaling drops for a moment together with the link: one "no such room",
+    // then the room is there again.
+    blockable.blocked = true;
+    blockable.script = ['roomNotFound'];
+    rig.hostTransport.sever(1);
+    drive(CLIENT_RECONNECT_DELAY_MS + 500);
+    expect(session.status).toBe('reconnecting');
+    expect(blockable.attempts).toBe(2);
+    blockable.blocked = false;
+    drive(CLIENT_RECONNECT_RETRY_MS + 500);
+    expect(session.status).toBe('connected');
+    expect(session.localPlayerId).toBe(id);
+    drive(CLIENT_ROOM_GONE_MS + 2000);
+    expect(session.status).toBe('connected');
+
+    // And an attempt that merely times out does not clear what the server said before it:
+    // two answers within the time are still not three, and not yet a host that left.
+    const { rig: rig2, blockable: b2, session: s2, drive: drive2 } = lonely();
+    b2.deaf = true;
+    b2.blocked = true;
+    b2.script = ['roomNotFound', 'timeout', 'roomNotFound', 'silent'];
+    drive2(CLIENT_LINK_TIMEOUT_MS + 100);
+    drive2(CLIENT_RECONNECT_DELAY_MS + 2 * CLIENT_RECONNECT_RETRY_MS + 500);
+    expect(b2.attempts).toBe(4);
+    expect(s2.status).toBe('reconnecting');
+    drive2(CLIENT_RECONNECT_RETRY_MS);
+    expect(b2.attempts).toBe(5);
+    expect(s2.status).toBe('reconnecting');
+    rig.dispose();
+    rig2.dispose();
+  });
+
+  it('when the window runs out, the last word about the room picks the message', () => {
+    // Attempts that time out for most of the window, then one "no such room" too late for
+    // CLIENT_ROOM_GONE_MS to pass: the host went, not this page's network.
+    const gone = lonely();
+    gone.blockable.deaf = true;
+    gone.blockable.blocked = true;
+    gone.blockable.script = [
+      ...Array.from({ length: 15 }, (): TransportErrorReason => 'timeout'),
+      'roomNotFound',
+      'timeout',
+    ];
+    gone.drive(CLIENT_LINK_TIMEOUT_MS + RECONNECT_GRACE_MS - 1000);
+    expect(gone.session.status).toBe('reconnecting');
+    expect(gone.blockable.attempts).toBeGreaterThan(17);
+    gone.drive(2000);
+    expect(gone.session.status).toBe('hostLeft');
+    expect(gone.session.error).toEqual({ kind: 'hostLeft' });
+    gone.rig.dispose();
+
+    // The same, but then the signaling server cannot be reached: this page's network.
+    const offline = lonely();
+    offline.blockable.deaf = true;
+    offline.blockable.blocked = true;
+    offline.blockable.script = ['roomNotFound', 'brokerUnreachable'];
+    offline.drive(CLIENT_LINK_TIMEOUT_MS + RECONNECT_GRACE_MS + 1000);
+    expect(offline.session.status).toBe('disconnected');
+    expect(offline.session.error).toEqual({ kind: 'connectionLost' });
+    offline.rig.dispose();
+  });
+
+  it('shows the silence as the ping while the host says nothing', () => {
+    const { rig, blockable, session, drive } = lonely();
+    drive(2000);
+    expect(session.pingMs).toBeLessThan(50);
+    // The link goes quiet without closing. The last good round trip must not stay on screen
+    // for the six seconds until the link times out.
+    blockable.deaf = true;
+    // (The last pong may be up to half a second old when the link goes quiet.)
+    drive(CLIENT_QUIET_MS - 700);
+    expect(session.pingMs).toBeLessThan(50);
+    drive(1000);
+    expect(session.status).toBe('connected');
+    expect(session.pingMs).toBeGreaterThanOrEqual(CLIENT_QUIET_MS);
+    drive(2000);
+    expect(session.status).toBe('connected');
+    expect(session.pingMs).toBeGreaterThanOrEqual(CLIENT_QUIET_MS + 2000);
+    // Heard again: the real figure is back at once.
+    blockable.deaf = false;
+    drive(600);
+    expect(session.pingMs).toBeLessThan(50);
     rig.dispose();
   });
 

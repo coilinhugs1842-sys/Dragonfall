@@ -27,6 +27,6 @@
     "hit",
     "death_fall"
   ],
-  "dragonClassIds": ["talon", "bastion", "tempest", "wraith"],
+  "dragonClassIds": ["talon", "bastion", "tempest", "wraith", "verdant", "aureate", "zephyr", "granite", "mirage"],
   "mapIds": ["shattered-spires", "emberfall-caldera"]
 }

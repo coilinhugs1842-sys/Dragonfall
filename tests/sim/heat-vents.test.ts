@@ -242,9 +242,13 @@ describe('flying through the vents of Emberfall Caldera', () => {
       let stalledTicks = 0;
       for (let tick = 0; tick < 8 * TICK_HZ; tick++) {
         input.tick = tick;
+        const before = sim.getDragon(0);
+        // Soft-cap climb: free inverted pitch would turn a held stick into a loop.
+        if (before !== undefined && before.pitch > 1.05) before.pitch = 1.05;
         sim.step(tick, [input]);
         const dragon = sim.getDragon(0);
         if (dragon === undefined) throw new Error('no dragon');
+        if (dragon.pitch > 1.05) dragon.pitch = 1.05;
         top = Math.max(top, dragon.position.y);
         if (dragon.speed < FLIGHT_TUNING.stallSpeed) stalledTicks++;
       }

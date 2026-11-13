@@ -83,7 +83,17 @@ import { checkManifest } from '../../tools/pipeline/manifest.mjs';
 
 const MAP = createEmberfallCaldera();
 const WORLD = createMapCollisionWorld(MAP);
-const CLASSES: readonly DragonClassId[] = ['talon', 'bastion', 'tempest', 'wraith'];
+const CLASSES: readonly DragonClassId[] = [
+  'talon',
+  'bastion',
+  'tempest',
+  'wraith',
+  'verdant',
+  'aureate',
+  'zephyr',
+  'granite',
+  'mirage',
+];
 const REPO = resolve(__dirname, '../..');
 const ASSETS_DIR = resolve(REPO, 'public/assets');
 const CALDERA_IDS = new Set(CALDERA_ASSET_TYPES.map((type) => type.id));

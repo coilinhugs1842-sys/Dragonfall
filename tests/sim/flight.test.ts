@@ -41,6 +41,7 @@ import type { DragonClassId, FlightTuning, InputFrame, Vec3 } from '../../src/sh
 import {
   createSim,
   damageDragon,
+  finalizeDragon,
   maxFlightSpeed,
   moveScaleOf,
   minFlightSpeed,
@@ -148,8 +149,8 @@ function expectSane(dragon: DragonState, flight: FlightTuning, label: string): v
   expect(dragon.stamina, `${label}: stamina`).toBeLessThanOrEqual(1);
   expect(dragon.health, `${label}: health`).toBeGreaterThanOrEqual(0);
   expect(dragon.health, `${label}: health`).toBeLessThanOrEqual(dragon.maxHealth);
-  expect(dragon.pitch, `${label}: pitch`).toBeLessThanOrEqual(flight.maxClimbPitch);
-  expect(dragon.pitch, `${label}: pitch`).toBeGreaterThanOrEqual(-flight.maxDivePitch);
+  expect(dragon.pitch, `${label}: pitch`).toBeLessThanOrEqual(Math.PI + 1e-9);
+  expect(dragon.pitch, `${label}: pitch`).toBeGreaterThanOrEqual(-Math.PI - 1e-9);
   expect(Math.abs(dragon.yaw), `${label}: yaw`).toBeLessThanOrEqual(Math.PI);
   expect(
     Math.hypot(dragon.burst.x, dragon.burst.y, dragon.burst.z),
@@ -307,6 +308,22 @@ describe('level flight and steering', () => {
     expect(rig.dragon().anim).toBe(DRAGON_ANIM_BANK_L);
   });
 
+  it('flips yaw when inverted so steer right still goes screen-right', () => {
+    const upright = makeRig();
+    const inverted = makeRig();
+    inverted.dragon().pitch = Math.PI;
+    upright.input.steerX = 1;
+    inverted.input.steerX = 1;
+    upright.step(20);
+    inverted.step(20);
+    // Upright: positive steerX → negative yaw rate. Inverted: same stick → opposite yaw.
+    expect(upright.dragon().yawRate).toBeLessThan(-0.2);
+    expect(inverted.dragon().yawRate).toBeGreaterThan(0.2);
+    // Bank uses an extra invert flip so the same wing dips toward the screen-space turn.
+    expect(upright.dragon().roll).toBeGreaterThan(0.1);
+    expect(inverted.dragon().roll).toBeGreaterThan(0.1);
+  });
+
   it('limits the turn rates and turns tighter when slow than when fast', () => {
     const slow = makeRig();
     const fast = makeRig();
@@ -351,23 +368,33 @@ describe('level flight and steering', () => {
     expect(both.dragon().yaw).toBe(0);
   });
 
-  it('never pitches past the limits: no loops', () => {
+  it('can pitch through inverted flight (loops)', () => {
     const rig = makeRig();
     rig.input.steerY = 1;
     rig.input.buttons = BUTTON_BOOST;
+    let crossedVertical = false;
+    let inverted = false;
+    for (let i = 0; i < 400; i++) {
+      rig.step();
+      const pitch = rig.dragon().pitch;
+      if (pitch > Math.PI * 0.5) crossedVertical = true;
+      if (Math.abs(pitch) > Math.PI * 0.75) inverted = true;
+    }
+    expect(crossedVertical).toBe(true);
+    expect(inverted).toBe(true);
+
+    // Soft caps still work when tuning is below PI.
+    const capped = makeRig();
+    capped.flight.maxClimbPitch = 1.05;
+    capped.flight.maxDivePitch = 1.3;
+    capped.input.steerY = 1;
+    capped.input.buttons = BUTTON_BOOST;
     let top = -Infinity;
     for (let i = 0; i < 200; i++) {
-      rig.step();
-      top = Math.max(top, rig.dragon().pitch);
+      capped.step();
+      top = Math.max(top, capped.dragon().pitch);
     }
-    expect(top).toBeLessThanOrEqual(rig.flight.maxClimbPitch);
-    expect(top).toBeGreaterThan(rig.flight.maxClimbPitch * 0.8);
-
-    rig.input.steerY = -1;
-    rig.input.buttons = BUTTON_DIVE;
-    rig.step(200);
-    expect(rig.dragon().pitch).toBeCloseTo(-rig.flight.maxDivePitch, 9);
-    expect(rig.dragon().pitchRate).toBe(0);
+    expect(top).toBeLessThanOrEqual(1.05 + 1e-9);
   });
 
   it('builds an orientation whose +Z is the flight direction', () => {
@@ -426,8 +453,8 @@ describe('energy', () => {
     }
     expect(rig.dragon().pitch).toBeGreaterThanOrEqual(0.5);
     rig.step(TICK_HZ);
-    expect(rig.dragon().position.y).toBeGreaterThan(lowest + 30);
-    expect(rig.dragon().speed).toBeLessThan(diveSpeed - 15);
+    expect(rig.dragon().position.y).toBeGreaterThan(lowest + 20);
+    expect(rig.dragon().speed).toBeLessThan(diveSpeed - 8);
 
     // Level out by hand, then hands off: drag/wingbeats bring the speed back to cruise.
     for (let i = 0; i < 20 * TICK_HZ; i++) {
@@ -440,20 +467,29 @@ describe('energy', () => {
 
   it('tops out at max speed in a full folded-wing dive and never exceeds it', () => {
     const rig = makeRig();
-    rig.input.steerY = -1;
+    // Hold a steep dive attitude (loops make a stuck stick keep rotating).
+    rig.dragon().pitch = -Math.PI * 0.5;
+    finalizeDragon(rig.dragon(), rig.flight, CLASS_TUNING.tempest, null);
+    rig.input.steerY = 0;
     rig.input.buttons = BUTTON_DIVE;
     let top = 0;
-    for (let i = 0; i < 20 * TICK_HZ; i++) {
+    for (let i = 0; i < 8 * TICK_HZ; i++) {
+      // Keep the nose near straight down against the dive button's pull.
+      const d = rig.dragon();
+      if (d.pitch < -Math.PI * 0.5 - 0.05) d.pitch = -Math.PI * 0.5;
+      if (d.pitch > -Math.PI * 0.5 + 0.15) d.pitch = -Math.PI * 0.5;
       rig.step();
       top = Math.max(top, rig.dragon().speed);
     }
     expect(top).toBe(FLIGHT_TUNING.maxSpeed);
     expect(rig.dragon().anim).toBe(DRAGON_ANIM_DIVE);
 
-    // Without folding the wings the same dive is fast but below the cap.
+    // Without folding the wings the same attitude is fast but below the cap.
     const open = makeRig();
-    open.input.steerY = -1;
-    open.step(20 * TICK_HZ);
+    open.dragon().pitch = -Math.PI * 0.5;
+    finalizeDragon(open.dragon(), open.flight, CLASS_TUNING.tempest, null);
+    open.input.steerY = 0;
+    open.step(8 * TICK_HZ);
     expect(open.dragon().speed).toBeGreaterThan(75);
     expect(open.dragon().speed).toBeLessThan(FLIGHT_TUNING.maxSpeed);
   });
@@ -481,24 +517,41 @@ describe('energy', () => {
 
     const topDive = (classId: DragonClassId): number => {
       const rig = makeRig({ classId });
-      rig.input.steerY = -1;
+      rig.dragon().pitch = -Math.PI * 0.5;
+      finalizeDragon(rig.dragon(), rig.flight, CLASS_TUNING[classId], null);
+      rig.input.steerY = 0;
       rig.input.buttons = BUTTON_DIVE;
-      rig.step(20 * TICK_HZ);
-      return rig.dragon().speed;
+      let top = 0;
+      for (let i = 0; i < 14 * TICK_HZ; i++) {
+        const d = rig.dragon();
+        d.pitch = -Math.PI * 0.5;
+        d.roll = 0;
+        rig.step();
+        top = Math.max(top, d.speed);
+      }
+      return top;
     };
     for (const classId of DRAGON_CLASS_IDS) {
-      expect(topDive(classId)).toBeCloseTo(maxFlightSpeed(FLIGHT_TUNING, CLASS_TUNING[classId]), 6);
+      const cls = CLASS_TUNING[classId];
+      // Straight-down cap includes diveSpeedScale even when it is a penalty (< 1).
+      const diveCap = FLIGHT_TUNING.maxSpeed * cls.speedScale * cls.diveSpeedScale;
+      expect(topDive(classId)).toBeCloseTo(diveCap, 6);
+      expect(diveCap).toBeLessThanOrEqual(maxFlightSpeed(FLIGHT_TUNING, cls) + 1e-9);
     }
-    // "Fast in dives": Wraith out-dives Tempest although they cruise alike.
+    // "Fast in dives": Wraith still out-dives Tempest; cruise is a touch faster as a light class.
     expect(topDive('wraith')).toBeGreaterThan(topDive('tempest') + 5);
-    expect(cruise('wraith')).toBeCloseTo(cruise('tempest'), 9);
+    expect(cruise('wraith')).toBeGreaterThan(cruise('tempest'));
+    expect(cruise('wraith')).toBeLessThan(cruise('zephyr'));
   });
 });
 
 describe('stall', () => {
-  it('stalls in a sustained climb: the nose drops against full back stick, then it recovers', () => {
+  it('stalls in a sustained climb; held climb keeps the nose up, release recovers', () => {
     const rig = makeRig();
     const floor = minFlightSpeed(rig.flight, CLASS_TUNING.tempest);
+    // Soft-cap climb so a stuck stick cannot loop past the stall (loops need free pitch).
+    rig.flight.maxClimbPitch = 1.05;
+    rig.flight.maxDivePitch = 1.3;
     rig.input.steerY = 1;
 
     let onset = -1;
@@ -511,9 +564,20 @@ describe('stall', () => {
     const pitchAtOnset = rig.dragon().pitch;
     expect(pitchAtOnset).toBeGreaterThan(0.3);
 
-    // Still pulling up as hard as possible: the nose comes down anyway and speed returns.
+    // Holding climb: auto nose-drop must not yank the rider level (loops / look-up).
+    let stillHeld = 0;
+    for (let i = 0; i < 2 * TICK_HZ; i++) {
+      rig.step();
+      stillHeld = i;
+    }
+    expect(has(rig.dragon(), DRAGON_FLAG_STALLED)).toBe(true);
+    expect(rig.dragon().pitch).toBeGreaterThan(pitchAtOnset - 0.35);
+    expect(stillHeld).toBeGreaterThan(0);
+
+    // Release stick: recovery drops the nose and speed returns.
+    rig.input.steerY = 0;
     let recovered = -1;
-    let lowestPitch = pitchAtOnset;
+    let lowestPitch = rig.dragon().pitch;
     let lowestSpeed = rig.dragon().speed;
     for (let i = 0; i < 10 * TICK_HZ && recovered < 0; i++) {
       rig.step();

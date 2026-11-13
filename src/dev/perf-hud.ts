@@ -37,8 +37,9 @@ export interface PerfHudOptions {
    */
   getNetText?: () => string;
   /**
-   * The effect lines, already formatted: particles alive against the preset's cap (with the
-   * peak) and audio voices playing against theirs. Called at the text rate.
+   * The effect lines, already formatted: effect particles alive against the preset's cap, the
+   * map's own particles (vent streaks, ash) and the peak of both together, and audio voices
+   * playing against theirs. Called at the text rate.
    */
   getFxText?: () => string;
   /** Where to mount. Defaults to `#ui`, then `document.body`. */

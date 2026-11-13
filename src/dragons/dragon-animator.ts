@@ -53,8 +53,8 @@ import type { BakedClip, PoseAccumulator } from './pose-math';
 
 export const DRAGON_CLIP_COUNT = DRAGON_ANIM_CLIPS.length;
 
-/** Weight eases toward its target at this rate per second (about 0.3 s to settle). */
-export const ANIM_BLEND_RATE = 7;
+/** Cross-fade rate for locomotion weights (higher = snappier glide↔dive↔boost). */
+export const ANIM_BLEND_RATE = 9;
 /** The fall takes over faster than that. */
 const DEATH_BLEND_RATE = 10;
 const ONE_SHOT_FADE_IN_S = 0.08;
@@ -244,15 +244,16 @@ export function writeLocomotionTargets(out: Float32Array, input: DragonAnimInput
     return;
   }
   const boosting = (flags & DRAGON_FLAG_BOOSTING) !== 0 || anim === DRAGON_ANIM_BOOST ? 1 : 0;
-  const dive = Math.max(anim === DRAGON_ANIM_DIVE ? 1 : 0, saturate((-input.climb - 0.3) / 0.3));
+  const dive = Math.max(anim === DRAGON_ANIM_DIVE ? 1 : 0, saturate((-input.climb - 0.22) / 0.28));
+  // Near stall: match hover so the wings keep beating instead of locking into a glide.
   const hover = Math.max(
     anim === DRAGON_ANIM_HOVER ? 1 : 0,
-    saturate((0.42 - input.speedRatio) / 0.2),
+    saturate((0.48 - input.speedRatio) / 0.22),
   );
   const flap = Math.max(
     anim === DRAGON_ANIM_FLAP ? 1 : 0,
-    saturate((input.climb - 0.06) / 0.22),
-    saturate((0.85 - input.speedRatio) / 0.3) * 0.8,
+    saturate((input.climb - 0.04) / 0.2),
+    saturate((0.88 - input.speedRatio) / 0.28) * 0.85,
   );
 
   let rest = 1;
@@ -271,21 +272,24 @@ export function writeLocomotionTargets(out: Float32Array, input: DragonAnimInput
   const dodging =
     (flags & DRAGON_FLAG_DODGING) !== 0 &&
     (anim === DRAGON_ANIM_BANK_L || anim === DRAGON_ANIM_BANK_R);
-  let bank = saturate(Math.abs(input.roll) / 0.8) * 0.7;
+  let bank = saturate(Math.abs(input.roll) / 0.7) * 0.82;
   let right = input.roll > 0;
   if (dodging) {
-    bank = 0.9;
+    // Q/E dodge: full bank lean so the roll reads as a barrel accent, not a soft tip.
+    bank = 1;
     right = anim === DRAGON_ANIM_BANK_R;
   } else if (anim === DRAGON_ANIM_BANK_L || anim === DRAGON_ANIM_BANK_R) {
-    bank = Math.max(bank, 0.45);
+    bank = Math.max(bank, 0.55);
     right = anim === DRAGON_ANIM_BANK_R;
   }
-  const wBank = bank * wGlide + 0.5 * bank * wFlap;
+  const wBank = bank * wGlide + 0.65 * bank * wFlap + (dodging ? 0.35 * bank * wDive : 0);
   wGlide *= 1 - bank;
-  wFlap *= 1 - 0.5 * bank;
+  wFlap *= 1 - 0.65 * bank;
+  let diveOut = wDive;
+  if (dodging) diveOut *= 1 - 0.35 * bank;
 
   out[DRAGON_ANIM_HOVER] = wHover;
-  out[DRAGON_ANIM_DIVE] = wDive;
+  out[DRAGON_ANIM_DIVE] = diveOut;
   out[DRAGON_ANIM_BOOST] = wBoost;
   out[DRAGON_ANIM_FLAP] = wFlap;
   out[DRAGON_ANIM_GLIDE] = wGlide;
@@ -411,7 +415,15 @@ export function advanceDragonAnim(
         const clip = entered ? anim : DRAGON_ANIM_HIT;
         if (rig.clips[clip] != null) {
           state.oneShot = clip;
-          state.oneShotTime = 0;
+          // Ready/MVP roar returns to perched: hold the seated pose, do not replay land.
+          if (
+            clip === DRAGON_ANIM_LAND &&
+            state.lastAnim === DRAGON_ANIM_ROAR
+          ) {
+            state.oneShotTime = durationOf(rig, clip);
+          } else {
+            state.oneShotTime = 0;
+          }
         }
       }
     }

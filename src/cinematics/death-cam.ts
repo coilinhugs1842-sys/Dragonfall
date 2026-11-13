@@ -17,6 +17,13 @@
  * the chase camera is waiting, closing in a little as it goes. Rock between the killer and the
  * camera pulls the camera in at once; it eases back out when the way is clear.
  *
+ * NEVER INSIDE A DRAGON. The victim's falling body is drawn, and a kill at about the orbit's
+ * radius puts the starting place right on it; a wing mate of the killer can be there too. Every
+ * dragon but the killer has a keep-out sphere (its class's half wingspan plus a clearance) and
+ * the camera is moved out of each, up and away: at once on the orbit's first frame (it is a
+ * cut), eased afterwards. Round the killer itself the same sphere is kept when rock pulls the
+ * camera in: it goes up instead of into the wings. Rock still wins over both.
+ *
  * Checked again every frame: a killer that dies, veils or leaves stops the orbit on that frame,
  * a different killer restarts it round the new one (a cut, not a sweep across the map), and the
  * clock keeps running from the fall either way. A respawn, a phase other than `playing` or
@@ -37,7 +44,15 @@ import {
   createVec3,
   findDragonView,
 } from '../shared';
-import type { DragonView, PlayerId, TerrainQuery, WorldView } from '../shared';
+import type {
+  DragonClassId,
+  DragonView,
+  MutableVec3,
+  PlayerId,
+  TerrainQuery,
+  Vec3,
+  WorldView,
+} from '../shared';
 import {
   aimCamera,
   clamp,
@@ -77,6 +92,11 @@ export interface DeathCamTuning {
   rockEaseOutRate: number;
   /** Longest step the orbit and its easing take in one frame (the 3 s clock is not capped). */
   maxDt: number;
+  /** Air kept between the camera and the wing tips of any dragon (`DEATH_CAM_HALF_SPAN`). */
+  wingClearance: number;
+  /** How fast the camera moves out of a dragon's way, and how fast it settles back (1/s). */
+  avoidInRate: number;
+  avoidOutRate: number;
 }
 
 export const DEATH_CAM_TUNING: DeathCamTuning = {
@@ -94,7 +114,33 @@ export const DEATH_CAM_TUNING: DeathCamTuning = {
   rockMargin: 1.5,
   rockEaseOutRate: 1.5,
   maxDt: 0.1,
+  wingClearance: 2.5,
+  avoidInRate: 14,
+  avoidOutRate: 2.5,
 };
+
+/**
+ * Half the wingspan of each class, metres: `wingspan / 2` of
+ * public/assets/dragons/<class>/manifest.json, rounded up (tests/cinematics/death-cam-avoid
+ * checks them against the files). A table and not the asset library: the camera must not wait
+ * for a download, and `src/cinematics` reads no assets.
+ */
+export const DEATH_CAM_HALF_SPAN: Readonly<Record<DragonClassId, number>> = {
+  talon: 6.1,
+  wraith: 6.7,
+  bastion: 7.9,
+  tempest: 7,
+  verdant: 7.3,
+  aureate: 6.5,
+  zephyr: 7.8,
+  granite: 6.4,
+  mirage: 7.2,
+};
+
+/** The sphere round a dragon the death cam stays out of: wings spread, plus the clearance. */
+export function deathCamKeepOut(classId: DragonClassId, tuning: DeathCamTuning = DEATH_CAM_TUNING): number {
+  return (DEATH_CAM_HALF_SPAN[classId] ?? DEATH_CAM_HALF_SPAN.bastion) + tuning.wingClearance;
+}
 
 /**
  * The dragon the death cam may show for this frame's local dragon, or undefined when there is
@@ -137,6 +183,10 @@ export function createDeathCam(): DeathCam {
   let pull = 1;
   /** Look-ahead offset from the killer, eased. */
   const lead = createVec3();
+  /** Offset that keeps the camera out of the other dragons, eased. */
+  const avoid = createVec3();
+  /** The orbit's first frame is a cut: the offset is taken as it is, not eased toward. */
+  let avoidFresh = true;
 
   // Per-frame scratch.
   const forward = createVec3();
@@ -144,6 +194,7 @@ export function createDeathCam(): DeathCam {
   const position = createVec3();
   const target = createVec3();
   const wantLead = createVec3();
+  const wantAvoid = createVec3();
 
   function forget(): void {
     down = false;
@@ -152,12 +203,64 @@ export function createDeathCam(): DeathCam {
     pull = 1;
   }
 
+  /**
+   * Into `out`: how far `from` (the camera's place on the orbit) has to move to be outside the
+   * keep-out sphere of every dragon but the killer. The victim's own falling body is one of
+   * them, and the usual one: a kill at the orbit's radius puts the camera's start right on it.
+   *
+   * The way out of a sphere is away from its dragon with a bias upward, so a camera exactly on
+   * a dragon still has a direction to go, and it lands exactly on the sphere, so the offset
+   * fades to nothing as the dragon moves off instead of switching off.
+   */
+  function writeAvoidance(
+    out: MutableVec3,
+    view: WorldView,
+    killer: DragonView,
+    local: DragonView,
+    from: Vec3,
+  ): void {
+    setVec3(out, 0, 0, 0);
+    for (let i = 0; i < view.dragonCount; i++) {
+      const other = view.dragons[i];
+      if (other === undefined || other.id === killer.id) continue;
+      // A veiled enemy is not drawn for this player, and a camera that swerves round empty air
+      // would say where it is.
+      if (
+        other.team !== local.team &&
+        (other.flags & DRAGON_FLAG_VEILED) !== 0 &&
+        (other.flags & DRAGON_FLAG_ALIVE) !== 0
+      ) {
+        continue;
+      }
+      const keepOut = deathCamKeepOut(other.classId, tuning);
+      const dx = from.x - other.position.x;
+      const dy = from.y - other.position.y;
+      const dz = from.z - other.position.z;
+      const gap = keepOut * keepOut - (dx * dx + dy * dy + dz * dz);
+      // Outside the sphere (or a position that is not a number): nothing to do.
+      if (!(gap > 0)) continue;
+      const wayY = dy + keepOut * 0.35;
+      const wayLength = Math.sqrt(dx * dx + wayY * wayY + dz * dz);
+      const ux = wayLength > 1e-4 ? dx / wayLength : 0;
+      const uy = wayLength > 1e-4 ? wayY / wayLength : 1;
+      const uz = wayLength > 1e-4 ? dz / wayLength : 0;
+      // Distance along that way to the sphere's surface.
+      const along = dx * ux + dy * uy + dz * uz;
+      const step = Math.sqrt(along * along + gap) - along;
+      out.x += ux * step;
+      out.y += uy * step;
+      out.z += uz * step;
+    }
+  }
+
   /** Starts circling `killer`: from the victim's side, turning toward the killer's tail. */
   function startOrbit(killer: DragonView): void {
     orbitId = killer.id;
     orbitStartS = downForS;
     pull = 1;
     setVec3(lead, 0, 0, 0);
+    setVec3(avoid, 0, 0, 0);
+    avoidFresh = true;
 
     forwardOfQuat(forward, killer.orientation);
     const tail = yawOfDirection(-forward.x, -forward.z);
@@ -236,6 +339,21 @@ export function createDeathCam(): DeathCam {
       setVec3(centre, killer.position.x, killer.position.y + tuning.lookLift, killer.position.z);
       writeOrbitPosition(position, centre, radius, azimuth, height - tuning.lookLift);
 
+      // Other dragons: out of their way before anything else. In fast, back slowly.
+      writeAvoidance(wantAvoid, view, killer, local, position);
+      if (avoidFresh) {
+        setVec3(avoid, wantAvoid.x, wantAvoid.y, wantAvoid.z);
+        avoidFresh = false;
+      } else {
+        const growing =
+          wantAvoid.x * wantAvoid.x + wantAvoid.y * wantAvoid.y + wantAvoid.z * wantAvoid.z >
+          avoid.x * avoid.x + avoid.y * avoid.y + avoid.z * avoid.z;
+        dampLookTarget(avoid, wantAvoid, growing ? tuning.avoidInRate : tuning.avoidOutRate, dt);
+      }
+      position.x += avoid.x;
+      position.y += avoid.y;
+      position.z += avoid.z;
+
       // Rock: one ray from the killer to the camera, like the chase rig.
       const rayX = position.x - centre.x;
       const rayY = position.y - centre.y;
@@ -257,6 +375,32 @@ export function createDeathCam(): DeathCam {
       position.x = centre.x + rayX * pull;
       position.y = centre.y + rayY * pull;
       position.z = centre.z + rayZ * pull;
+
+      // The killer's own wings. Rock may have pulled the camera in to any distance; what it
+      // lost in distance it takes in height (the wings spread sideways, the sky above a flying
+      // dragon is nearly always open), up to the keep-out sphere and never into a roof. It
+      // follows the pull, which is continuous on the way out, so it adds no jump of its own.
+      const keepOut = deathCamKeepOut(killer.classId, tuning);
+      const offX = position.x - killer.position.x;
+      const offY = position.y - killer.position.y;
+      const offZ = position.z - killer.position.z;
+      const level = offX * offX + offZ * offZ;
+      if (level + offY * offY < keepOut * keepOut) {
+        let rise = Math.sqrt(keepOut * keepOut - level) - offY;
+        if (terrain !== null) {
+          const roof = terrain.raycast(
+            position.x,
+            position.y,
+            position.z,
+            0,
+            1,
+            0,
+            rise + tuning.rockMargin,
+          );
+          if (roof >= 0) rise = Math.min(rise, Math.max(roof - tuning.rockMargin, 0));
+        }
+        position.y += rise;
+      }
 
       // Look a little ahead of the killer, eased so a dodge or a bounce does not jerk the view.
       const velocity = killer.velocity;

@@ -9,7 +9,7 @@
  *
  * QUALITY (`DRAGON_QUALITY` define, set by `setDragonMaterialQuality`):
  *   0 Low     lighting per VERTEX (sun half-Lambert + hemisphere), one rim term, no shadow
- *             lookup. Two texture fetches per pixel.
+ *             lookup. Two texture fetches per pixel. The hit flash is the rim alone.
  *   1 Medium  per-pixel wrapped sun with the shared sun shadow, warm + cool rim, back-lit
  *             membranes.
  *   2 High    Medium plus a soft specular sheen on the hide.
@@ -103,6 +103,10 @@ varying vec2 vSlot;
 
 ${WORLD_LIGHT_PARS_FRAGMENT}
 
+// The hit flash's colour: a hot ember, scene-linear. Warm for both teams (it says "struck", and
+// the team colour is already on the wings).
+const vec3 HIT_TINT = vec3(1.0, 0.44, 0.13);
+
 void main() {
   if (uFx.w < 0.999) {
     // Interleaved gradient noise: a stable, evenly spread screen-door pattern (veil, phase).
@@ -164,8 +168,18 @@ void main() {
     float band = 0.5 + 0.5 * sin(vWorldPos.y * 2.2 - uFx2.w * 7.0);
     color = mix(color, color * 0.8 + vec3(0.95, 0.97, 1.0) * (0.012 + fresnel3 * 0.7), uFx2.z * (0.3 + 0.6 * band * band));
   }
-  // Hit flash.
-  color = mix(color, vec3(2.4, 2.0, 1.6), uFx.z * 0.75);
+  // Hit flash (strength and timing: hit-flash.ts). An impact, never a fill: the lit, painted
+  // colour stays under it, and the heat sits on the silhouette the camera sees.
+  if (uFx.z > 0.0) {
+    // A wing seen edge-on is one large grazing surface: it takes less rim than the body.
+    float hitRim = uFx.z * (1.0 - 0.6 * membrane);
+    #if DRAGON_QUALITY == 0
+      color += HIT_TINT * (uFx.z * 0.03 + hitRim * fresnel3 * 1.3);
+    #else
+      color = color * (1.0 + uFx.z * 0.5)
+        + HIT_TINT * (uFx.z * 0.02 + hitRim * (fresnel2 * 0.3 + fresnel3 * 0.9));
+    #endif
+  }
 
   if (uDebug.x > 0.5) color = vec3(membrane, runes, mask) * 0.8 + base * 0.2;
 

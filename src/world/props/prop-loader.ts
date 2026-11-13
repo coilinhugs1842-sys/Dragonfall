@@ -26,10 +26,10 @@ import type {
   WebGLRenderer,
 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { MapManifest, MapPropSet, MapTexture } from '../../shared';
+import { acquireKtx2 } from './shared-ktx2';
 
 /** Material slot names the map art uses (T-4.5 contract). */
 export const STONE_MATERIAL = 'Stone';
@@ -349,53 +349,15 @@ export async function collectMapAssets(
   };
 }
 
-/**
- * One texture transcoder for all the map loads that overlap. With two maps in the game the
- * default map (lobby, podium) and the match's own map can load at the same time, and two
- * loaders would mean two sets of transcoder workers (three.js warns about exactly that).
- */
-interface SharedKtx2 {
-  readonly loader: KTX2Loader;
-  readonly renderer: WebGLRenderer;
-  readonly transcoderUrl: string;
-  users: number;
-}
-
-let sharedKtx2: SharedKtx2 | null = null;
-
-function acquireKtx2(renderer: WebGLRenderer, transcoderUrl: string): SharedKtx2 {
-  const shared = sharedKtx2;
-  if (shared !== null && shared.renderer === renderer && shared.transcoderUrl === transcoderUrl) {
-    shared.users++;
-    return shared;
-  }
-  // A different renderer or path (tests, viewers) gets its own loader, never shared.
-  const own: SharedKtx2 = {
-    loader: new KTX2Loader().setTranscoderPath(transcoderUrl).detectSupport(renderer),
-    renderer,
-    transcoderUrl,
-    users: 1,
-  };
-  if (shared === null) sharedKtx2 = own;
-  return own;
-}
-
-function releaseKtx2(held: SharedKtx2): void {
-  held.users--;
-  if (held.users > 0) return;
-  // The transcoder workers are only needed while loading.
-  held.loader.dispose();
-  if (sharedKtx2 === held) sharedKtx2 = null;
-}
-
 async function loadBundle(
   map: MapManifest,
   renderer: WebGLRenderer,
   options: MapAssetLoadOptions,
 ): Promise<MapAssetBundle> {
   const base = options.baseUrl ?? `${defaultBase()}assets/`;
-  const held = acquireKtx2(renderer, options.transcoderUrl ?? `${defaultBase()}vendor/basis/`);
-  const ktx2 = held.loader;
+  // The page's one transcoder, shared with the dragon loader and any other map load in flight.
+  const lease = acquireKtx2(renderer, options.transcoderUrl ?? `${defaultBase()}vendor/basis/`);
+  const ktx2 = lease.loader;
   const gltf = new GLTFLoader().setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder);
   const source: MapAssetSource = {
     async loadAsset(set) {
@@ -427,7 +389,8 @@ async function loadBundle(
   try {
     return await collectMapAssets(map, source);
   } finally {
-    releaseKtx2(held);
+    // The transcoder workers are only needed while loading.
+    lease.release();
   }
 }
 

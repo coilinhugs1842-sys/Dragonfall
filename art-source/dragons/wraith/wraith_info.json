@@ -1,14 +1,14 @@
 {
  "classId": "wraith",
  "triangles": [
-  7222,
-  2484,
-  828
+  7329,
+  2543,
+  808
  ],
  "vertices": [
-  5892,
-  2770,
-  1229
+  6050,
+  2878,
+  1204
  ],
  "bones": [
   "root",
@@ -126,11 +126,11 @@
  },
  "wingspan": 13.35,
  "length": 12.97,
- "height": 2.63,
+ "height": 2.64,
  "muzzle": [
   0.0,
   0.292,
   5.306
  ],
- "raw_glb_bytes": 1831140
+ "raw_glb_bytes": 1878384
 }

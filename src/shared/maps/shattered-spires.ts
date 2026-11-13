@@ -66,7 +66,7 @@ export const SPIRES_STORM_RADIUS = 1000;
 export const SPIRES_CHUNK_SIZE = 250;
 export const SPIRES_CLOUD_SEA_Y = 0;
 export const SPIRES_FLOOR_Y = -4;
-export const SPIRES_CEILING_Y = 700;
+export const SPIRES_CEILING_Y = 800;
 /** No collision geometry reaches beyond this radius: a lane stays free inside the storm wall. */
 export const SPIRES_SOLID_MAX_RADIUS = 965;
 

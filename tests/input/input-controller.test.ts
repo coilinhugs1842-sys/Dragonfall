@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { InputController } from '../../src/input';
 import type { InputControllerOptions } from '../../src/input';
-import { BUTTON_FLAP, BUTTON_PRIMARY, createInputFrame } from '../../src/shared';
+import { BUTTON_PRIMARY, createInputFrame } from '../../src/shared';
 import { FakeCanvas, FakeDocument, FakeTarget } from './fakes';
 
 interface Rig {
@@ -134,7 +134,7 @@ describe('input while locked', () => {
     rig.doc.dispatch('mousemove', { movementX: 120, movementY: -60 });
     rig.controller.sample(5, frame);
     expect(frame.tick).toBe(5);
-    expect(frame.buttons).toBe(BUTTON_FLAP | BUTTON_PRIMARY);
+    expect(frame.buttons).toBe(BUTTON_PRIMARY);
     expect(frame.steerX).toBeGreaterThan(0);
     expect(frame.steerY).toBeGreaterThan(0);
     expect(rig.controller.state.reticleX).toBeGreaterThan(0);

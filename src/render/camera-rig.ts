@@ -39,7 +39,7 @@
  * Nothing in `update` allocates: all scratch objects are instance fields.
  */
 import { Matrix4, PerspectiveCamera, Quaternion, Vector3 } from 'three';
-import { DRAGON_FLAG_BOOSTING, FLIGHT_TUNING, findDragonView } from '../shared';
+import { DRAGON_FLAG_BOOSTING, DRAGON_FLAG_DODGING, FLIGHT_TUNING, findDragonView } from '../shared';
 import type { Quat, TerrainQuery, Vec3, WorldView } from '../shared';
 
 /** What the camera needs from a dragon. `DragonView` satisfies it as-is. */
@@ -83,6 +83,11 @@ export interface CameraRigTuning {
   rollFraction: number;
   maxRoll: number;
   rollRate: number;
+  /**
+   * How fast the chase "up" blends between world-up and the dragon's local up through inverted
+   * flight. Lower = less snap when looping upright again.
+   */
+  softUpRate: number;
   /** Degrees added at top speed, and while boosting. */
   fovSpeedKick: number;
   fovBoostKick: number;
@@ -120,6 +125,7 @@ export const CAMERA_RIG_TUNING: CameraRigTuning = {
   rollFraction: 0.3,
   maxRoll: 0.35,
   rollRate: 4,
+  softUpRate: 5,
   fovSpeedKick: 11,
   fovBoostKick: 6,
   fovRate: 3.5,
@@ -323,6 +329,8 @@ export class ChaseCamera {
   private readonly axis: SpringAxis = { value: 0, velocity: 0 };
   private readonly right = new Vector3();
   private readonly camUp = new Vector3();
+  /** Blended world/local up so the chase view can go inverted smoothly. */
+  private readonly softUp = new Vector3(0, 1, 0);
   private readonly look = new Vector3();
   private readonly matrix = new Matrix4();
   private readonly rollQuat = new Quaternion();
@@ -384,6 +392,68 @@ export class ChaseCamera {
     fy /= fLength;
     fz /= fLength;
     const leftY = s * (q.x * q.y + q.w * q.z);
+    let ux = s * (q.x * q.y - q.w * q.z);
+    let uy = 1 - s * (q.x * q.x + q.z * q.z);
+    let uz = s * (q.y * q.z + q.w * q.x);
+    const uLength = Math.sqrt(ux * ux + uy * uy + uz * uz);
+    if (uLength > TINY) {
+      ux /= uLength;
+      uy /= uLength;
+      uz /= uLength;
+    } else {
+      ux = 0;
+      uy = 1;
+      uz = 0;
+    }
+    // Soft up is BANK-FREE: ± the horizon up for this heading. Blending toward the dragon's full
+    // local up made the camera roll with every turn while inverted (upright stayed world-locked).
+    // `aligned` = how much the dragon's local up matches that horizon up (bank tilts it sideways
+    // but keeps the sign until ~90°, so hard banks do not falsely flip the view).
+    const dodging = (target.flags & DRAGON_FLAG_DODGING) !== 0;
+    let refX = 0;
+    let refY = 1;
+    let refZ = 0;
+    const fDotRef = fx * refX + fy * refY + fz * refZ;
+    refX -= fx * fDotRef;
+    refY -= fy * fDotRef;
+    refZ -= fz * fDotRef;
+    const refLen = Math.sqrt(refX * refX + refY * refY + refZ * refZ);
+    if (refLen > TINY) {
+      refX /= refLen;
+      refY /= refLen;
+      refZ /= refLen;
+    } else {
+      // Nose straight up/down: pick a stable sideways reference in the XZ plane.
+      refX = -fz;
+      refY = 0;
+      refZ = fx;
+      const sideLen = Math.sqrt(refX * refX + refZ * refZ);
+      if (sideLen > TINY) {
+        refX /= sideLen;
+        refZ /= sideLen;
+      } else {
+        refX = 1;
+        refY = 0;
+        refZ = 0;
+      }
+    }
+    const aligned = ux * refX + uy * refY + uz * refZ;
+    const invertBlend = dodging ? 0 : clamp01((0.25 - aligned) / 0.5);
+    // 0 = +ref (upright horizon), 1 = -ref (inverted horizon). No bank in either.
+    const flip = 1 - 2 * invertBlend;
+    let wantX = refX * flip;
+    let wantY = refY * flip;
+    let wantZ = refZ * flip;
+    const wantLen = Math.sqrt(wantX * wantX + wantY * wantY + wantZ * wantZ);
+    if (wantLen > TINY) {
+      wantX /= wantLen;
+      wantY /= wantLen;
+      wantZ /= wantLen;
+    } else {
+      wantX = 0;
+      wantY = 1;
+      wantZ = 0;
+    }
 
     let vx = target.velocity.x;
     let vy = target.velocity.y;
@@ -403,7 +473,12 @@ export class ChaseCamera {
     );
     const distanceTarget = tuning.distance + tuning.speedPullBack * speedT;
     const fovTarget = chaseFovTarget(this.baseFov, speedT, boosting, tuning, this.reduceMotion);
-    const rollTarget = this.reduceMotion ? 0 : cameraRollTarget(leftY, tuning);
+    // Mild bank lean only while upright. Inverted soft-up is already horizon-flipped; adding
+    // leftY roll there made the camera tip with the dragon (unlike upright). Q/E dodge: none.
+    const rollTarget =
+      this.reduceMotion || dodging || invertBlend > 0.35
+        ? 0
+        : cameraRollTarget(leftY, tuning) * (1 - invertBlend);
     const boostTarget = boosting ? 1 : 0;
 
     const jumpX = px - this.lastTarget.x;
@@ -419,9 +494,11 @@ export class ChaseCamera {
       !this.isStateFinite();
 
     const heading = this.heading;
+    const soft = this.softUp;
     if (snap) {
       heading.set(fx, fy, fz);
       this.headingVelocity.set(0, 0, 0);
+      soft.set(wantX, wantY, wantZ);
       this.distance = distanceTarget;
       this.fov = fovTarget;
       this.roll = rollTarget;
@@ -431,6 +508,13 @@ export class ChaseCamera {
       this.pull = 1;
     } else {
       this.springHeading(fx, fy, fz, dt);
+      const softStep = dampFactor(tuning.softUpRate, dt);
+      soft.x += (wantX - soft.x) * softStep;
+      soft.y += (wantY - soft.y) * softStep;
+      soft.z += (wantZ - soft.z) * softStep;
+      const softLen = soft.length();
+      if (softLen > TINY) soft.multiplyScalar(1 / softLen);
+      else soft.set(0, 1, 0);
       this.distance += (distanceTarget - this.distance) * dampFactor(tuning.distanceRate, dt);
       this.fov += (fovTarget - this.fov) * dampFactor(tuning.fovRate, dt);
       this.roll += (rollTarget - this.roll) * dampFactor(tuning.rollRate, dt);
@@ -441,22 +525,39 @@ export class ChaseCamera {
     }
     this.fov = clamp(this.fov, MIN_BASE_FOV, MAX_CAMERA_FOV);
 
-    // Where the camera wants to be: behind the smoothed heading, lifted along world up.
-    const wantX = px - heading.x * this.distance;
-    const wantY = py - heading.y * this.distance + tuning.height;
-    const wantZ = pz - heading.z * this.distance;
+    // Where the camera wants to be: behind the smoothed heading, lifted along soft up
+    // (world up when upright, dragon local up when inverted).
+    const camWantX = px - heading.x * this.distance + soft.x * tuning.height;
+    const camWantY = py - heading.y * this.distance + soft.y * tuning.height;
+    const camWantZ = pz - heading.z * this.distance + soft.z * tuning.height;
     if (snap) {
-      this.springPosition.set(wantX, wantY, wantZ);
+      this.springPosition.set(camWantX, camWantY, camWantZ);
       this.springVelocity.set(vx, vy, vz);
     } else {
-      this.springFollow(wantX, wantY, wantZ, vx, vy, vz, dt);
+      this.springFollow(camWantX, camWantY, camWantZ, vx, vy, vz, dt);
     }
 
-    // Camera-space right and up for the aim shift and the shake. right = heading x up.
-    const right = this.right.set(-heading.z, 0, heading.x);
+    // Camera-space right and up: right = heading x softUp (handles inverted flight).
+    // If softUp is nearly parallel to the heading (loop apex), fall back to world up for the
+    // basis so lookAt does not whip.
+    let basisUpX = soft.x;
+    let basisUpY = soft.y;
+    let basisUpZ = soft.z;
+    if (Math.abs(heading.x * basisUpX + heading.y * basisUpY + heading.z * basisUpZ) > 0.95) {
+      basisUpX = 0;
+      basisUpY = 1;
+      basisUpZ = 0;
+    }
+    const right = this.right.set(
+      heading.y * basisUpZ - heading.z * basisUpY,
+      heading.z * basisUpX - heading.x * basisUpZ,
+      heading.x * basisUpY - heading.y * basisUpX,
+    );
     if (right.lengthSq() > TINY) right.normalize();
     else right.set(-1, 0, 0);
     const camUp = this.camUp.crossVectors(right, heading);
+    if (camUp.lengthSq() > TINY) camUp.normalize();
+    else camUp.set(basisUpX, basisUpY, basisUpZ);
 
     const lead = clamp01(tuning.lookLead);
     const aimX = this.aimX * tuning.aimShift;
@@ -465,16 +566,18 @@ export class ChaseCamera {
       px +
         (heading.x + (fx - heading.x) * lead) * tuning.lookAhead +
         right.x * aimX +
-        camUp.x * aimY,
+        camUp.x * aimY +
+        soft.x * tuning.lookHeight,
       py +
         (heading.y + (fy - heading.y) * lead) * tuning.lookAhead +
-        tuning.lookHeight +
         right.y * aimX +
-        camUp.y * aimY,
+        camUp.y * aimY +
+        soft.y * tuning.lookHeight,
       pz +
         (heading.z + (fz - heading.z) * lead) * tuning.lookAhead +
         right.z * aimX +
-        camUp.z * aimY,
+        camUp.z * aimY +
+        soft.z * tuning.lookHeight,
     );
 
     // Boost shake, on the camera's own clock so it is the same wave at any frame rate.
@@ -531,7 +634,24 @@ export class ChaseCamera {
     }
 
     this.position.set(outX, outY, outZ);
-    this.matrix.lookAt(this.position, this.look, UP);
+    // Prefer the eased soft up; if it is parallel to the view, lookAt with world up.
+    const viewX = this.look.x - outX;
+    const viewY = this.look.y - outY;
+    const viewZ = this.look.z - outZ;
+    const viewLen = Math.sqrt(viewX * viewX + viewY * viewY + viewZ * viewZ);
+    let lookUpX = soft.x;
+    let lookUpY = soft.y;
+    let lookUpZ = soft.z;
+    if (
+      viewLen > TINY &&
+      Math.abs((viewX * lookUpX + viewY * lookUpY + viewZ * lookUpZ) / viewLen) > 0.95
+    ) {
+      lookUpX = 0;
+      lookUpY = 1;
+      lookUpZ = 0;
+    }
+    this.camUp.set(lookUpX, lookUpY, lookUpZ);
+    this.matrix.lookAt(this.position, this.look, this.camUp);
     this.quaternion.setFromRotationMatrix(this.matrix);
     if (this.roll !== 0) {
       // The camera looks down -Z: "right wing down" is a negative turn about its own +Z.

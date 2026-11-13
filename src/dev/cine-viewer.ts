@@ -11,6 +11,7 @@
  *   &t=<seconds>      start the scene clock here
  *   &speed=<factor>   time scale (0 = frozen on `t`)
  *   &hud=0            hide the small caption
+ *   &map=<map id>     the map `loadMatch` loads (the game's own `?map=` flag); default: the first map
  *
  * `window.__cine = { name, timeS, info }` is there for the capture scripts.
  */
@@ -18,8 +19,9 @@ import { FrameDriver, createMatchAssetsCache, createStage } from '../game';
 import type { CameraDirector, MatchAssets, Stage } from '../game';
 import type { GameRenderer } from '../render';
 import { FixedStepLoop } from '../sim';
-import { SHATTERED_SPIRES_DEFAULT_SEED, TICK_MS } from '../shared';
+import { DEFAULT_MAP_ID, TICK_MS, defaultSeedOfMap } from '../shared';
 import type { ArenaMap, WorldView } from '../shared';
+import { getQueryFlags } from './query-flags';
 import type { RecordRig } from './record';
 
 /** What a scene module asks the harness to draw this frame. */
@@ -31,11 +33,17 @@ export type CineFrame =
 export interface CineHarness {
   readonly stage: Stage;
   readonly renderer: GameRenderer;
-  /** The default map (sky, sun, storm centre, gates); also what `loadMatch` loads. */
+  /**
+   * The default map: what the title and the aerie lobby stand on, as in the game. A match scene
+   * reads its map from what `loadMatch` returns (`?map=` may have picked another one).
+   */
   readonly map: ArenaMap;
   readonly uiRoot: HTMLElement;
   readonly params: URLSearchParams;
-  /** Loads the match views (map, dragons, effects) so `kind: 'match'` frames draw a WorldView. */
+  /**
+   * Loads the match views (the map of `?map=`, its dragons and effects) so `kind: 'match'`
+   * frames draw a WorldView. The stage takes that map's sky, as at a match start.
+   */
   loadMatch(): MatchAssets;
   /** Hand the camera to a director (null = chase rig / backdrop drift). */
   setDirector(director: CameraDirector | null): void;
@@ -79,6 +87,8 @@ export function startCineViewer(options: CineViewerOptions): void {
   const startParam = Number(params.get('t') ?? '0');
   let timeS = Number.isFinite(startParam) && startParam > 0 ? startParam : 0;
 
+  // The game's own parsing: a missing or unknown `?map=` is the default map.
+  const matchMapId = getQueryFlags().map ?? DEFAULT_MAP_ID;
   const cache = createMatchAssetsCache();
   const stage = createStage({
     quality: renderer.presetId,
@@ -115,7 +125,7 @@ export function startCineViewer(options: CineViewerOptions): void {
     uiRoot,
     params,
     loadMatch(): MatchAssets {
-      const assets = cache.get(SHATTERED_SPIRES_DEFAULT_SEED);
+      const assets = cache.get(defaultSeedOfMap(matchMapId), matchMapId);
       stage.loadMatch(assets);
       return assets;
     },

@@ -448,4 +448,19 @@ describe('animation state across a short spell as the far model', () => {
     expect(hitFlash(dragons)).toBe(1);
     dragons.dispose();
   });
+
+  it('flashes more gently with reduce motion on, and not at all a quarter second later', () => {
+    const { dragons, view, step } = flying();
+    dragons.setReduceMotion(true);
+    for (let i = 0; i < 30; i++) step();
+    const slot = view.dragons[0];
+    if (slot === undefined) throw new Error('no dragon in the view');
+    slot.health = 0.4;
+    step();
+    expect(hitFlash(dragons)).toBeGreaterThan(0);
+    expect(hitFlash(dragons)).toBeLessThanOrEqual(0.5);
+    for (let i = 0; i < 15; i++) step();
+    expect(hitFlash(dragons)).toBe(0);
+    dragons.dispose();
+  });
 });

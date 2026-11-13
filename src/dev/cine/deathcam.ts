@@ -10,9 +10,13 @@
  *   &swap=1        a second enemy becomes the killer 1.5 s into the orbit
  *   &die=1         the killer dies 1.5 s into the orbit
  *   &reduce=1      the reduce-motion version
+ *   &close=1       the killer flies alongside at the orbit's starting distance, so the camera's
+ *                  starting place is exactly where the victim's falling body is
+ *   &near=1        the second enemy flies in formation with the killer, exactly where the
+ *                  camera would start (use &t=1.52&speed=0 for the first frame of either)
  */
 import { PerspectiveCamera } from 'three';
-import { createDeathCam } from '../../cinematics/death-cam';
+import { DEATH_CAM_TUNING, createDeathCam } from '../../cinematics/death-cam';
 import {
   DRAGON_ANIM_BANK_L,
   DRAGON_ANIM_DEATH_FALL,
@@ -80,6 +84,8 @@ export function start(harness: CineHarness): void {
   const friendly = params.get('friendly') === '1';
   const swap = params.get('swap') === '1';
   const die = params.get('die') === '1';
+  const close = params.get('close') === '1';
+  const near = params.get('near') === '1';
 
   // Open sky south of the crown, with the claws as a backdrop.
   const well = map.skyWell.position;
@@ -111,6 +117,34 @@ export function start(harness: CineHarness): void {
     writeYawRoll(dragon, yaw, -KILLER_BANK);
     dragon.anim = DRAGON_ANIM_BANK_L;
   }
+
+  /** `&close`: straight and level beside the victim's path, the orbit's first radius away. */
+  function writeAlongside(dragon: MutableDragonView, loopS: number): void {
+    dragon.position.x = spotX - 60 + loopS * VICTIM_SPEED;
+    dragon.position.y = spotY - DEATH_CAM_TUNING.heightStart;
+    dragon.position.z = spotZ + DEATH_CAM_TUNING.radiusStart;
+    dragon.velocity.x = VICTIM_SPEED;
+    dragon.velocity.y = 0;
+    dragon.velocity.z = 0;
+    writeYawRoll(dragon, Math.PI / 2, 0);
+  }
+
+  /** The killer's flight at `loopS`. */
+  function writeKiller(dragon: MutableDragonView, loopS: number): void {
+    if (close) writeAlongside(dragon, loopS);
+    else writeCircling(dragon, loopS, 0.6, 6);
+  }
+
+  // `&near`: from the killer to where the death cam starts (toward the place of death, up).
+  const atFall = createWorldView();
+  const killerAtFall = acquireDragonView(atFall);
+  writeKiller(killerAtFall, DOWN_AT_S);
+  const towardX = spotX - 60 + DOWN_AT_S * VICTIM_SPEED - killerAtFall.position.x;
+  const towardZ = spotZ - killerAtFall.position.z;
+  const towardLength = Math.hypot(towardX, towardZ) || 1;
+  const nearX = (towardX / towardLength) * DEATH_CAM_TUNING.radiusStart;
+  const nearY = DEATH_CAM_TUNING.heightStart;
+  const nearZ = (towardZ / towardLength) * DEATH_CAM_TUNING.radiusStart;
 
   /** The whole scene at `loopS` seconds into the loop. */
   function writeScene(out: MutableWorldView, loopS: number): void {
@@ -145,7 +179,7 @@ export function start(harness: CineHarness): void {
 
     const killer = acquireDragonView(out);
     writeBasics(killer, KILLER_ID, friendly ? TEAM_EMBER : TEAM_FROST, 'tempest');
-    writeCircling(killer, loopS, 0.6, 6);
+    writeKiller(killer, loopS);
     if (veil || friendly) killer.flags |= DRAGON_FLAG_VEILED;
     if (die && twisted) {
       killer.flags = 0;
@@ -154,7 +188,21 @@ export function start(harness: CineHarness): void {
 
     const second = acquireDragonView(out);
     writeBasics(second, SECOND_ID, TEAM_FROST, 'bastion');
-    writeCircling(second, loopS, 0.6 + Math.PI, -10);
+    if (near) {
+      second.position.x = killer.position.x + nearX;
+      second.position.y = killer.position.y + nearY;
+      second.position.z = killer.position.z + nearZ;
+      second.velocity.x = killer.velocity.x;
+      second.velocity.y = killer.velocity.y;
+      second.velocity.z = killer.velocity.z;
+      second.orientation.x = killer.orientation.x;
+      second.orientation.y = killer.orientation.y;
+      second.orientation.z = killer.orientation.z;
+      second.orientation.w = killer.orientation.w;
+      second.anim = killer.anim;
+    } else {
+      writeCircling(second, loopS, 0.6 + Math.PI, -10);
+    }
 
     const wall = acquireZoneView(out);
     wall.id = 0;

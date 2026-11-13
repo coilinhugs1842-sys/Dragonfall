@@ -36,17 +36,21 @@ shape icon, not colour alone.
 - The dragon always moves forward. Cruise speed is about 45 m/s, between a 25 m/s stall and 95 m/s in a full
   dive or boost.
 - **Mouse aim:** the dragon turns toward the reticle, and the camera follows behind and slightly above.
-  **WASD** gives fine pitch and yaw. **A/D** add roll.
-- **Energy:** climbing bleeds speed and diving gains it. Speed is a resource you manage.
+  **WASD** gives fine pitch and yaw. **A/D** add roll. Pitch is free: full loops and continuous inverted
+  flight are allowed. The chase camera soft-slerps its up vector toward the dragon's local up past about
+  90° so the view can go upside-down without a hard snap; "pull up" stays toward the top of the screen.
+- **Energy:** climbing bleeds speed and diving gains it (gravity along the nose). Speed is a resource you
+  manage through loops as well as ordinary climbs and dives.
 - **Shift** boosts (stamina bar). **Space** flaps up hard. **Ctrl** dives or folds the wings.
 - **Q/E** barrel-roll dodge: a short burst sideways with about 0.25 s of damage immunity and a 4 s cooldown.
 - Hitting terrain bounces you and costs HP. It only kills at very high speed.
 - The arena edge is a **storm wall** that pushes you back in and deals damage over time.
 
-## Dragons (4 classes at launch)
+## Dragons (9 classes)
 
 Every class has **Primary** (left mouse), **Secondary** (right mouse), **Utility** (F) and an **Ultimate** (R)
-that charges by dealing damage and capturing objectives.
+that charges by dealing damage and capturing objectives. Matches still seat at most five riders per team;
+more classes means more pick variety, not more seats.
 
 | Class | Role | HP | Speed | Primary | Secondary | Utility | Ultimate |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -54,6 +58,11 @@ that charges by dealing damage and capturing objectives.
 | **Bastion** | frontline | high | slow | Flame cone (short range, sustained) | Wing shield (blocks frontal damage) | Rally roar (allies near you heal over time) | Bulwark charge (knock-back wave) |
 | **Tempest** | artillery | medium | medium | Lightning lance (charge-up beam, long range) | Static mine (area slow) | Updraft (vertical burst) | Thunderhead (storm cloud that zaps an area) |
 | **Wraith** | ambusher | low-med | fast in dives | Shade breath (damage over time) | Veil (briefly invisible until you attack) | Phase dive (pass through terrain for 1 s) | Night terror (blinds enemies in a cone) |
+| **Verdant** | support | med | med | Bloom bolts (thorn projectiles) | Root snare seeds | Updraft-garden haste | Canopy regen field |
+| **Aureate** | disruptor | med-low | med-fast | Prism shards | Shatter slow pulse | Prism skim (slowing redirect) | Solar lattice slow field |
+| **Zephyr** | scout | lowest | fastest | Gale bolts | Gust knock | Slipstream boost | Gale wall deny |
+| **Granite** | siege | highest | slowest | Magma spit (arcing bombs) | Quake slam zone | Stone mend regen | Crater smash ahead |
+| **Mirage** | trickster | low-med | fast in dives | Decoy bolts | Afterimage blind bloom | Mirror step dash | Phantasm blind field |
 
 Exact numbers live in `src/shared` tuning tables so they can be balanced without code changes.
 
@@ -66,7 +75,7 @@ effects for it, on the host's screen too.
 | Mode | Teams | Win condition | Phase |
 | --- | --- | --- | --- |
 | **Skirmish** | 1v1–5v5 | First team to N takedowns, or the most when time runs out | MVP |
-| **Duel** | 1v1 (also 2v2) | Best of 5 rounds, no respawns, the storm wall shrinks each round | MVP |
+| **Duel** | 1v1–5v5 | Best of 5 rounds, no respawns, the storm wall shrinks each round | MVP |
 | **Ember Relay** | 2v2–5v5 | Carry the enemy's sky-shard back to your brazier (capture-the-flag) | Phase 6 |
 | **Sky Crown** | 2v2–5v5 | Hold a moving control zone for N seconds total | Stretch |
 
@@ -111,7 +120,8 @@ Title ─► Host / Join (room code) ─► Lobby (cinematic aerie) ─► Match
 ### During the match
 
 - Killfeed, team score, timer, ability cooldowns, and a teammate compass.
-- On death: a 3 s **death cam** that orbits your killer. Stretch: a short replay from the snapshot history.
+- On death: a 3 s **death cam** that orbits your killer. In Duel (no respawns) you then spectate
+  living teammates (click / Space / gamepad A to cycle). Stretch: a short replay from the snapshot history.
 
 ### Results podium
 

@@ -1,14 +1,14 @@
 {
  "classId": "bastion",
  "triangles": [
-  6938,
-  2482,
-  779
+  7045,
+  2541,
+  759
  ],
  "vertices": [
-  6136,
-  3009,
-  1276
+  6300,
+  3115,
+  1251
  ],
  "bones": [
   "root",
@@ -126,11 +126,11 @@
  },
  "wingspan": 15.64,
  "length": 10.73,
- "height": 3.42,
+ "height": 3.57,
  "muzzle": [
   0.0,
   0.193,
   5.091
  ],
- "raw_glb_bytes": 1764556
+ "raw_glb_bytes": 1814764
 }

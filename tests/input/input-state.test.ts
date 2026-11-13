@@ -145,7 +145,7 @@ describe('keys -> buttons and fine steer', () => {
     const cases: readonly (readonly [string, number])[] = [
       ['ShiftLeft', BUTTON_BOOST],
       ['ShiftRight', BUTTON_BOOST],
-      ['Space', BUTTON_FLAP],
+      ['Space', BUTTON_PRIMARY],
       ['ControlLeft', BUTTON_DIVE],
       ['KeyC', BUTTON_DIVE],
       ['KeyQ', BUTTON_DODGE_LEFT],
@@ -264,18 +264,19 @@ describe('keys -> buttons and fine steer', () => {
     const state = createInputState();
     const frame = createInputFrame();
     inputCodeDown(state, 'Space');
-    setInputBindings(state, rebindAction(DEFAULT_BINDINGS, 'flap', 0, 'KeyV'));
+    // Replace Space on primary with KeyV; the held Space must not keep firing.
+    setInputBindings(state, rebindAction(DEFAULT_BINDINGS, 'primary', 1, 'KeyV'));
     expect(sampleInput(state, 0, frame).buttons).toBe(0);
     expect(inputCodeDown(state, 'Space')).toBe(false);
     inputCodeDown(state, 'KeyV');
-    expect(sampleInput(state, 1, frame).buttons).toBe(BUTTON_FLAP);
+    expect(sampleInput(state, 1, frame).buttons).toBe(BUTTON_PRIMARY);
   });
 
   it('lets one code drive two actions when the table shares it', () => {
     const shared = rebindAction(DEFAULT_BINDINGS, 'boost', 0, 'Space', { steal: false });
     const state = createInputState(shared);
     inputCodeDown(state, 'Space');
-    expect(sampleInput(state, 0, createInputFrame()).buttons).toBe(BUTTON_FLAP | BUTTON_BOOST);
+    expect(sampleInput(state, 0, createInputFrame()).buttons).toBe(BUTTON_PRIMARY | BUTTON_BOOST);
   });
 
   it('writes into the frame it is given and returns it', () => {

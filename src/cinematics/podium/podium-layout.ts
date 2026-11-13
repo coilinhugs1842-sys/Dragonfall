@@ -55,6 +55,11 @@ const PERCH_DROP: Readonly<Record<DragonClassId, number>> = {
   bastion: 1.55,
   tempest: 1.5,
   wraith: 1.45,
+  verdant: 1.48,
+  aureate: 1.46,
+  zephyr: 1.4,
+  granite: 1.6,
+  mirage: 1.45,
 };
 
 export function perchDrop(classId: DragonClassId): number {

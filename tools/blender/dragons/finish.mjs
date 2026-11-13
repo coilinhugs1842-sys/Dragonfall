@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 
-const ALL = ['talon', 'bastion', 'tempest', 'wraith'];
+const ALL = ['talon', 'bastion', 'tempest', 'wraith', 'verdant', 'aureate', 'zephyr', 'granite', 'mirage'];
 const classes = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const wing = (side) =>
   ['shoulder', 'elbow', 'wrist', 'finger1', 'finger2', 'finger3'].map((b) => `wing_${b}_${side}`);

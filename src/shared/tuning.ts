@@ -41,7 +41,10 @@ export interface FlightTuning {
   /** Turn-rate multiplier at stall speed and at max speed; linear in between. */
   turnScaleSlow: number;
   turnScaleFast: number;
-  /** Pitch limits. Both stay below a quarter turn: no loops (see src/sim/flight.ts). */
+  /**
+   * Soft pitch caps in radians. At `Math.PI` (the default) pitch wraps freely for loops /
+   * inverted flight. Values below PI clamp the nose (accessibility / legacy).
+   */
   maxClimbPitch: number;
   maxDivePitch: number;
   /** Bank angle at a full-rate turn. */
@@ -127,7 +130,7 @@ export const FLIGHT_TUNING: FlightTuning = {
   cruiseSpeed: 45, // doc
   maxSpeed: 95, // doc
   minSpeedFraction: 0.6,
-  gravityAccel: 20,
+  gravityAccel: 24,
   speedReturnRate: 0.5,
 
   maxPitchRate: 1.6,
@@ -136,8 +139,8 @@ export const FLIGHT_TUNING: FlightTuning = {
   steerResponse: 8,
   turnScaleSlow: 1.25,
   turnScaleFast: 0.6,
-  maxClimbPitch: 1.05,
-  maxDivePitch: 1.3,
+  maxClimbPitch: Math.PI,
+  maxDivePitch: Math.PI,
   maxBankAngle: 1.0,
   bankResponse: 5,
   rollInputBank: 0.5,
@@ -204,6 +207,8 @@ export interface ClassTuning {
    * generous enough for a body that is longer than it is wide).
    */
   hitRadius: number;
+  /** Multiplier on flight turn authority (1 = baseline). */
+  turnScale: number;
   /** @deprecated Placeholder; the real numbers are in ABILITY_TABLE (./abilities.ts). */
   abilities: Record<AbilitySlot, AbilityTuning>;
 }
@@ -225,17 +230,19 @@ function placeholderAbilities(): Record<AbilitySlot, AbilityTuning> {
  */
 export const CLASS_TUNING: Record<DragonClassId, ClassTuning> = {
   talon: {
-    maxHp: 100,
-    speedScale: 1.1,
-    diveSpeedScale: 1.0,
+    maxHp: 112,
+    speedScale: 1.16,
+    diveSpeedScale: 1.04,
     hitRadius: 2.5,
+    turnScale: 1.1,
     abilities: placeholderAbilities(),
   },
   bastion: {
-    maxHp: 180,
+    maxHp: 168,
     speedScale: 0.9,
     diveSpeedScale: 1.0,
     hitRadius: 3.2,
+    turnScale: 1,
     abilities: placeholderAbilities(),
   },
   tempest: {
@@ -243,13 +250,55 @@ export const CLASS_TUNING: Record<DragonClassId, ClassTuning> = {
     speedScale: 1.0,
     diveSpeedScale: 1.0,
     hitRadius: 2.8,
+    turnScale: 1,
     abilities: placeholderAbilities(),
   },
   wraith: {
     maxHp: 120,
-    speedScale: 1.0,
-    diveSpeedScale: 1.15,
+    speedScale: 1.08,
+    diveSpeedScale: 1.18,
     hitRadius: 2.5,
+    turnScale: 1.08,
+    abilities: placeholderAbilities(),
+  },
+  verdant: {
+    maxHp: 135,
+    speedScale: 1.0,
+    diveSpeedScale: 1.0,
+    hitRadius: 2.7,
+    turnScale: 1.02,
+    abilities: placeholderAbilities(),
+  },
+  aureate: {
+    maxHp: 125,
+    speedScale: 1.06,
+    diveSpeedScale: 1.05,
+    hitRadius: 2.6,
+    turnScale: 1.05,
+    abilities: placeholderAbilities(),
+  },
+  zephyr: {
+    maxHp: 98,
+    speedScale: 1.2,
+    diveSpeedScale: 1.1,
+    hitRadius: 2.3,
+    turnScale: 1.18,
+    abilities: placeholderAbilities(),
+  },
+  granite: {
+    maxHp: 185,
+    speedScale: 0.86,
+    diveSpeedScale: 0.95,
+    hitRadius: 3.35,
+    turnScale: 1,
+    abilities: placeholderAbilities(),
+  },
+  mirage: {
+    maxHp: 115,
+    speedScale: 1.1,
+    diveSpeedScale: 1.12,
+    hitRadius: 2.5,
+    turnScale: 1.1,
     abilities: placeholderAbilities(),
   },
 };

@@ -310,7 +310,8 @@ describe('buttons -> InputFrame', () => {
     const rig = createRig();
     inputCodeDown(rig.input, 'Space');
     rig.pad.press(PAD.RT);
-    expect(rig.sample().buttons).toBe(BUTTON_FLAP | BUTTON_PRIMARY);
+    // Space and RT are both primary now.
+    expect(rig.sample().buttons).toBe(BUTTON_PRIMARY);
     // The same action from both devices holds until both let go.
     rig.pad.press(PAD.A);
     rig.sample();
@@ -765,7 +766,7 @@ describe('release, flight off and disconnect', () => {
     expect(rig.input.activeDevice).toBe('keyboard');
     // Keys still work afterwards.
     inputCodeDown(rig.input, 'Space');
-    expect(sampleInput(rig.input, 1, rig.frame).buttons).toBe(BUTTON_FLAP);
+    expect(sampleInput(rig.input, 1, rig.frame).buttons).toBe(BUTTON_PRIMARY);
   });
 
   it('starts clean when another pad takes the place of the first', () => {

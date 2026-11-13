@@ -884,9 +884,9 @@ function setFlag(
 
 /**
  * Host picks the mode. Unknown modes are invalid, unshipped ones unavailable. The team size is
- * pulled into the new mode's range (Duel caps it at 2, Ember Relay needs 2), with the usual
- * overflow to spectators. The score limit starts again on the new mode's own value when the two
- * modes count different things (30 takedowns in Skirmish, 3 captures in Ember Relay).
+ * pulled into the new mode's range (Ember Relay needs at least 2), with the usual overflow to
+ * spectators. The score limit starts again on the new mode's own value when the two modes count
+ * different things (30 takedowns in Skirmish, 3 captures in Ember Relay).
  */
 export function setMode(lobby: HostLobby, actorId: PlayerId, mode: ModeId): LobbyResult {
   const refusal = hostPanelRefusal(lobby, actorId);

@@ -34,7 +34,7 @@ const OPEN_SKY: BotWorld = {
   centerZ: 0,
   radius: 1000,
   floorY: 0,
-  ceilingY: 700,
+  ceilingY: 800,
 };
 
 interface HostBot {

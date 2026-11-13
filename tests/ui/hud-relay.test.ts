@@ -7,6 +7,9 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  DRAGON_FLAG_ALIVE,
+  DRAGON_FLAG_BURNING,
+  DRAGON_FLAG_SLOWED,
   HUD_COMPASS_MARKERS,
   NO_PLAYER,
   OBJECTIVE_KINDS,
@@ -434,6 +437,93 @@ describe('relay HUD (DOM)', () => {
     expect(marks[3]?.dataset['kind']).toBe('ally');
     expect(pathOf(marks[3] ?? root)).not.toBe(SHARD_SHAPES.ember);
     expect(marks[0]?.querySelector('.dfh-mark-dist')?.textContent).toBe('100');
+  });
+
+  it('keeps the distance figures of close compass markers apart', () => {
+    const fill = (
+      index: number,
+      kind: 'ally' | 'shard' | 'brazier',
+      angle: number,
+      distanceM: number,
+    ): void => {
+      const marker = state.compass[index];
+      if (marker === undefined) throw new Error('no marker');
+      marker.kind = kind;
+      marker.team = TEAM_EMBER;
+      marker.angle = angle;
+      marker.distanceM = distanceM;
+      marker.alive = true;
+    };
+    // A team mate carrying the shard: two markers on one spot, the same distance away. Another
+    // mate a little further on the same bearing, the brazier well away from all of them.
+    fill(0, 'ally', 0.3, 282);
+    fill(1, 'shard', 0.3, 280);
+    fill(2, 'ally', 0.32, 300);
+    fill(3, 'brazier', -1, 600);
+    state.compassCount = 4;
+    draw();
+    const marks = root.querySelectorAll('.dfh-mark');
+    const lane = (index: number): string | undefined => marks[index]?.dataset['lane'];
+    // The shard keeps its figure; the mate on it shares that figure (the same "280");
+    // the mate behind them puts "300" a line lower; the brazier is not touched.
+    expect(lane(1)).toBe('0');
+    expect(lane(0)).toBe('2');
+    expect(lane(2)).toBe('1');
+    expect(lane(3)).toBe('0');
+    expect(marks[2]?.querySelector('.dfh-mark-dist')?.textContent).toBe('300');
+
+    // Nothing is written while they stay where they are.
+    resetWrites();
+    draw();
+    expect(writeCount()).toBe(0);
+
+    // The carrier's escort peels off: every figure is back on the first line.
+    fill(0, 'ally', -0.4, 150);
+    fill(2, 'ally', 0.9, 300);
+    draw();
+    expect([lane(0), lane(1), lane(2), lane(3)]).toEqual(['0', '0', '0', '0']);
+  });
+
+  it('shows the carrier "Carrying the shard" instead of "Slowed"', () => {
+    const chip = (label: string): FakeElement => {
+      const found = root
+        .querySelectorAll('.dfh-chip')
+        .find((node) => node.querySelector('.dfh-chip-label')?.textContent === label);
+      if (found === undefined) throw new Error(`no chip ${label}`);
+      return found;
+    };
+    state.localPool.alive = true;
+    state.localPool.flags = DRAGON_FLAG_ALIVE;
+    draw();
+    expect(shown(chip('Carrying the shard'))).toBe(false);
+    expect(shown(chip('Slowed'))).toBe(false);
+
+    // The shard's weight arrives as the ordinary slow status.
+    state.relayPool.carrying = true;
+    state.localPool.flags = DRAGON_FLAG_ALIVE | DRAGON_FLAG_SLOWED | DRAGON_FLAG_BURNING;
+    draw(16);
+    expect(shown(chip('Carrying the shard'))).toBe(true);
+    expect(shown(chip('Slowed'))).toBe(false);
+    // Other statuses are not touched, and the carry chip is not drawn as harm.
+    expect(shown(chip('Burning'))).toBe(true);
+    expect(chip('Carrying the shard').className).not.toContain('dfh-chip-harm');
+    // Up for the whole carry, also on a tick where the slow flag is not set yet.
+    state.localPool.flags = DRAGON_FLAG_ALIVE;
+    draw(16);
+    expect(shown(chip('Carrying the shard'))).toBe(true);
+
+    // The shard is gone and an enemy's slow is running: that one is a debuff and says so.
+    state.relayPool.carrying = false;
+    state.localPool.flags = DRAGON_FLAG_ALIVE | DRAGON_FLAG_SLOWED;
+    draw(16);
+    expect(shown(chip('Carrying the shard'))).toBe(false);
+    expect(shown(chip('Slowed'))).toBe(true);
+
+    // Another mode: never.
+    state.relay = null;
+    draw(16);
+    expect(shown(chip('Carrying the shard'))).toBe(false);
+    expect(shown(chip('Slowed'))).toBe(true);
   });
 
   it('counts captures on the scoreboard and puts the capturers first', () => {

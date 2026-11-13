@@ -4,10 +4,12 @@
  * team's colour (the neutral violet for a draw), and on Medium / High two braziers.
  *
  * TWO VERSIONS
- * - The real one draws the map's shipped geometry (`island-small`, `banner-tall`, `brazier`
+ * - The real one draws the match map's shipped geometry (the island its `podium` entry names,
+ *   `island-small` when it names none; `banner-tall` and, where the map has one, `brazier`, all
  *   from the map's asset bundle, which the map view has already loaded) and the plinth with the
- *   painterly world material, so it takes the same sun, fog and dragon shadows as every other
- *   rock, and compiles no shader of its own (same source and defines as the map's). Each part
+ *   painterly world material in that map's own colours, so it takes the same sun, fog, rock
+ *   tint and dragon shadows as every other rock of the map it stands over, and compiles no
+ *   shader of its own (same source and defines as the map's). Each part
  *   is one `InstancedMesh` whose instance matrices are already in world space: the world
  *   material lights instanced meshes by their instance matrix alone.
  * - The stand-in (a plain cone of rock and the plinth, Lambert under the world light) shows
@@ -39,8 +41,9 @@ import {
 } from 'three';
 import type { Material, ShaderMaterial, WebGLRenderer } from 'three';
 import { TEAMS, TEAM_EMBER, TEAM_FROST } from '../../shared';
-import type { ArenaMap, MatchWinner, QualityPreset } from '../../shared';
+import type { ArenaMap, MapPodium, MatchWinner, QualityPreset } from '../../shared';
 import { useWorldLight } from '../../world/light';
+import { skyLookOf } from '../../world/sky';
 import {
   TINT_NEUTRAL_INDEX,
   createWorldMaterials,
@@ -53,19 +56,27 @@ import { ISLAND_DEPTH, ISLAND_SCALE } from './podium-layout';
 import type { PodiumSite } from './podium-layout';
 
 /** Asset ids of the map's bundle the podium is dressed with. */
-const ISLAND_ASSET = 'island-small';
 const BANNER_ASSET = 'banner-tall';
 const BRAZIER_ASSET = 'brazier';
 
 /**
- * The island's own standing rocks leave about 160 degrees of its rim free. It is turned so
- * that free arc faces the camera: this bearing for a site with the sun (and the podium shot)
- * on the right, the other for a mirrored one.
+ * The island of a map that names none: the first map's `island-small`. Its own standing rocks
+ * leave about 160 degrees of its rim free, and it is turned so that free arc faces the camera
+ * (`yaw` for a site with the sun and the podium shot on the right, `yawMirrored` for a
+ * mirrored one). Its top is a low dome; it sits 0.2 m lower so the plinth covers it.
  */
-const ISLAND_YAW = -0.82;
-const ISLAND_YAW_MIRRORED = -1.41;
-/** The island's top is a low dome; it sits this much lower so the plinth covers it. */
-const ISLAND_Y = -0.2;
+const DEFAULT_ISLAND: MapPodium = {
+  island: 'island-small',
+  scale: ISLAND_SCALE,
+  y: -0.2,
+  yaw: -0.82,
+  yawMirrored: -1.41,
+};
+
+/** The island the podium of `map` stands on (`MapManifest.podium`). */
+export function podiumIslandOf(map: Pick<ArenaMap, 'podium'>): MapPodium {
+  return map.podium ?? DEFAULT_ISLAND;
+}
 /** Banners behind the outer steps: site X (mirrored for the left one), Y, Z, and their scale. */
 const BANNER_X = 16.6;
 const BANNER_Y = -0.3;
@@ -118,7 +129,7 @@ interface Part {
 }
 
 interface RealSet {
-  readonly mapId: string;
+  readonly map: ArenaMap;
   readonly bundle: MapAssetBundle;
   readonly materials: WorldMaterials;
   readonly farState: DataTexture;
@@ -255,11 +266,12 @@ export function createPodiumRock(initial: QualityPreset, webgl: WebGLRenderer | 
   }
 
   /** Builds the real podium from a loaded bundle; throws when it lacks what the podium needs. */
-  function buildReal(bundle: MapAssetBundle, mapId: string): RealSet {
+  function buildReal(bundle: MapAssetBundle, map: ArenaMap): RealSet {
+    const dressing = podiumIslandOf(map);
     const stone = bundle.textures.get('stone');
-    const island = bundle.assets.get(ISLAND_ASSET);
+    const island = bundle.assets.get(dressing.island);
     if (stone === undefined || island === undefined || island.lods.length === 0) {
-      throw new Error('podium: the map bundle has no stone texture or no island-small');
+      throw new Error(`podium: the map bundle has no stone texture or no ${dressing.island}`);
     }
     // The world material's far-mesh variant wants a state texture; the podium has no far mesh.
     const farState = new DataTexture(new Uint8Array(2), 1, 1, RGFormat, UnsignedByteType);
@@ -273,8 +285,10 @@ export function createPodiumRock(initial: QualityPreset, webgl: WebGLRenderer | 
       },
       farState,
       preset,
+      // The match map's own rock tint, lava light and glow strength, as its map view uses.
+      skyLookOf(map.sky),
     );
-    const set: RealSet = { mapId, bundle, materials, farState, parts: [], wrappers: [] };
+    const set: RealSet = { map, bundle, materials, farState, parts: [], wrappers: [] };
     const low = preset.id === 'low';
     const pick = <T>(lods: readonly T[]): T | undefined => lods[Math.min(low ? 1 : 0, lods.length - 1)];
 
@@ -285,8 +299,8 @@ export function createPodiumRock(initial: QualityPreset, webgl: WebGLRenderer | 
       islandLod?.stone,
       materials.rock,
       'podium-island',
-      [{ x: 0, y: ISLAND_Y, z: 0, yaw: ISLAND_YAW, scale: ISLAND_SCALE }],
-      [{ x: 0, y: ISLAND_Y, z: 0, yaw: ISLAND_YAW_MIRRORED, scale: ISLAND_SCALE }],
+      [{ x: 0, y: dressing.y, z: 0, yaw: dressing.yaw, scale: dressing.scale }],
+      [{ x: 0, y: dressing.y, z: 0, yaw: dressing.yawMirrored, scale: dressing.scale }],
       0,
       true,
     );
@@ -324,10 +338,10 @@ export function createPodiumRock(initial: QualityPreset, webgl: WebGLRenderer | 
   }
 
   /** The stand-in leaves, the real set is drawn (or the other way round when it cannot be). */
-  function adopt(bundle: MapAssetBundle, mapId: string): void {
+  function adopt(bundle: MapAssetBundle, map: ArenaMap): void {
     disposeReal();
     try {
-      real = buildReal(bundle, mapId);
+      real = buildReal(bundle, map);
     } catch (error) {
       console.warn('[podium] keeping the stand-in rock.', error);
       real = null;
@@ -350,21 +364,22 @@ export function createPodiumRock(initial: QualityPreset, webgl: WebGLRenderer | 
     standIn.updateMatrix();
 
     const token = ++loadToken;
-    if (real !== null && real.mapId === map.id) {
+    if (real !== null && real.map.id === map.id) {
       positionReal(real);
       return;
     }
     disposeReal();
-    // A map without the island (a greybox) has nothing to load: the stand-in stays.
-    if (webgl === null || !map.props.some((set) => set.id === ISLAND_ASSET)) return;
+    // A map without its island (a greybox) has nothing to load: the stand-in stays.
+    const islandId = podiumIslandOf(map).island;
+    if (webgl === null || !map.props.some((set) => set.id === islandId)) return;
     const ready = loadedMapAssets(map.id, webgl);
     if (ready !== null) {
-      adopt(ready, map.id);
+      adopt(ready, map);
       return;
     }
     loadMapAssets(map, webgl).then(
       (bundle) => {
-        if (!disposed && token === loadToken) adopt(bundle, map.id);
+        if (!disposed && token === loadToken) adopt(bundle, map);
       },
       () => {
         // The map view reports a failed load; the podium just keeps its stand-in.
@@ -395,8 +410,8 @@ export function createPodiumRock(initial: QualityPreset, webgl: WebGLRenderer | 
     if (real === null) return;
     // Another preset draws other LODs and leaves the braziers out or in: build the few
     // wrappers again from the same bundle (no fetch, no decode).
-    const { bundle, mapId } = real;
-    adopt(bundle, mapId);
+    const { bundle, map } = real;
+    adopt(bundle, map);
   }
 
   return {

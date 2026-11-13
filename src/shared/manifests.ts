@@ -149,6 +149,26 @@ export interface MapVent {
   readonly boost: number;
 }
 
+/**
+ * The floating rock the results podium stands on (src/cinematics/podium): one of the map's own
+ * small islands, so the results scene belongs to the map the match was flown on. The island's
+ * origin is the middle of its top.
+ */
+export interface MapPodium {
+  /** Id of an entry of `MapManifest.props`. */
+  readonly island: string;
+  /** Scale of the island under the steps. */
+  readonly scale: number;
+  /** Height of the island's origin against the podium's floor, metres (below is negative). */
+  readonly y: number;
+  /**
+   * Turn of the island (radians) that puts the clear part of its rim toward the results camera,
+   * for a site with the sun on the right of the picture, and for a mirrored one.
+   */
+  readonly yaw: number;
+  readonly yawMirrored: number;
+}
+
 export interface MapColliders {
   /**
    * Low-poly collision mesh the sim builds its BVH from (no textures). Absent on a greybox map,
@@ -268,6 +288,8 @@ export interface MapManifest {
   readonly introSpline?: readonly Vec3[];
   /** Heat vents: columns of rising air that lift and speed up a dragon. Absent = none. */
   readonly vents?: readonly MapVent[];
+  /** The island under the results podium. Absent = the first map's `island-small`. */
+  readonly podium?: MapPodium;
   readonly audio?: MapAudio;
 }
 

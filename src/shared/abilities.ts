@@ -131,6 +131,8 @@ export interface AbilityDef {
   impulseUp: number;
   /** m/s added to the airspeed. */
   speedGain: number;
+  /** Metres the caster is moved along the nose when the ability fires (blink). */
+  teleportForward: number;
 }
 
 export type ClassAbilities = Record<AbilitySlot, AbilityDef>;
@@ -152,6 +154,12 @@ export interface ProjectileDef {
   blastEdgeScale: number;
   /** Zone left where it ends. */
   zoneOnEnd: ZoneKind | null;
+  /** Status applied to enemies in the blast (or the direct hit when there is no blast). */
+  status: StatusKind | null;
+  statusS: number;
+  statusPower: number;
+  /** Passes through dragons and terrain (decoy dragons). */
+  passThrough: boolean;
   /**
    * How clients learn about it. `event`: the `abilityCast` event is the launch and every
    * client flies the projectile itself from the event (fast, short-lived bolts: no per-snapshot
@@ -167,10 +175,19 @@ export interface ZoneDef {
   pulseIntervalS: number;
   /** HP per pulse to enemies inside. */
   damage: number;
-  /** Status given to enemies inside (or to allies, for `regen`). */
+  /** Status given to enemies inside. */
   status: StatusKind | null;
   statusS: number;
   statusPower: number;
+  /** Status given to allies inside (heal / buff bubbles). */
+  allyStatus: StatusKind | null;
+  allyStatusS: number;
+  allyStatusPower: number;
+  /**
+   * Random sideways / vertical burst (m/s) applied to enemies each pulse. Makes steering feel
+   * mushy when stacked with a slow.
+   */
+  driftPower: number;
   /** The zone stays on its owner and ends when the owner dies. */
   follow: boolean;
 }
@@ -203,11 +220,12 @@ function ability(kind: AbilityKind, values: Partial<AbilityDef>): AbilityDef {
     impulseForward: 0,
     impulseUp: 0,
     speedGain: 0,
+    teleportForward: 0,
     ...values,
   };
 }
 
-// --- The 16 abilities ----------------------------------------------------------------------------
+// --- The class kits (4 slots × 9 classes) ---------------------------------------------------------
 
 /** First-pass balance, tuned by playtest. Ultimates cost a full charge and have no cooldown. */
 export const ABILITY_TABLE: AbilityTable = {
@@ -223,13 +241,13 @@ export const ABILITY_TABLE: AbilityTable = {
     // Searing dash: damaging lunge.
     secondary: ability('dash', {
       tags: ABILITY_TAG_ATTACK,
-      cooldownS: 7,
-      damage: 32,
-      radius: 7,
-      durationS: 0.4,
+      cooldownS: 6,
+      damage: 36,
+      radius: 8,
+      durationS: 0.45,
       pulseIntervalS: 1 / 30,
-      impulseForward: 55,
-      speedGain: 15,
+      impulseForward: 62,
+      speedGain: 18,
     }),
     // Afterburn: speed, and a trail that burns pursuers. The trail hurts, so it is an attack:
     // firing it gives up spawn protection.
@@ -267,15 +285,15 @@ export const ABILITY_TABLE: AbilityTable = {
     // Wing shield: blocks frontal damage.
     secondary: ability('buff', {
       tags: ABILITY_TAG_CONFIRMED,
-      cooldownS: 10,
+      cooldownS: 11,
       windupS: 0.2,
-      durationS: 3,
+      durationS: 2.6,
       selfStatus: 'shield',
     }),
     // Rally roar: allies near you heal over time.
     utility: ability('zone', {
       tags: ABILITY_TAG_ALLIES,
-      cooldownS: 16,
+      cooldownS: 18,
       zone: 'rallyAura',
     }),
     // Bulwark charge: a surge forward and a knock-back wave.
@@ -296,7 +314,7 @@ export const ABILITY_TABLE: AbilityTable = {
     // Lightning lance: charge-up beam, long range.
     primary: ability('beam', {
       tags: ABILITY_TAG_ATTACK | ABILITY_TAG_AUTO,
-      cooldownS: 0.7,
+      cooldownS: 0.9,
       windupS: 0.5,
       damage: 42,
       range: 420,
@@ -371,21 +389,212 @@ export const ABILITY_TABLE: AbilityTable = {
       statusS: 3.5,
     }),
   },
+  verdant: {
+    // Bloom bolts: soft thorn projectiles.
+    primary: ability('projectile', {
+      tags: ABILITY_TAG_ATTACK | ABILITY_TAG_AUTO,
+      cooldownS: 0.2,
+      damage: 8,
+      aimLimit: 0.3,
+      projectile: 'bloomBolt',
+    }),
+    // Mending pod: bursts into a lingering heal bubble (allies regen; enemies take a tick).
+    secondary: ability('projectile', {
+      tags: ABILITY_TAG_ATTACK,
+      cooldownS: 9,
+      maxCharges: 2,
+      damage: 0,
+      aimLimit: 0.35,
+      projectile: 'rootSeed',
+    }),
+    // Spur bubble: ally haste field to fly through.
+    utility: ability('zone', {
+      tags: ABILITY_TAG_ALLIES,
+      cooldownS: 12,
+      aimLimit: 0.3,
+      zone: 'updraftGarden',
+      zoneOffset: 35,
+    }),
+    // Canopy: large team regen field.
+    ultimate: ability('zone', {
+      tags: ABILITY_TAG_ALLIES,
+      cooldownS: 1,
+      ultCost: 1,
+      zone: 'canopy',
+    }),
+  },
+  aureate: {
+    // Prism shards: crystal bolts.
+    primary: ability('projectile', {
+      tags: ABILITY_TAG_ATTACK | ABILITY_TAG_AUTO,
+      cooldownS: 0.22,
+      damage: 11,
+      aimLimit: 0.32,
+      projectile: 'prismShard',
+    }),
+    // Flash orb: travels then pops a quick enemy-only whiteout.
+    secondary: ability('projectile', {
+      tags: ABILITY_TAG_ATTACK,
+      cooldownS: 10,
+      damage: 4,
+      aimLimit: 0.32,
+      projectile: 'flashOrb',
+    }),
+    // Drift haze: larger bubble that slows and nudges enemies off their line.
+    utility: ability('zone', {
+      tags: ABILITY_TAG_ATTACK,
+      cooldownS: 11,
+      aimLimit: 0.3,
+      zone: 'solarLattice',
+      zoneOffset: 45,
+    }),
+    // Solar lattice ultimate: lingering deny field ahead.
+    ultimate: ability('zone', {
+      tags: ABILITY_TAG_ATTACK,
+      cooldownS: 1,
+      ultCost: 1,
+      aimLimit: 0.35,
+      zone: 'galeWall',
+      zoneOffset: 90,
+    }),
+  },
+  zephyr: {
+    // Gale bolts: faster fire, lighter hits.
+    primary: ability('projectile', {
+      tags: ABILITY_TAG_ATTACK | ABILITY_TAG_AUTO,
+      cooldownS: 0.11,
+      damage: 5,
+      aimLimit: 0.3,
+      projectile: 'galeBolt',
+    }),
+    // Blink: short teleport forward (no phase — avoids burying the rider in rock).
+    secondary: ability('dash', {
+      cooldownS: 7.5,
+      durationS: 0.15,
+      teleportForward: 42,
+      impulseForward: 14,
+      speedGain: 8,
+    }),
+    // Slipstream: forward + up speed burst.
+    utility: ability('dash', {
+      cooldownS: 7,
+      impulseForward: 35,
+      impulseUp: 18,
+      speedGain: 18,
+      selfStatus: 'haste',
+      selfStatusPower: 1.25,
+      durationS: 2,
+    }),
+    // Gale wall: deny a lane with wind.
+    ultimate: ability('zone', {
+      tags: ABILITY_TAG_ATTACK,
+      cooldownS: 1,
+      ultCost: 1,
+      aimLimit: 0.3,
+      zone: 'galeWall',
+      zoneOffset: 70,
+    }),
+  },
+  granite: {
+    // Magma spit: heavy arcing bombs that cook off earlier.
+    primary: ability('projectile', {
+      tags: ABILITY_TAG_ATTACK | ABILITY_TAG_AUTO,
+      cooldownS: 0.45,
+      damage: 22,
+      aimLimit: 0.22,
+      projectile: 'magmaSpit',
+    }),
+    // Magma burst: proximity explosion around the body (closer = harder).
+    secondary: ability('wave', {
+      tags: ABILITY_TAG_ATTACK,
+      cooldownS: 9,
+      damage: 34,
+      range: 38,
+      coneHalfAngle: Math.PI,
+      knockback: 18,
+    }),
+    // Stone mend: self regen.
+    utility: ability('buff', {
+      tags: ABILITY_TAG_CONFIRMED,
+      cooldownS: 14,
+      windupS: 0.25,
+      durationS: 4,
+      selfStatus: 'regen',
+      selfStatusPower: 14,
+    }),
+    // Crater smash: impact crater ahead.
+    ultimate: ability('zone', {
+      tags: ABILITY_TAG_ATTACK,
+      cooldownS: 1,
+      ultCost: 1,
+      aimLimit: 0.25,
+      zone: 'crater',
+      zoneOffset: 35,
+      impulseForward: 22,
+    }),
+  },
+  mirage: {
+    // Decoy bolts: soft phantom projectiles.
+    primary: ability('projectile', {
+      tags: ABILITY_TAG_ATTACK | ABILITY_TAG_AUTO,
+      cooldownS: 0.18,
+      damage: 7,
+      aimLimit: 0.3,
+      projectile: 'decoyBolt',
+    }),
+    // Phantom double: fake dragon that flies straight for 3 seconds.
+    secondary: ability('projectile', {
+      cooldownS: 11,
+      damage: 0,
+      aimLimit: 0.2,
+      projectile: 'mirageDecoy',
+    }),
+    // Mirror step: short blink dash.
+    utility: ability('dash', {
+      cooldownS: 8,
+      durationS: 0.28,
+      impulseForward: 58,
+      speedGain: 16,
+    }),
+    // Phantasm: blinding mirage field ahead.
+    ultimate: ability('zone', {
+      tags: ABILITY_TAG_ATTACK,
+      cooldownS: 1,
+      ultCost: 1,
+      aimLimit: 0.3,
+      zone: 'phantasm',
+      zoneOffset: 55,
+    }),
+  },
 };
 
-export const PROJECTILE_DEFS: Record<ProjectileKind, ProjectileDef> = {
-  fireBolt: {
-    speed: 240,
+function projectile(values: Partial<ProjectileDef>): ProjectileDef {
+  return {
+    speed: 0,
     gravity: 0,
     inheritVelocity: 0,
     radius: 0.8,
-    lifeS: 1.1,
+    lifeS: 1,
     blastRadius: 0,
     blastEdgeScale: 1,
     zoneOnEnd: null,
+    status: null,
+    statusS: 0,
+    statusPower: 0,
+    passThrough: false,
     replication: 'event',
-  },
-  meteorBomb: {
+    ...values,
+  };
+}
+
+export const PROJECTILE_DEFS: Record<ProjectileKind, ProjectileDef> = {
+  fireBolt: projectile({
+    speed: 240,
+    radius: 0.8,
+    lifeS: 1.1,
+    replication: 'event',
+  }),
+  meteorBomb: projectile({
     speed: 20,
     gravity: 30,
     inheritVelocity: 1,
@@ -393,20 +602,77 @@ export const PROJECTILE_DEFS: Record<ProjectileKind, ProjectileDef> = {
     lifeS: 4,
     blastRadius: 18,
     blastEdgeScale: 0.4,
-    zoneOnEnd: null,
     replication: 'snapshot',
-  },
-  staticMine: {
+  }),
+  staticMine: projectile({
     speed: 90,
-    gravity: 0,
-    inheritVelocity: 0,
     radius: 1.5,
     lifeS: 0.9,
-    blastRadius: 0,
-    blastEdgeScale: 1,
     zoneOnEnd: 'staticField',
     replication: 'snapshot',
-  },
+  }),
+  bloomBolt: projectile({
+    speed: 210,
+    gravity: 4,
+    radius: 0.9,
+    lifeS: 1.15,
+    replication: 'event',
+  }),
+  rootSeed: projectile({
+    speed: 95,
+    gravity: 4,
+    radius: 1.4,
+    lifeS: 1.05,
+    zoneOnEnd: 'rootSnare',
+    replication: 'snapshot',
+  }),
+  prismShard: projectile({
+    speed: 280,
+    radius: 0.65,
+    lifeS: 0.95,
+    replication: 'event',
+  }),
+  galeBolt: projectile({
+    speed: 310,
+    radius: 0.55,
+    lifeS: 0.85,
+    replication: 'event',
+  }),
+  magmaSpit: projectile({
+    speed: 105,
+    gravity: 26,
+    inheritVelocity: 0.3,
+    radius: 1.6,
+    lifeS: 1.35,
+    blastRadius: 14,
+    blastEdgeScale: 0.45,
+    replication: 'snapshot',
+  }),
+  decoyBolt: projectile({
+    speed: 220,
+    radius: 0.75,
+    lifeS: 1.05,
+    replication: 'event',
+  }),
+  flashOrb: projectile({
+    speed: 130,
+    gravity: 2,
+    radius: 1.2,
+    lifeS: 0.55,
+    blastRadius: 32,
+    blastEdgeScale: 0.2,
+    status: 'blind',
+    statusS: 1.35,
+    statusPower: 1,
+    replication: 'snapshot',
+  }),
+  mirageDecoy: projectile({
+    speed: 78,
+    radius: 2.8,
+    lifeS: 3,
+    passThrough: true,
+    replication: 'snapshot',
+  }),
 };
 
 function zone(values: Partial<ZoneDef>): ZoneDef {
@@ -418,6 +684,10 @@ function zone(values: Partial<ZoneDef>): ZoneDef {
     status: null,
     statusS: 0,
     statusPower: 0,
+    allyStatus: null,
+    allyStatusS: 0,
+    allyStatusPower: 0,
+    driftPower: 0,
     follow: false,
     ...values,
   };
@@ -448,10 +718,90 @@ export const ZONE_DEFS: Record<ZoneKind, ZoneDef> = {
     radius: 48,
     durationS: 5,
     pulseIntervalS: 0.5,
-    status: 'regen',
-    statusS: 1,
-    statusPower: 9,
+    allyStatus: 'regen',
+    allyStatusS: 1,
+    allyStatusPower: 9,
     follow: true,
+  }),
+  updraftGarden: zone({
+    radius: 34,
+    durationS: 5,
+    pulseIntervalS: 0.35,
+    allyStatus: 'haste',
+    allyStatusS: 1.1,
+    allyStatusPower: 1.18,
+  }),
+  canopy: zone({
+    radius: 55,
+    durationS: 8,
+    pulseIntervalS: 0.45,
+    allyStatus: 'regen',
+    allyStatusS: 1.2,
+    allyStatusPower: 12,
+  }),
+  solarLattice: zone({
+    radius: 48,
+    durationS: 5.5,
+    pulseIntervalS: 0.25,
+    status: 'slow',
+    statusS: 0.7,
+    statusPower: 0.72,
+    driftPower: 14,
+  }),
+  galeWall: zone({
+    radius: 28,
+    durationS: 5,
+    pulseIntervalS: 0.3,
+    damage: 6,
+    status: 'slow',
+    statusS: 0.6,
+    statusPower: 0.5,
+  }),
+  rootSnare: zone({
+    radius: 28,
+    durationS: 5.5,
+    pulseIntervalS: 0.4,
+    damage: 3,
+    allyStatus: 'regen',
+    allyStatusS: 1.1,
+    allyStatusPower: 11,
+  }),
+  quakeField: zone({
+    radius: 32,
+    durationS: 2.5,
+    pulseIntervalS: 0.35,
+    damage: 16,
+    status: 'slow',
+    statusS: 0.9,
+    statusPower: 0.55,
+  }),
+  crater: zone({
+    radius: 38,
+    durationS: 4,
+    pulseIntervalS: 0.4,
+    damage: 28,
+    status: 'slow',
+    statusS: 1,
+    statusPower: 0.5,
+  }),
+  afterimage: zone({
+    radius: 22,
+    durationS: 2.5,
+    pulseIntervalS: 0.5,
+    damage: 4,
+    status: 'blind',
+    statusS: 1.2,
+    statusPower: 1,
+    follow: true,
+  }),
+  phantasm: zone({
+    radius: 40,
+    durationS: 5,
+    pulseIntervalS: 0.4,
+    damage: 6,
+    status: 'blind',
+    statusS: 2.5,
+    statusPower: 1,
   }),
 };
 

@@ -18,7 +18,7 @@ export interface ModeInfo {
 
 export const MODES: Readonly<Record<ModeId, ModeInfo>> = {
   skirmish: { id: 'skirmish', name: 'Skirmish', minTeamSize: 1, maxTeamSize: 5, available: true },
-  duel: { id: 'duel', name: 'Duel', minTeamSize: 1, maxTeamSize: 2, available: true },
+  duel: { id: 'duel', name: 'Duel', minTeamSize: 1, maxTeamSize: 5, available: true },
   // Phase 6.
   emberRelay: {
     id: 'emberRelay',

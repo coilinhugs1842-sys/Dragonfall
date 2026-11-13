@@ -48,17 +48,35 @@ export const TINT_NEUTRAL_INDEX = 2;
 /** sRGB hex of neutral cloth: a faded dusk violet. */
 const NEUTRAL_TINT = 0x8f7fb0;
 /**
- * Glow modes (`aInst.z`): 0 a crystal or rune (slow pulse), 1 a flame (flickers and licks
- * sideways), 2 a marker that says "fly here" (steady, keeps its colour: no white-hot core, so
- * the palette's magenta reads as magenta and not as pale pink).
+ * Glow modes (`aInst.z`), what an instance's `glow` faces do:
+ * 0 steady: a rune, a lava crack, and a far flame (slow pulse, the faces toward the eye run hot);
+ * 1 a flame (flickers and licks sideways);
+ * 2 a marker that says "fly here": the palette's magenta at the painted brightness (not the pale
+ *   pink the art pipeline's lifted glow colours give), shaded like a crystal but quieter;
+ * 3 a crystal: a cut gem instead of a flat pink shape. Each facet takes one tone from the sun
+ *   (deep violet-magenta away from it), the colour runs from deep at the foot to light at the
+ *   tip, edges seen at a slant lighten, and a facet that mirrors the sun flashes. Low keeps the
+ *   facet tones and the run;
+ * 4 carved: no light at all, the glyph is a dark groove in the stone (the aerie's perch stones,
+ *   where a magenta rune would wrongly say "objective").
  */
 export const GLOW_MODE_STEADY = 0;
 export const GLOW_MODE_FLAME = 1;
 export const GLOW_MODE_MARKER = 2;
+export const GLOW_MODE_CRYSTAL = 3;
+export const GLOW_MODE_CARVED = 4;
 /** The palette's magenta for hazards, pickups and objectives (docs/ART_DIRECTION.md). */
 const MARKER_COLOR = 0xff3fa4;
-/** Emissive gain of a marker (a crystal's is 1.9): under the tone curve's shoulder. */
-const MARKER_GAIN = 1.18;
+/** A marker's sunlit facets, as a gain on the palette magenta (it was 1.18 on every face): a sign, not a lamp. */
+const MARKER_LIT = 0.42;
+/** Metres above (or below) an instance's origin at which the run along a crystal is half done. */
+const GEM_RUN_METRES = 14;
+/** A crystal's sunlit facets, as a share of the look's glow gain (1.9 on the first map). */
+const CRYSTAL_LIT = 0.54;
+/** What a facet turned away from the sun keeps of each channel: deeper, and toward violet. */
+const GEM_SHADE = 'vec3(0.3, 0.24, 0.5)';
+/** The same for a marker: it has to stay magenta from every side. */
+const MARKER_SHADE = 'vec3(0.5, 0.42, 0.66)';
 /** Metres above the sea over which the glow from below (lava) fades to 37 %. */
 const BOUNCE_HEIGHT = 110;
 /** Strength of that glow on rock that faces down, and on rock that faces up. */
@@ -91,6 +109,7 @@ varying vec2 vUv;
 varying vec3 vColor;
 varying vec4 vMasks;
 varying vec4 vFx;               // x: signed fade, y: phase, z: glow mode, w: fog distance scale
+varying float vLift;            // metres above the instance's origin (0 on the merged far meshes: no run)
 
 void main() {
   vec3 p = position;
@@ -99,9 +118,11 @@ void main() {
   vUv = uv;
   #ifdef WM_FAR
     vec4 state = texelFetch(uFarState, ivec2(int(aFar.x + 0.5), 0), 0);
-    vFx = vec4(state.g > 0.5 ? -state.r : state.r, fract(aFar.x * 0.618034), 0.0, aFar.y);
+    // The glow mode rides in the colour's fourth byte (prop-field.ts): 0, marker or crystal.
+    vFx = vec4(state.g > 0.5 ? -state.r : state.r, fract(aFar.x * 0.618034), floor(aColor.a * 255.0 + 0.5), aFar.y);
     vec4 world = modelMatrix * vec4(p, 1.0);
     vNormal = normal;
+    vLift = 0.0;
   #else
     vFx = vec4(aInst.x, aInst.y, aInst.z, 1.0);
     #ifdef WM_TINT
@@ -121,9 +142,11 @@ void main() {
     #ifdef USE_INSTANCING
       vec4 world = modelMatrix * (instanceMatrix * vec4(p, 1.0));
       vNormal = normalize(mat3(instanceMatrix) * normal);
+      vLift = world.y - (modelMatrix * instanceMatrix[3]).y;
     #else
       vec4 world = modelMatrix * vec4(p, 1.0);
       vNormal = normalize(mat3(modelMatrix) * normal);
+      vLift = world.y - modelMatrix[3].y;
     #endif
   #endif
   vWorldPos = world.xyz;
@@ -164,6 +187,7 @@ varying vec2 vUv;
 varying vec3 vColor;
 varying vec4 vMasks;
 varying vec4 vFx;
+varying float vLift;
 ${WORLD_LIGHT_PARS_FRAGMENT}
 
 void main() {
@@ -179,7 +203,11 @@ void main() {
   float ao = vMasks.r;
   float moss = vMasks.g;
   float edge = vMasks.b;
-  float glow = vMasks.a;
+  // Glow modes 2..4 (see GLOW_MODE_*): marker, crystal, carved.
+  float marker = step(1.5, vFx.z) * (1.0 - step(2.5, vFx.z));
+  float crystal = step(2.5, vFx.z) * (1.0 - step(3.5, vFx.z));
+  float carved = step(3.5, vFx.z);
+  float glow = vMasks.a * (1.0 - carved);
   float solid = 1.0 - glow;
 
   // --- Albedo: painted vertex colour x brush detail -------------------------------------------
@@ -202,6 +230,8 @@ void main() {
   // Grade: the painted slate is pushed a little deeper and bluer than the vertex colours alone.
   float albedoLuma = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
   albedo = mix(albedo, max(mix(vec3(albedoLuma), albedo, uGrade.x), 0.0) * uGrade.y, solid);
+  // A carved glyph: a groove of dark stone where the glow would be.
+  albedo = mix(albedo, uStoneColor * 0.28 * grain, vMasks.a * carved);
 
   // Painted moss: calmer than the raw vertex green.
   float mossy = moss * solid;
@@ -248,19 +278,41 @@ void main() {
   // --- Emissive ------------------------------------------------------------------------------------
   float slow = sin(uTime * 0.9 + vFx.y * 6.2832);
   float flicker = sin(uTime * 11.0 + vFx.y * 50.0) * sin(uTime * 7.3 + vFx.y * 31.0);
-  float marker = step(1.5, vFx.z);
-  float pulse = 1.0 + uGlow.y * mix(slow, flicker, step(0.5, vFx.z) * (1.0 - marker));
+  float gem = marker + crystal;
+  float pulse = 1.0 + uGlow.y * mix(slow, flicker, step(0.5, vFx.z) * (1.0 - step(1.5, vFx.z)));
   // Facets stay readable (a little of the lighting survives) and the ones facing the eye run hot.
   float facing = max(dot(N, V), 0.0);
   vec3 glowColor = mix(vColor, vColor * vColor * 1.5, 0.7);
-  // A marker is the palette's magenta at the painted brightness (the art pipeline lifts glow
-  // colours toward white, which reads as pale pink), with less gain and no white-hot core.
-  glowColor = mix(glowColor, uMarkerColor * max(vColor.r, max(vColor.g, vColor.b)), marker);
-  float gain = mix(uGlow.x, ${MARKER_GAIN.toFixed(3)}, marker) * pulse;
   // The white-hot core is what the gain has above 1 (0.3 of the gain at the first map's 1.9).
-  float hot = max(uGlow.x - 1.0, 0.0) * 0.6333 * pulse * (1.0 - marker);
-  vec3 ember = glowColor * gain * (0.6 + 0.4 * facing)
+  float hot = max(uGlow.x - 1.0, 0.0) * 0.6333 * pulse;
+  vec3 ember = glowColor * (uGlow.x * pulse) * (0.6 + 0.4 * facing)
              + vec3(1.0, 0.9, 0.85) * (facing * facing * facing * hot);
+  // Crystals and markers are cut stones, not lamps. A marker is the palette's magenta at the
+  // painted brightness (the art pipeline lifts glow colours toward white: pale pink).
+  float paint = max(vColor.r, max(vColor.g, vColor.b));
+  vec3 gemColor = mix(glowColor, uMarkerColor * paint, marker);
+  // One tone per flat facet, lightest toward the sun. Along its length the stone runs from
+  // deep at the foot to light at the tip (-1..1 around the instance's origin); a crystal's tip
+  // is paler too, a marker stays the one magenta.
+  float facet = smoothstep(-0.4, 0.8, nl) * (0.55 + 0.45 * visibility);
+  float run = vLift / (abs(vLift) + ${GEM_RUN_METRES.toFixed(1)});
+  vec3 gemLit = gemColor * (mix(uGlow.x * ${CRYSTAL_LIT.toFixed(3)}, ${MARKER_LIT.toFixed(3)}, marker) * (1.0 + 0.4 * run));
+  gemLit = mix(gemLit, gemLit.r * vec3(1.0, 0.6, 0.86), 0.22 * max(run, 0.0) * crystal);
+  vec3 gemBody = mix(gemLit * mix(${GEM_SHADE}, ${MARKER_SHADE}, marker), gemLit, facet) * pulse;
+  #if WM_QUALITY >= 1
+    // Looked into straight on, the stone is deepest; edges seen at a slant lighten (it is
+    // clear), and a facet that mirrors the sun flashes. Markers get half the edge and no
+    // flash: they guide, they do not sparkle.
+    float slant = 1.0 - facing;
+    gemBody *= 1.0 - 0.22 * facing * facing;
+    gemBody += mix(gemColor, vec3(1.0, 0.72, 0.9), 0.55) * (slant * slant * slant * (0.8 - 0.4 * marker));
+    float flash = max(dot(N, normalize(V + uWlSunDir)), 0.0);
+    flash *= flash;
+    flash *= flash;
+    flash *= flash;
+    gemBody += vec3(1.0, 0.86, 0.8) * (flash * flash * 0.9 * visibility * crystal);
+  #endif
+  ember = mix(ember, gemBody, gem);
   color = mix(color, ember + color * 0.25, glow);
 
   // --- Atmosphere --------------------------------------------------------------------------------

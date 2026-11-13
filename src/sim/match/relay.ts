@@ -66,7 +66,7 @@ const OPEN_SKY_ARENA: RelayArena = {
   centerZ: 0,
   radius: 0,
   floorY: 0,
-  ceilingY: 700,
+  ceilingY: 800,
   terrain: null,
 };
 

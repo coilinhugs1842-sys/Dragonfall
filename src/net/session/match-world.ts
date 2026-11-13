@@ -145,7 +145,7 @@ export function createOpenSkyMatchWorld(): MatchWorld {
     centerZ: 0,
     radius: 1000,
     floorY: 0,
-    ceilingY: 700,
+    ceilingY: 800,
   };
 }
 

@@ -35,6 +35,8 @@ const TEAM_ORDER: readonly TeamId[] = [TEAM_EMBER, TEAM_FROST];
 
 interface AwardDom {
   readonly card: HTMLElement;
+  /** The heading: "Most takedowns" becomes "Most captures" in Ember Relay. */
+  readonly title: HTMLElement;
   readonly name: HTMLElement;
   readonly you: HTMLElement;
   readonly classLabel: HTMLElement;
@@ -49,6 +51,8 @@ interface RowDom {
   readonly you: HTMLElement;
   readonly classLabel: HTMLElement;
   readonly marks: HTMLElement;
+  /** Shards brought home: a column only Ember Relay's table shows. */
+  readonly captures: HTMLElement;
   readonly takedowns: HTMLElement;
   readonly deaths: HTMLElement;
   readonly assists: HTMLElement;
@@ -86,8 +90,9 @@ function buildAward(title: string): AwardDom {
   const unit = el('span', 'dfr-award-unit');
   append(figure, value, unit);
   const detail = el('p', 'dfr-award-detail dfu-num');
-  append(card, el('h3', 'dfu-overline dfr-award-title', title), who, classLabel, figure, detail);
-  return { card, name, you, classLabel, value, unit, detail };
+  const heading = el('h3', 'dfu-overline dfr-award-title', title);
+  append(card, heading, who, classLabel, figure, detail);
+  return { card, title: heading, name, you, classLabel, value, unit, detail };
 }
 
 function buildRow(): RowDom {
@@ -105,12 +110,13 @@ function buildRow(): RowDom {
   const line = el('div', 'dfr-who');
   append(line, name, you, marks, classLabel);
   who.appendChild(line);
+  const captures = el('td', 'dfu-num dfr-cell-cap');
   const takedowns = el('td', 'dfu-num dfr-cell-key');
   const deaths = el('td', 'dfu-num');
   const assists = el('td', 'dfu-num');
   const damage = el('td', 'dfu-num');
-  append(row, who, takedowns, deaths, assists, damage);
-  return { row, name, you, classLabel, marks, takedowns, deaths, assists, damage };
+  append(row, who, captures, takedowns, deaths, assists, damage);
+  return { row, name, you, classLabel, marks, captures, takedowns, deaths, assists, damage };
 }
 
 function buildTeam(team: TeamId, withColumns: boolean): TeamDom {
@@ -126,8 +132,8 @@ function buildTeam(team: TeamId, withColumns: boolean): TeamDom {
   append(title, el('span', 'dfr-team-name', info.name), score);
   // The column captions are spelled out for screen readers and abbreviated on screen. Only
   // the first team's header shows them; the second lines up under it.
-  const caption = (short: string, long: string): HTMLElement => {
-    const cell = el('th', 'dfr-col dfu-num', withColumns ? short : '');
+  const caption = (short: string, long: string, extra = ''): HTMLElement => {
+    const cell = el('th', `dfr-col dfu-num${extra}`, withColumns ? short : '');
     cell.setAttribute('scope', 'col');
     cell.setAttribute('aria-label', long);
     cell.title = long;
@@ -136,6 +142,8 @@ function buildTeam(team: TeamId, withColumns: boolean): TeamDom {
   append(
     line,
     title,
+    // Ember Relay only (results.css hides it in the other modes): what that mode is won by.
+    caption('Cap', 'Captures', ' dfr-cell-cap'),
     caption('Tkd', 'Takedowns'),
     caption('Dth', 'Deaths'),
     caption('Ast', 'Assists'),
@@ -164,6 +172,7 @@ export class ResultsPanel {
   private readonly score: HTMLElement;
   private readonly awards: AwardDom[] = [];
   private readonly teams: TeamDom[] = [];
+  private readonly table: HTMLElement;
   /** In reveal order: banner, the three cards, the table. */
   private readonly parts: HTMLElement[] = [];
   private readonly partOn: boolean[] = [];
@@ -213,6 +222,8 @@ export class ResultsPanel {
 
     // --- Table ------------------------------------------------------------------------------
     const table = el('div', 'dfu-panel dfr-table dfr-part');
+    table.dataset['captures'] = '0';
+    this.table = table;
     for (const team of TEAM_ORDER) {
       const dom = buildTeam(team, team === TEAM_EMBER);
       this.teams.push(dom);
@@ -286,6 +297,7 @@ export class ResultsPanel {
       dom.card.hidden = !award.shown;
       if (!award.shown) continue;
       dom.card.dataset['team'] = TEAMS[award.team].key;
+      dom.title.textContent = award.title;
       // Names are player-chosen text: always set as text, never as markup.
       dom.name.textContent = award.name;
       dom.you.hidden = !award.isLocal;
@@ -294,6 +306,9 @@ export class ResultsPanel {
       dom.unit.textContent = award.unit;
       dom.detail.textContent = award.detail;
     }
+
+    // The captures column and its emphasis: only where captures decide the match.
+    this.table.dataset['captures'] = view.captures ? '1' : '0';
 
     const rows = results.scoreboard;
     for (let t = 0; t < this.teams.length; t++) {
@@ -316,6 +331,7 @@ export class ResultsPanel {
         line.you.hidden = !mine;
         line.classLabel.textContent = DRAGON_CLASSES[row.classId].name;
         line.marks.textContent = awardMarks(results, row.playerId);
+        line.captures.textContent = intString(row.captures ?? 0);
         line.takedowns.textContent = intString(row.takedowns);
         line.deaths.textContent = intString(row.deaths);
         line.assists.textContent = intString(row.assists ?? 0);

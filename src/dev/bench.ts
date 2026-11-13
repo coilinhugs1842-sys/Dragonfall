@@ -53,6 +53,7 @@ export interface BenchResult {
   readonly renderScaleAvg: number;
   /** Averaged host cost per frame of fixed-step work, ms. */
   readonly simMs: number;
+  /** Most particles in one frame: the effects' own plus the map's vent streaks and ash. */
   readonly particlesPeak: number;
   readonly voicesPeak: number;
   readonly heapMb: number;

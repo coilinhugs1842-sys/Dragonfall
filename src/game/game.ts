@@ -170,6 +170,8 @@ const AUTOPILOT_ALTITUDE = 400;
 const COST_SMOOTHING = 0.05;
 /** A gap between two frames longer than this makes the events queued meanwhile stale. */
 const STALE_EVENTS_GAP_S = 0.5;
+/** Keys with which a watcher follows the next rider (a click and a pad's A do the same). */
+const WATCH_NEXT_CODES: readonly string[] = ['Space', 'ArrowRight'];
 /**
  * Metres ahead of the camera at which shots cross the reticle (`InputFrame.aimYaw`): the camera
  * sits behind and above the dragon, so the aim is the direction from the dragon to this point
@@ -273,6 +275,10 @@ export interface GameReport {
     readonly warming: boolean;
     /** Shader warm-ups since the page loaded. */
     readonly warmUps: number;
+    /** The map that is loaded and drawn ('' outside a match): proof of what a rejoin rebuilt. */
+    readonly map: string;
+    /** The rider a watcher's camera follows (`NO_PLAYER` for a rider, or with nobody to follow). */
+    readonly watching: PlayerId;
   };
   /** The match clock and score as the HUD shows them. */
   readonly match: {
@@ -309,6 +315,8 @@ export interface GameReport {
   readonly camera: { readonly fov: number; readonly yaw: number };
   readonly vfx: {
     readonly particles: number;
+    /** The map's own particles (vent streaks, ash); `peak` counts them too. */
+    readonly map: number;
     readonly peak: number;
     readonly capacity: number;
     readonly drawCalls: number;
@@ -433,7 +441,10 @@ export interface Game {
   readonly settings: GameSettings;
   /** The middle of the arena at fight height: what a fly-round camera circles. */
   readonly arenaFocus: Readonly<Vec3>;
-  /** Most particles alive and most voices playing in one frame so far (needs `flags.measure`). */
+  /**
+   * Most particles on screen (the effects' own plus the map's vent streaks and ash) and most
+   * voices playing in one frame so far (needs `flags.measure`).
+   */
   getPeaks(): { readonly particles: number; readonly voices: number };
   /**
    * Hands the camera to a dev tool (`?bench`, the trailer capture) or takes it back with null.
@@ -660,6 +671,8 @@ export function createGame(options: GameOptions): Game {
   let padActing = false;
   let isRider = false;
   let matchAssets: MatchAssets | null = null;
+  /** The map whose models were last asked for ahead of a match (the stage loads the default at boot). */
+  let preloadedMap = DEFAULT_MAP_ID;
 
   const input: InputController = createInputController(canvas, {
     onLockChange: (locked: boolean): void => {
@@ -673,14 +686,23 @@ export function createGame(options: GameOptions): Game {
   // A rider's steering ring and "click to fly" prompt are the HUD's; this overlay is only the
   // spectator's prompt.
   const watchOverlay: FlightOverlay = createFlightOverlay({
-    promptText: 'Watching · click to follow the next rider',
+    promptText: 'Watching · click or press Space to follow the next rider',
   });
   watchOverlay.setVisible(false);
   watchOverlay.update(0, 0, false);
   let watchOverlayShown = false;
 
+  /** Lobby spectator, or a rider out for the round (Duel): cycle the camera subject. */
+  const canCycleWatch = (): boolean => {
+    if (!stage.matchLoaded || pauseOpen || settingsOpen) return false;
+    if (!isRider) return true;
+    if (!worldView.local.valid || worldView.local.respawnInS !== Infinity) return false;
+    const local = findDragonView(worldView, worldView.localDragonId);
+    return local !== undefined && (local.flags & DRAGON_FLAG_ALIVE) === 0;
+  };
+
   const onCanvasClick = (): void => {
-    if (stage.matchLoaded && !isRider) stage.cycleSpectateTarget();
+    if (canCycleWatch()) stage.cycleSpectateTarget();
   };
   canvas.addEventListener('click', onCanvasClick);
 
@@ -692,6 +714,17 @@ export function createGame(options: GameOptions): Game {
   const boardKeyUsable = (): boolean =>
     stage.matchLoaded && !pauseOpen && !settingsOpen && !input.locked;
   const onBoardKeyDown = (event: KeyboardEvent): void => {
+    // A watcher's Space (or right arrow) is the click on the picture: follow the next rider.
+    if (
+      !event.repeat &&
+      WATCH_NEXT_CODES.includes(event.code) &&
+      boardKeyUsable() &&
+      canCycleWatch()
+    ) {
+      event.preventDefault();
+      stage.cycleSpectateTarget();
+      return;
+    }
     if (!scoreboardCodes.includes(event.code) || !boardKeyUsable()) return;
     // Tab would otherwise walk the focus through the page behind the HUD.
     event.preventDefault();
@@ -1253,6 +1286,14 @@ export function createGame(options: GameOptions): Game {
       }
     }
 
+    // The map the host has picked starts loading on every page while the room is still in the
+    // lobby, so the match start is a fade and not a loading screen. Only when the pick changes.
+    const lobbyMap = facts.lobby !== null && !inMatch ? facts.lobby.settings.map : preloadedMap;
+    if (lobbyMap !== preloadedMap) {
+      preloadedMap = lobbyMap;
+      stage.preloadMap(assets.get(matchSeedOfMap(lobbyMap, assets.defaultMap.seed), lobbyMap).map);
+    }
+
     // A client that reconnects mid-match is told about the match again a moment after its
     // WELCOME; the views stay up across that gap instead of being torn down and rebuilt.
     const lobbyPhase = facts.lobby === null ? 'lobby' : facts.lobby.phase;
@@ -1293,11 +1334,7 @@ export function createGame(options: GameOptions): Game {
     if (!rejoining) isRider = stage.matchLoaded && rider;
 
     setInputActive(isRider && !flags.autopilot && !pauseOpen && !settingsOpen);
-    const showWatch = stage.matchLoaded && !isRider && !pauseOpen && !settingsOpen;
-    if (showWatch !== watchOverlayShown) {
-      watchOverlayShown = showWatch;
-      watchOverlay.setVisible(showWatch);
-    }
+    // Overlay visibility for downed Duel riders is refreshed after the WorldView is built.
 
     walkApp(
       stage.matchLoaded
@@ -1459,6 +1496,11 @@ export function createGame(options: GameOptions): Game {
     if (current === null) return;
     const info = hudInput;
     info.cameraYaw = cameraYaw;
+    // This frame's camera (placed by `stage.updateMatch`) and the map's rock, for the
+    // friend-or-foe markers over the dragons. The arrays are the camera's own: nothing is copied.
+    info.cameraWorld = stage.camera.matrixWorld.elements;
+    info.cameraProjection = stage.camera.projectionMatrix.elements;
+    info.terrain = matchAssets !== null ? matchAssets.collision : null;
     info.isRider = isRider;
     info.buttons = lastInput.buttons;
     info.showReticle = isRider && !flags.autopilot && !pauseOpen && !settingsOpen;
@@ -1580,8 +1622,8 @@ export function createGame(options: GameOptions): Game {
     }
     const step = padLink.nav;
     if (step === null) return;
-    if (step === 'accept' && stage.matchLoaded && !isRider && !pauseOpen && !settingsOpen) {
-      // A spectator's A is the click on the picture: follow the next rider.
+    if (step === 'accept' && canCycleWatch()) {
+      // A spectator's (or downed Duel rider's) A is the click on the picture: next rider.
       stage.cycleSpectateTarget();
       return;
     }
@@ -1647,8 +1689,14 @@ export function createGame(options: GameOptions): Game {
         }
       }
       if (flags.measure) {
-        const alive = stage.vfxStats?.aliveParticles ?? 0;
+        // Everything the particle budget is for: the effects' own and what the map draws itself.
+        const alive = (stage.vfxStats?.aliveParticles ?? 0) + stage.mapAirParticles;
         if (alive > particlePeak) particlePeak = alive;
+      }
+      const showWatch = canCycleWatch();
+      if (showWatch !== watchOverlayShown) {
+        watchOverlayShown = showWatch;
+        watchOverlay.setVisible(showWatch);
       }
       writeHud(dtS);
       if (probe !== null) {
@@ -1672,6 +1720,10 @@ export function createGame(options: GameOptions): Game {
     }
     if (matchOnScreen || stage.matchLoaded || current === null) lobbyOnScreen = false;
     else if (current.kind === 'solo' || facts.lobby === null) lobbyOnScreen = false;
+    if (!matchOnScreen && watchOverlayShown) {
+      watchOverlayShown = false;
+      watchOverlay.setVisible(false);
+    }
 
     // Every change of scene goes through the cream: the cut is held there until the new scene
     // has its picture and its shaders, then fades in.
@@ -1832,8 +1884,8 @@ export function createGame(options: GameOptions): Game {
       const fx =
         vfx === null
           ? 'fx —'
-          : `fx ${vfx.aliveParticles}/${vfx.particleCapacity} particles (peak ${particlePeak})` +
-            `  ${vfx.drawCalls} calls`;
+          : `fx ${vfx.aliveParticles}/${vfx.particleCapacity} particles + ${stage.mapAirParticles} map` +
+            ` (peak ${particlePeak})  ${vfx.drawCalls} calls`;
       const sound =
         stats === null
           ? 'audio —'
@@ -1937,6 +1989,8 @@ export function createGame(options: GameOptions): Game {
           introCard: show.cardOpacity,
           warming: stage.warming,
           warmUps: stage.warmUps,
+          map: stage.matchLoaded && matchAssets !== null ? matchAssets.mapId : '',
+          watching: isRider ? NO_PLAYER : stage.watchedId,
         },
         app: app.state,
         screen: uiState.screen,
@@ -1958,6 +2012,7 @@ export function createGame(options: GameOptions): Game {
             ? null
             : {
                 particles: stage.vfxStats.aliveParticles,
+                map: stage.mapAirParticles,
                 peak: particlePeak,
                 capacity: stage.vfxStats.particleCapacity,
                 drawCalls: stage.vfxStats.drawCalls,

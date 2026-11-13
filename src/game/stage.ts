@@ -9,7 +9,8 @@
  *   the riders perched on them. The set is hidden, and its dragons are freed by the caller,
  *   while a match is loaded.
  * - Match: `updateMatch` moves every view to the frame's WorldView. The camera follows the local
- *   dragon; a spectator follows one rider at a time (`cycleSpectateTarget`).
+ *   dragon; a spectator (or a rider out for the round in Duel) follows one rider at a time
+ *   (`cycleSpectateTarget`), teammates only when the watcher is a downed rider.
  *
  * The views only ever see the WorldView, the map data and a terrain query: whether the picture
  * comes from the host's authoritative sim or from a client's prediction and snapshots is
@@ -37,6 +38,7 @@ import type {
   ArenaMap,
   PlayerId,
   QualityPresetId,
+  TeamId,
   Unsubscribe,
   WorldView,
 } from '../shared';
@@ -131,18 +133,29 @@ export interface Stage {
    * input (camera look-ahead); pass 0 for a spectator.
    */
   updateMatch(view: WorldView, steerX: number, steerY: number, dtS: number): void;
-  /** Next camera subject for a spectator (wraps round). */
+  /** Next camera subject for a spectator or a downed Duel rider (wraps round). */
   cycleSpectateTarget(): void;
   /**
    * Whose dragon the chase camera is on this frame: the local rider's own, the rider a
-   * spectator watches, the killer while the local rider is down; NO_PLAYER while it holds still
-   * or drifts.
+   * spectator (or downed Duel teammate-watch) follows, the killer while waiting to respawn;
+   * NO_PLAYER while it holds still or drifts.
    */
   readonly watchedId: PlayerId;
   /** The effects of the loaded match (cosmetic local shots); null with none loaded. */
   readonly vfx: Vfx | null;
   /** Live effect counters for the perf HUD; null with no match loaded. */
   readonly vfxStats: Readonly<VfxStats> | null;
+  /**
+   * Particles the loaded map draws itself at the current preset (vent streaks, ash): they
+   * count against the particle budget with the effects' own. 0 with no match loaded.
+   */
+  readonly mapAirParticles: number;
+  /**
+   * Starts fetching and decoding a map's models and textures (once per map and page; nothing
+   * happens for one that is loaded or loading). For the map the lobby has picked, so the match
+   * start finds them ready.
+   */
+  preloadMap(map: ArenaMap): void;
   /** Settings: base FOV in degrees, shake 0..1, and the reduce-motion switch. */
   setCameraSettings(fovDeg: number, shake: number, reduceMotion: boolean): void;
   /** Drops every live effect (a new round). */
@@ -309,6 +322,10 @@ export function createStage(options: StageOptions): Stage {
   let cameraReduceMotion = false;
   let watchedId: PlayerId = NO_PLAYER;
   let spectateId: PlayerId = NO_PLAYER;
+  /** When set, spectate subjects must be on this team (downed Duel rider watching mates). */
+  let spectateTeam: TeamId | null = null;
+  /** Skip this id while cycling (the watcher's own corpse). */
+  let spectateSkipId: PlayerId = NO_PLAYER;
   /** True on a frame where the chase camera had somebody to follow. */
   let chasing = false;
 
@@ -369,24 +386,47 @@ export function createStage(options: StageOptions): Stage {
     lighting.update(camera, timeS);
   }
 
-  /** The rider a spectator watches: the chosen one while it is in the view, else the first. */
+  function matchesSpectateFilter(dragon: DragonView): boolean {
+    if (dragon.id === spectateSkipId) return false;
+    if (spectateTeam !== null && dragon.team !== spectateTeam) return false;
+    return true;
+  }
+
+  /** The rider a watcher follows: the chosen one while it is alive and allowed, else the next. */
   function spectateSubject(view: WorldView): DragonView | undefined {
     const chosen = findDragonView(view, spectateId);
-    if (chosen !== undefined) return chosen;
+    if (
+      chosen !== undefined &&
+      matchesSpectateFilter(chosen) &&
+      (chosen.flags & DRAGON_FLAG_ALIVE) !== 0
+    ) {
+      return chosen;
+    }
     for (let i = 0; i < view.dragonCount; i++) {
       const dragon = view.dragons[i];
-      if (dragon !== undefined && (dragon.flags & DRAGON_FLAG_ALIVE) !== 0) {
+      if (
+        dragon !== undefined &&
+        matchesSpectateFilter(dragon) &&
+        (dragon.flags & DRAGON_FLAG_ALIVE) !== 0
+      ) {
         spectateId = dragon.id;
         return dragon;
       }
     }
+    // Lobby spectators may still sit on a corpse if nobody is flying; downed riders do not.
+    if (spectateTeam !== null) return undefined;
     const first = view.dragonCount > 0 ? view.dragons[0] : undefined;
-    if (first !== undefined) spectateId = first.id;
-    return first;
+    if (first !== undefined && matchesSpectateFilter(first)) {
+      spectateId = first.id;
+      return first;
+    }
+    return undefined;
   }
 
-  /** Ids in the last match view, kept so `cycleSpectateTarget` works between frames. */
+  /** Ids / teams / alive flags in the last match view, for `cycleSpectateTarget`. */
   const seenIds: PlayerId[] = [];
+  const seenTeams: TeamId[] = [];
+  const seenAlive: boolean[] = [];
   let seenCount = 0;
 
   // A subject that moved further than this in one frame was respawned: cut, do not sweep.
@@ -482,6 +522,7 @@ export function createStage(options: StageOptions): Stage {
       // The dead are drawn (they fall). Skinned dragons from the GLBs; the placeholder shows
       // while a class is still loading.
       const dragons = createDragons(preset, { showDead: true, library: dragonAssets });
+      dragons.setReduceMotion(cameraReduceMotion);
       if (riders !== undefined && riders.length > 0) dragons.prewarm(riders);
       const rig = createCameraRig({
         terrain: assets.collision,
@@ -509,6 +550,8 @@ export function createStage(options: StageOptions): Stage {
       void warmUp();
       watchedId = NO_PLAYER;
         spectateId = NO_PLAYER;
+        spectateTeam = null;
+        spectateSkipId = NO_PLAYER;
       seenCount = 0;
       chasing = false;
       lastSubjectId = NO_PLAYER;
@@ -537,6 +580,7 @@ export function createStage(options: StageOptions): Stage {
         library: dragonAssets,
         minSkinned: MAX_PLAYERS,
       });
+      lobbyDragons.setReduceMotion(cameraReduceMotion);
       scene.add(object, lobbyDragons.object);
       showLobby(match === null);
       if (match === null) void warmUp();
@@ -578,24 +622,23 @@ export function createStage(options: StageOptions): Stage {
       }
       const rig = views.rig;
       seenCount = view.dragonCount;
-      for (let i = 0; i < seenCount; i++) seenIds[i] = view.dragons[i]?.id ?? NO_PLAYER;
+      for (let i = 0; i < seenCount; i++) {
+        const dragon = view.dragons[i];
+        seenIds[i] = dragon?.id ?? NO_PLAYER;
+        seenTeams[i] = dragon?.team ?? 0;
+        seenAlive[i] = dragon !== undefined && (dragon.flags & DRAGON_FLAG_ALIVE) !== 0;
+      }
 
-      const local = findDragonView(view, view.localDragonId);
-      if (local !== undefined && (local.flags & DRAGON_FLAG_ALIVE) !== 0) {
-            watchedId = local.id;
-        rig.setAim(steerX, steerY);
-        followSubject(rig, local, dtS);
-      } else if (local !== undefined) {
-        // Down: the chase rig goes to whoever got the takedown at once. The death cam
-        // (src/cinematics) orbits that dragon on the directed camera meanwhile, and hands back
-        // to this rig when its time is up. With no killer to show (terrain, storm, a veiled
-        // enemy) the camera stays where it was.
+      const followKillerOrHold = (victim: DragonView): void => {
+        // The death cam orbits the killer on the directed camera; the chase rig tracks them
+        // underneath so the hand-back is seamless. With no killer to show (terrain, storm, a
+        // veiled enemy) the camera stays where it was.
         const killer = view.local.valid ? findDragonView(view, view.local.killerId) : undefined;
         if (
           killer !== undefined &&
-          killer.id !== local.id &&
+          killer.id !== victim.id &&
           (killer.flags & DRAGON_FLAG_ALIVE) !== 0 &&
-          ((killer.flags & DRAGON_FLAG_VEILED) === 0 || killer.team === local.team)
+          ((killer.flags & DRAGON_FLAG_VEILED) === 0 || killer.team === victim.team)
         ) {
           watchedId = killer.id;
           rig.setAim(0, 0);
@@ -603,23 +646,51 @@ export function createStage(options: StageOptions): Stage {
         } else {
           watchedId = NO_PLAYER;
           if (!chasing) {
-            // Never had a pose (joined dead): start from the place of the fall.
             rig.setAim(0, 0);
-            followSubject(rig, local, dtS);
+            followSubject(rig, victim, dtS);
           } else {
-            // The next subject (the killer, or the respawned dragon) is a cut, not a sweep.
             lastSubjectId = NO_PLAYER;
           }
         }
+      };
+
+      const local = findDragonView(view, view.localDragonId);
+      if (local !== undefined && (local.flags & DRAGON_FLAG_ALIVE) !== 0) {
+        spectateTeam = null;
+        spectateSkipId = NO_PLAYER;
+        watchedId = local.id;
+        rig.setAim(steerX, steerY);
+        followSubject(rig, local, dtS);
+      } else if (local !== undefined) {
+        // Out for the round (Duel): after the death cam, follow living teammates and let the
+        // rider cycle them. While waiting to respawn (Skirmish), keep the killer chase.
+        const outForRound = view.local.valid && view.local.respawnInS === Infinity;
+        if (outForRound) {
+          spectateTeam = local.team;
+          spectateSkipId = local.id;
+          const mate = spectateSubject(view);
+          if (mate !== undefined) {
+            watchedId = mate.id;
+            rig.setAim(0, 0);
+            followSubject(rig, mate, dtS);
+          } else {
+            followKillerOrHold(local);
+          }
+        } else {
+          spectateTeam = null;
+          spectateSkipId = NO_PLAYER;
+          followKillerOrHold(local);
+        }
       } else {
-            const subject = spectateSubject(view);
+        spectateTeam = null;
+        spectateSkipId = NO_PLAYER;
+        const subject = spectateSubject(view);
         if (subject !== undefined) {
           watchedId = subject.id;
           rig.setAim(0, 0);
           followSubject(rig, subject, dtS);
         } else {
           watchedId = NO_PLAYER;
-          // Nobody to watch yet (the first snapshot has not arrived): keep drifting.
           if (!chasing) placeBackdropCamera();
         }
       }
@@ -643,14 +714,26 @@ export function createStage(options: StageOptions): Stage {
 
     cycleSpectateTarget(): void {
       if (seenCount === 0) return;
-      let index = 0;
+      const eligible: number[] = [];
       for (let i = 0; i < seenCount; i++) {
-        if (seenIds[i] === spectateId) {
-          index = (i + 1) % seenCount;
+        const id = seenIds[i];
+        if (id === undefined || id === NO_PLAYER || id === spectateSkipId) continue;
+        if (spectateTeam !== null && seenTeams[i] !== spectateTeam) continue;
+        if (!seenAlive[i]) continue;
+        eligible.push(i);
+      }
+      if (eligible.length === 0) return;
+      let at = 0;
+      for (let i = 0; i < eligible.length; i++) {
+        const index = eligible[i] ?? 0;
+        if (seenIds[index] === spectateId) {
+          at = (i + 1) % eligible.length;
           break;
         }
       }
-      spectateId = seenIds[index] ?? NO_PLAYER;
+      const next = eligible[at] ?? eligible[0];
+      if (next === undefined) return;
+      spectateId = seenIds[next] ?? NO_PLAYER;
     },
 
     snapCamera(): void {
@@ -666,12 +749,22 @@ export function createStage(options: StageOptions): Stage {
     get vfxStats() {
       return match === null ? null : match.vfx.stats;
     },
+    get mapAirParticles() {
+      return match === null ? 0 : match.mapView.stats.airParticles;
+    },
+    preloadMap(next: ArenaMap): void {
+      if (webgl !== null) preloadMapAssets(next, webgl);
+    },
 
     setCameraSettings(fovDeg: number, shake: number, reduceMotion: boolean): void {
       cameraFov = fovDeg;
       cameraShake = shake;
       cameraReduceMotion = reduceMotion;
-      if (match !== null) applyCameraSettings(match.rig);
+      if (match !== null) {
+        applyCameraSettings(match.rig);
+        match.dragons.setReduceMotion(reduceMotion);
+      }
+      lobbyDragons?.setReduceMotion(reduceMotion);
     },
 
     clearEffects(): void {

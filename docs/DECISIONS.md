@@ -197,3 +197,22 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
 46. **The lobby keeps all ten dragons skinned on every preset.** Low's cap of six skinned dragons is for a
     fight; the aerie has no map and no effects behind it, and a placeholder on a perch would be the first
     thing a player sees. Measured in the aerie viewer with ten dragons: 23 draw calls / 38k triangles on Low.
+
+## 2026-11-12: inverted flight and nine classes
+
+47. **True inverted flight.** Pitch wraps freely (full loops); the old climb/dive hard caps that said
+    "no loops" are gone. Gravity still bleeds speed on climbs and adds it on dives along the nose. The
+    chase camera soft-slerps world-up toward the dragon's local up past ~90° so inverted views stay
+    readable without a snap; reticle steer stays camera-relative. Revisit only if loops feel unreadable
+    on the U-series chase cam.
+48. **Nine dragon classes.** Verdant, Aureate, Zephyr, Granite and Mirage join Talon / Bastion / Tempest /
+    Wraith. Append-only class ids; team size stays ≤5. Procedural Blender PARAMS (decision 36), same
+    pipeline. Balance is data-only in `tuning.ts` / `abilities.ts`.
+
+49. **Allowed-classes mask is u16.** Nine classes need nine bits; `host.setAllowedClasses` encodes a
+    u16 bitmask and `PROTOCOL_VERSION` is 5.
+
+50. **Duel teammate spectate after death.** After the 3 s death cam, a rider with no respawns
+    follows living teammates and can cycle them. Skirmish still sits on the killer until respawn.
+51. **Flight ceiling at 800 m.** Push-down and storm vertical bounds start at world Y 800 on every
+    shipped map (was 700). Raise together so greybox / Spires / Caldera stay matched.

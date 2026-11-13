@@ -59,6 +59,43 @@ export const ABILITY_GLYPHS: Readonly<
     // Night terror.
     ultimate: 'M11.5 2.5A6 6 0 1 0 13.5 11 5 5 0 0 1 11.5 2.5Z',
   },
+  verdant: {
+    primary: 'M8 13V4M5 7 8 4 11 7M4 12H12M6 10C7 8.5 9 8.5 10 10',
+    // Mending pod / heal bubble.
+    secondary: 'M5 8a3 3 0 1 0 6 0a3 3 0 1 0-6 0M8 4V6M6 11.5 8 13.5 10 11.5',
+    // Spur buff bubble.
+    utility: 'M4.5 8a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0M8 3.5 9.2 6.2 12 6.6 9.8 8.5 10.5 11.2 8 9.8 5.5 11.2 6.2 8.5 4 6.6 6.8 6.2Z',
+    ultimate: 'M3 12C5 7 7 5 8 3 9 5 11 7 13 12M5 12H11M6.5 9H9.5',
+  },
+  aureate: {
+    primary: 'M8 2 10 6 14 7 10.5 10 12 14 8 11.5 4 14 5.5 10 2 7 6 6Z',
+    // Flash orb.
+    secondary: 'M8 2.5A5.5 5.5 0 1 0 8 13.5 5.5 5.5 0 1 0 8 2.5ZM8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 1 0 8 5.5Z',
+    // Drift haze bubble.
+    utility: 'M3 8c2-3 4-4 5-5 1 1 3 2 5 5M4 11c1.5-2 3-3 4-3s2.5 1 4 3',
+    ultimate: 'M2 8H14M4 5 8 9 12 5M4 11 8 7 12 11',
+  },
+  zephyr: {
+    primary: 'M12 2.5 8 7M12 2.5H9M12 2.5V5.5M6 10 4 12M9 11 7 13',
+    // Blink teleport.
+    secondary: 'M2 8H6M4 5.5 6.5 8 4 10.5M9.5 8H14M11.5 5.5 14 8 11.5 10.5',
+    utility: 'M8 13V2.5M4 7 8 2.5 12 7M2.5 11.5H13.5',
+    ultimate: 'M1.5 4.5H11A2.2 2.2 0 1 0 8.8 2.2M1.5 8H14A2.2 2.2 0 1 1 11.8 10.2M1.5 11.5H9',
+  },
+  granite: {
+    primary: 'M7 2.5 9.5 6 12 7.5 9 10 10.5 13.5 7 11 3.5 13.5 5 10 2 7.5 4.5 6Z',
+    // Magma burst around self.
+    secondary: 'M8 8m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0M8 3V5M8 11V13M3 8H5M11 8H13M4.5 4.5 6 6M10 10 11.5 11.5M11.5 4.5 10 6M6 10 4.5 11.5',
+    utility: 'M8 3V13M4 8H12M5 5 8 3 11 5M5 11 8 13 11 11',
+    ultimate: 'M3 6C5 10 7 12 8 13.5 9 12 11 10 13 6M4 6H12M2 14H14',
+  },
+  mirage: {
+    primary: 'M11 2.5 7.5 7M11 2.5H8.5M11 2.5V5M5 10 3.5 12M9 11 7.5 13M13 4.5 10 8',
+    // Phantom double silhouette.
+    secondary: 'M3.5 5H7.5V12H3.5ZM8.5 4H13V13H8.5Z',
+    utility: 'M2 8H6M4 5.5 6.5 8 4 10.5M9 8H14M11.5 5.5 14 8 11.5 10.5',
+    ultimate: 'M8 2.5A5.5 5.5 0 1 0 8 13.5 5.5 5.5 0 1 0 8 2.5ZM5.5 8A2.5 2.5 0 1 0 10.5 8 2.5 2.5 0 1 0 5.5 8Z',
+  },
 };
 
 /** For takedowns nobody dealt: rock and the storm wall. */
@@ -82,6 +119,17 @@ export function takedownGlyph(
   return ABILITY_GLYPHS[killerClassId][source];
 }
 
+/**
+ * The team shapes as FILLED marks: triangle = Ember, diamond = Frost (docs/ART_DIRECTION.md).
+ * Wherever the HUD shows a team colour it shows this shape with it.
+ */
+export const TEAM_SHAPES: Readonly<Record<'ember' | 'frost' | 'none', string>> = {
+  ember: 'M8 1.8 14.6 13.6H1.4Z',
+  frost: 'M8 1 14.4 8 8 15 1.6 8Z',
+  // Neutral objective: a ring.
+  none: 'M8 2.5A5.5 5.5 0 1 0 8 13.5 5.5 5.5 0 1 0 8 2.5ZM8 5.5A2.5 2.5 0 1 1 8 10.5 2.5 2.5 0 1 1 8 5.5Z',
+};
+
 // --- Ember Relay (T-6.3) ----------------------------------------------------------------------------
 
 /**
@@ -94,6 +142,16 @@ export const SHARD_SHAPES: Readonly<Record<'ember' | 'frost' | 'none', string>> 
   frost: 'M8 0.6 14 4V12L8 15.4 2 12V4ZM8 4 4.6 8 8 12 11.4 8Z',
   none: 'M8 0.6 14 4V12L8 15.4 2 12V4Z',
 };
+
+/**
+ * The status chip of a rider carrying a shard: the crystal as a line drawing, like the other
+ * chips. It stands in for "Slowed" for the length of the carry: the carrier is slower because
+ * of what it carries, not because of something an enemy did to it.
+ */
+export const CARRY_CHIP = {
+  label: 'Carrying the shard',
+  d: 'M8 1.5 13 4.5V11.5L8 14.5 3 11.5V4.5ZM8 1.5V14.5',
+} as const;
 
 /** The local team's brazier as a filled mark: a flame over a bowl. */
 export const BRAZIER_SHAPE =

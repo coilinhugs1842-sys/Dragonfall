@@ -349,7 +349,7 @@ export function createEmberRelayView(preset: QualityPreset): EmberRelayView {
     object,
 
     get drawCalls(): number {
-      return cardQuadCount > 0 ? 4 : 3;
+      return (cardQuadCount > 0 ? 4 : 3) - (beacons.visible ? 0 : 1);
     },
 
     get triangles(): number {
@@ -360,6 +360,10 @@ export function createEmberRelayView(preset: QualityPreset): EmberRelayView {
       const relay = view.relay;
       object.visible = relay.active;
       if (!relay.active) return;
+      // The results podium: nobody has anywhere left to fly, so the light columns that say "fly
+      // here" go, and the podium shot is not crossed by them. The stone, the crystals and the
+      // fires stay: they are part of the place.
+      beacons.visible = view.clock.phase !== 'results';
       for (const team of TEAM_IDS) {
         const stand = relay.stands[team];
         const brazier = relay.braziers[team];

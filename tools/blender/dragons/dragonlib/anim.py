@@ -114,7 +114,7 @@ def glide(ph, P):
     return pose
 
 
-def _flap_wings(pose, P, ph, amp=34.0, bias=4.0, fold=1.0, sweep=0.0, sweep_amp=6.0):
+def _flap_wings(pose, P, ph, amp=42.0, bias=5.0, fold=1.05, sweep=0.0, sweep_amp=8.0):
     th = TAU * ph
     f = max(0.0, -np.sin(th)) ** 1.25 * fold  # peaks mid upstroke
     wings(pose, P,
@@ -157,36 +157,36 @@ def boost(ph, P):
 
 
 def _tuck(pose, P, k=1.0, flutter=0.0):
-    wings(pose, P, flap=7 * k + flutter, sweep=52 * k, twist=-3 * k, elbow=64 * k, wrist=88 * k,
-          close=0.82 * k, wrist_lag=flutter * 1.5, finger_lag=flutter * 2.0)
+    wings(pose, P, flap=5 * k + flutter, sweep=58 * k, twist=-5 * k, elbow=72 * k, wrist=96 * k,
+          close=0.9 * k, wrist_lag=flutter * 1.6, finger_lag=flutter * 2.2)
 
 
 def dive(ph, P):
     pose = {}
-    fl = 1.3 * s(ph, 4)
-    spine(pose, neck=(-5, -6 + 0.6 * s(ph, 2), -4), head=9 + 0.8 * s(ph, 2, 1.0), jaw=2,
-          hips=-1.5,
-          tail=tuple(2.5 + (0.8 + 0.5 * k) * s(ph, 3, 0.9 * k) for k in range(4)),
-          tail_yaw=tuple((0.6 + 0.5 * k) * s(ph, 2, 0.5 + 0.9 * k) for k in range(4)),
-          loc=(0.012 * s(ph, 4, 1.0), 0.02 * s(ph, 4), 0))
-    _tuck(pose, P, 1.0, fl)
+    fl = 1.6 * s(ph, 4)
+    spine(pose, root_pitch=-4, chest=-2, neck=(-7, -8 + 0.7 * s(ph, 2), -5), head=12 + 1.0 * s(ph, 2, 1.0), jaw=3,
+          hips=-2.5,
+          tail=tuple(3.2 + (1.0 + 0.6 * k) * s(ph, 3, 0.9 * k) for k in range(4)),
+          tail_yaw=tuple((0.8 + 0.6 * k) * s(ph, 2, 0.5 + 0.9 * k) for k in range(4)),
+          loc=(0.014 * s(ph, 4, 1.0), 0.025 * s(ph, 4), 0))
+    _tuck(pose, P, 1.12, fl)
     return pose
 
 
 def bank_l(ph, P):
     pose = {}
     b = s(ph)
-    spine(pose, chest_yaw=5, neck_yaw=(6 + 0.6 * b, 7, 6), head_yaw=7 + 0.8 * s(ph, lag=1), head_roll=-8,
-          neck=(1 + 0.6 * b, 1, 0), head=-2,
-          hips_yaw=3,
-          tail_yaw=tuple(-(5 + 2.2 * k) + 1.6 * s(ph, 1, 0.7 * k) for k in range(4)),
-          tail=tuple(1.5 * s(ph, lag=0.9 + 0.5 * k) + 1.5 for k in range(4)),
-          loc=(0, 0.04 * s(ph, lag=-0.4), 0))
+    spine(pose, root_roll=-10, chest_yaw=8, neck_yaw=(9 + 0.8 * b, 10, 8), head_yaw=10 + 1.0 * s(ph, lag=1), head_roll=-14,
+          neck=(2 + 0.8 * b, 2, 0), head=-3,
+          hips_yaw=5,
+          tail_yaw=tuple(-(7 + 2.6 * k) + 1.8 * s(ph, 1, 0.7 * k) for k in range(4)),
+          tail=tuple(1.8 * s(ph, lag=0.9 + 0.5 * k) + 2.0 for k in range(4)),
+          loc=(0, 0.05 * s(ph, lag=-0.4), 0))
     # inside (left) wing drops and gathers, outside wing lifts and reaches
-    wing(pose, '_L', P, flap=-9 + 2 * b, sweep=11, twist=-4, elbow=16 + 2 * b, wrist=14, close=0.12,
-         wrist_lag=-5 + 2.4 * s(ph, lag=0.9), finger_lag=-4 + 2.5 * s(ph, 2, 1.5))
-    wing(pose, '_R', P, flap=11 + 2 * s(ph, lag=0.4), sweep=-3, twist=4, elbow=1, wrist=0, close=0.0,
-         wrist_lag=5 + 2.4 * s(ph, lag=1.3), finger_lag=5 + 2.5 * s(ph, 2, 1.9))
+    wing(pose, '_L', P, flap=-14 + 2 * b, sweep=18, twist=-6, elbow=28 + 3 * b, wrist=28, close=0.28,
+         wrist_lag=-6 + 2.4 * s(ph, lag=0.9), finger_lag=-5 + 2.5 * s(ph, 2, 1.5))
+    wing(pose, '_R', P, flap=16 + 2 * s(ph, lag=0.4), sweep=-5, twist=6, elbow=2, wrist=2, close=0.0,
+         wrist_lag=6 + 2.4 * s(ph, lag=1.3), finger_lag=6 + 2.5 * s(ph, 2, 1.9))
     return pose
 
 

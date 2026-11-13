@@ -1,14 +1,14 @@
 {
  "classId": "talon",
  "triangles": [
-  6630,
-  2364,
-  776
+  6737,
+  2423,
+  756
  ],
  "vertices": [
-  5459,
-  2693,
-  1177
+  5621,
+  2799,
+  1152
  ],
  "bones": [
   "root",
@@ -126,11 +126,11 @@
  },
  "wingspan": 12.03,
  "length": 12.6,
- "height": 2.62,
+ "height": 2.77,
  "muzzle": [
   0.0,
   0.423,
   5.393
  ],
- "raw_glb_bytes": 1741984
+ "raw_glb_bytes": 1791220
 }

@@ -516,6 +516,11 @@ export function createAudio(options: AudioOptions = {}): AudioEngine {
     bastion: soundIndexOf(FLAP_SOUNDS.bastion),
     tempest: soundIndexOf(FLAP_SOUNDS.tempest),
     wraith: soundIndexOf(FLAP_SOUNDS.wraith),
+    verdant: soundIndexOf(FLAP_SOUNDS.verdant),
+    aureate: soundIndexOf(FLAP_SOUNDS.aureate),
+    zephyr: soundIndexOf(FLAP_SOUNDS.zephyr),
+    granite: soundIndexOf(FLAP_SOUNDS.granite),
+    mirage: soundIndexOf(FLAP_SOUNDS.mirage),
   };
   const heartbeatSound = soundIndexOf(FLIGHT_SOUNDS.heartbeat);
   const countdownSound = soundIndexOf(COUNTDOWN_TICK_SOUND);

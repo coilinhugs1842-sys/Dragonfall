@@ -48,7 +48,7 @@ Ids are `T-<phase>.<n>`. Work top to bottom unless the user says otherwise. Each
 - [x] T-3.10 Simple bot pilots (fly, chase, shoot) for testing and slot fill
 
 ## Phase 4: Art pass (each generation batch needs the user's OK)
-- [!] T-4.1 Style gate: user approves the STYLE FORMULA; 3 mood-board images. *Blocked: the free Higgsfield plan refuses or fails every image job (DECISIONS 39). The formula is in use as drafted (DECISIONS 37).*
+- [!] T-4.1 Style gate: user approves the STYLE FORMULA; 3 mood-board images. *Blocked: free Higgsfield plan (DECISIONS 39). Formula in use as drafted (DECISIONS 37). Unblocks with Plus/Ultra or the 3-day trial.*
 - [x] T-4.2 `tools/` wrappers: optimize (gltf-transform + KTX2), audio normalise (ffmpeg)
 - [x] T-4.3 Dragons ×4: concept → 3D → procedural rig + clips → LODs → optimize → manifest *(procedural, DECISIONS 36)*
 - [x] T-4.4 Dragon loader: GLB LODs + KTX2 + meshopt, animation blending, team tint on membrane/runes
@@ -68,14 +68,14 @@ Ids are `T-<phase>.<n>`. Work top to bottom unless the user says otherwise. Each
 
 ## Phase 6: Scale + content
 - [ ] T-6.1 5v5 load tests (real laptops + bots) after a 10-min warm-up on the U-series host
-- [ ] T-6.2 Auto quality pick (3 s test flight) + GPU name logging
-- [ ] T-6.3 Ember Relay mode
-- [ ] T-6.4 Emberfall Caldera map (assets, colliders, visuals)
-- [ ] T-6.5 Reconnect within 30 s mid-match; spectators
-- [ ] T-6.6 Gamepad support; accessibility (colour-blind check, UI scale)
+- [x] T-6.2 Auto quality pick (3 s test flight) + GPU name logging
+- [x] T-6.3 Ember Relay mode
+- [x] T-6.4 Emberfall Caldera map (assets, colliders, visuals, heat vents)
+- [x] T-6.5 Reconnect within 30 s mid-match; spectators *(unit tests + `tools/capture/rejoin.mjs`; real-laptop gate still open)*
+- [x] T-6.6 Gamepad support; accessibility (colour-blind check, UI scale)
 
 ## Phase 7: Ship
-- [ ] T-7.1 GitHub: check LFS usage vs quota, push; GitHub Actions → Pages deploy (checkout with `lfs: true`)
-- [ ] T-7.2 LAN mode (`peer:lan`) guide; README hosting guide
+- [x] T-7.1 GitHub: Actions → Pages at https://coilinhugs1842-sys.github.io/Dragonfall/ (`pages.yml`, LFS checkout → dist/)
+- [x] T-7.2 LAN mode (`peer:lan`) guide; README hosting guide
 - [ ] T-7.3 Final perf pass with the weakest laptop as host
-- [ ] T-7.4 Trailer from captures (Higgsfield video, user OK)
+- [~] T-7.4 Trailer from captures (`art-source/trailer/dragonfall-trailer.mp4`, ~63 s, Caldera + Ember Relay in). *Higgsfield Seedance polish blocked on free plan (DECISIONS 39).*

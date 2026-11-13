@@ -16,9 +16,13 @@ export {
   writeHudClock,
   writeHudLocal,
 } from './hud-state';
+export { createDragonTagWriter } from './dragon-tags';
+export type { DragonTagFrame, DragonTagWriter, TagViewer } from './dragon-tags';
+export { TAG_TUNING } from './tag-model';
 export type {
   MutableHudCompassMarker,
   MutableHudDamageArc,
+  MutableHudDragonTag,
   MutableHudLocalState,
   MutableHudRelayState,
   MutableHudReticleState,

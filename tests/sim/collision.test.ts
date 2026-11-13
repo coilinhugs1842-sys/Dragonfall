@@ -554,6 +554,8 @@ describe('terrain: grazing and awkward geometry', () => {
     rig.dragon().pitch = -1.0;
     rig.input.buttons = BUTTON_DIVE;
     for (let i = 0; i < 90 && rig.hits.length === 0; i++) {
+      // Keep a steep dive without free-pitch looping under the pillar.
+      if (rig.dragon().pitch < -1.2) rig.dragon().pitch = -1.0;
       rig.step();
       expectClearOfBoxes(rig.dragon(), [PILLAR], `tick ${i}`);
     }

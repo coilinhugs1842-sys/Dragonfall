@@ -141,27 +141,27 @@ export const SHOTS = [
     ui: 'game',
   },
 
-  // ---- PLACEHOLDERS: not recorded, not in the cut, until the features land ------------------
   {
     id: 'caldera-flyby',
-    placeholder: 'Emberfall Caldera (the second map) is still being built by another agent',
-    what: 'PLACEHOLDER: intro flyby over Emberfall Caldera with its map title card',
+    what: 'Intro flyby over Emberfall Caldera with its map title card',
     url: `${LIVE_WITH_INTRO}&map=emberfall-caldera`,
+    seed: 1204,
     from: `${REPORT}.phase === 'intro'`,
     pre: 0.5,
-    seconds: 4.4,
+    // Cut takes in=0.5 + 2 match bars (4 s) → need ≥ 4.5 s of tape.
+    seconds: 5,
     ui: 'cine',
   },
   {
     id: 'ember-relay',
-    placeholder: 'Ember Relay (the capture-the-flag mode) is still being built by another agent',
-    what: 'PLACEHOLDER: Ember Relay: a carrier runs the ember home with the HUD on',
+    what: 'Ember Relay: a carrier runs the ember home with the HUD on',
     url: `${LIVE}&mode=emberRelay`,
+    seed: 8841,
     start: 10,
     from: `${REPORT}.match.events.objective >= 1`,
     pre: 2.5,
     max: 240,
-    seconds: 4.4,
+    seconds: 5,
     ui: 'game',
   },
 ];

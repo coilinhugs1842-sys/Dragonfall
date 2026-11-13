@@ -42,8 +42,10 @@ export const RECONNECT_GRACE_MS = 30_000;
  * Bump on any wire-format change; the host rejects a `hello` with a different version.
  * 3: the match timeline (Phase 5). The lobby has a `starting` phase, a match can open with an
  *    `intro`, and during intro and countdown the MATCH_PHASE header tick is the tick play begins.
+ * 4: maps and Ember Relay (Phase 6). MATCH_START carries the map id, the new RELAY message
+ *    carries the shards and braziers, and a SCOREBOARD row grew by one byte (captures).
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 5;
 
 // --- Rooms and signaling ------------------------------------------------------------------------
 

@@ -62,6 +62,7 @@ PARAMS = dict(
         memb_dark=(0.05, 0.045, 0.085), memb_light=(0.19, 0.17, 0.28), memb_warm=(0.36, 0.28, 0.48),
         spike=(0.05, 0.05, 0.08), spike_tip=(0.5, 0.45, 0.66), eye=(0.95, 0.97, 1.0), pattern='smoke', iri=0.6,
         memb_iri=True, mouth=(0.30, 0.08, 0.26),
-        saddle=(0.16, 0.14, 0.18), rider=(0.24, 0.22, 0.28), rider_helm=(0.6, 0.58, 0.62),
+        # rider: night-violet leather, dusk-steel armour from the horn tones
+        saddle=(0.16, 0.14, 0.18), rider=(0.22, 0.18, 0.28), rider_armor=(0.46, 0.42, 0.56),
     ),
 )

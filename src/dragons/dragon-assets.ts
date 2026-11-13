@@ -12,7 +12,9 @@
  * One load per class, cached for the life of the page: `get` answers synchronously (null while
  * loading or after a failure, and the caller draws the placeholder dragon instead), `load` /
  * `loadAll` give promises for a loading screen. The loaders themselves (GLTFLoader, KTX2Loader,
- * the meshopt decoder) are fetched as a separate chunk on first use.
+ * the meshopt decoder) are fetched as a separate chunk on first use. The KTX2 loader is the
+ * page's shared one (src/world/props/shared-ktx2.ts), so a map that loads at the same moment
+ * uses the same transcoder workers.
  *
  * Load-time code: it allocates freely. Nothing here runs per frame.
  */
@@ -38,6 +40,7 @@ import type {
 } from 'three';
 import type { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import type { Ktx2Lease } from '../world/props/shared-ktx2';
 import { DRAGON_ANIM_CLIPS, DRAGON_ANIM_ROAR, DRAGON_CLASS_IDS } from '../shared';
 import type { AssetManifest, DragonClassId, DragonManifest, Vec3 } from '../shared';
 // The file, not the `world/props` barrel: the barrel would pull the map loaders into this chunk.
@@ -585,7 +588,10 @@ export interface DragonAssetLibraryOptions {
   readonly assetsUrl?: string;
   /** Folder of the Basis transcoder. Default: `<base>vendor/basis/`. */
   readonly transcoderUrl?: string;
-  /** Share an existing KTX2Loader (its worker pool) instead of creating one. */
+  /**
+   * Use this KTX2Loader (a viewer's own) instead of the page's shared one. The library then
+   * never frees it.
+   */
   readonly ktx2?: KTX2Loader;
 }
 
@@ -613,7 +619,8 @@ export function createDragonAssetLibrary(options: DragonAssetLibraryOptions): Dr
   const entries = new Map<DragonClassId, Entry>();
   let revision = 0;
   let disposed = false;
-  let loaders: Promise<{ gltf: GLTFLoader; ktx2: KTX2Loader; ownsKtx2: boolean }> | null = null;
+  /** `lease`: our hold on the page's shared KTX2 loader (null with `options.ktx2`). */
+  let loaders: Promise<{ gltf: GLTFLoader; lease: Ktx2Lease | null }> | null = null;
   let rootManifest: Promise<AssetManifest> | null = null;
   let pending = 0;
   let maxTextureSize = 0;
@@ -645,20 +652,21 @@ export function createDragonAssetLibrary(options: DragonAssetLibraryOptions): Dr
     return entry;
   }
 
-  function getLoaders(): Promise<{ gltf: GLTFLoader; ktx2: KTX2Loader; ownsKtx2: boolean }> {
+  function getLoaders(): Promise<{ gltf: GLTFLoader; lease: Ktx2Lease | null }> {
     loaders ??= Promise.all([
       import('three/addons/loaders/GLTFLoader.js'),
-      import('three/addons/loaders/KTX2Loader.js'),
+      // The file, not the `world/props` barrel (see the import of texture-mips above).
+      import('../world/props/shared-ktx2'),
       import('three/addons/libs/meshopt_decoder.module.js'),
-    ]).then(([gltfModule, ktx2Module, meshopt]) => {
-      const ownsKtx2 = options.ktx2 === undefined;
-      const ktx2 =
-        options.ktx2 ??
-        new ktx2Module.KTX2Loader().setTranscoderPath(transcoderUrl).detectSupport(webgl);
+    ]).then(([gltfModule, shared, meshopt]) => {
+      // One transcoder for the page: a map loading right now already holds the same loader.
+      const lease = options.ktx2 === undefined ? shared.acquireKtx2(webgl, transcoderUrl) : null;
+      const ktx2 = options.ktx2 ?? lease?.loader;
+      if (ktx2 === undefined) throw new Error('no KTX2 loader');
       const gltf = new gltfModule.GLTFLoader()
         .setKTX2Loader(ktx2)
         .setMeshoptDecoder(meshopt.MeshoptDecoder);
-      return { gltf, ktx2, ownsKtx2 };
+      return { gltf, lease };
     });
     return loaders;
   }
@@ -669,8 +677,8 @@ export function createDragonAssetLibrary(options: DragonAssetLibraryOptions): Dr
     const done = loaders;
     loaders = null;
     void done.then(
-      ({ ktx2, ownsKtx2 }) => {
-        if (ownsKtx2) ktx2.dispose();
+      ({ lease }) => {
+        lease?.release();
       },
       // The loader chunk itself failed to arrive: nothing to free, and the load that wanted
       // it has already reported the error.
@@ -789,9 +797,9 @@ const sharedLibraries = new WeakMap<WebGLRenderer, DragonAssetLibrary>();
  * The page's one library for a renderer: created (and the load of every class started) on the
  * first call, then shared by every stage and viewer. It lives as long as the renderer.
  *
- * `after`: start loading only once this settles. The stage passes the map's asset load, so the
- * two never run a KTX2 transcoder pool each at the same time (three warns about that, and the
- * map is needed first anyway).
+ * `after`: start loading only once this settles. The stage passes the default map's asset
+ * load: the map is needed first. (Both borrow the page's one KTX2 loader, so a load that does
+ * overlap, such as another map's at a match start, shares its transcoder workers.)
  */
 export function sharedDragonAssetLibrary(
   webgl: WebGLRenderer,

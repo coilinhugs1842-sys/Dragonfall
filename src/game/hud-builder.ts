@@ -43,12 +43,14 @@ import type {
   ScoreboardRow,
   TakedownEvent,
   TeamId,
+  TerrainQuery,
   Unsubscribe,
   Vec3,
   WorldView,
 } from '../shared';
 import {
   ageHudState,
+  createDragonTagWriter,
   createHudState,
   pushDamageArc,
   pushKillfeed,
@@ -58,7 +60,7 @@ import {
   writeHudClock,
   writeHudLocal,
 } from '../ui/hud';
-import type { MutableHudState } from '../ui/hud';
+import type { DragonTagFrame, MutableHudState } from '../ui/hud';
 
 /** Player ids are a `u8`. */
 const ID_SLOTS = 256;
@@ -116,7 +118,18 @@ export interface HudFrameInput {
    * always false on a client (only the host can skip). Shown as the "skip" hint.
    */
   canSkipIntro: boolean;
+  /**
+   * This frame's camera, for the markers over the dragons: the element arrays of its
+   * `matrixWorld` and `projectionMatrix` (16 numbers each, as three.js keeps them; held by
+   * reference, nothing is copied). An empty array = no camera: no markers are drawn.
+   */
+  cameraWorld: ArrayLike<number>;
+  cameraProjection: ArrayLike<number>;
+  /** The map's rock, so an enemy behind it is not marked. Null = not known. */
+  terrain: TerrainQuery | null;
 }
+
+const NO_CAMERA: readonly number[] = [];
 
 export function createHudFrameInput(): HudFrameInput {
   return {
@@ -135,6 +148,9 @@ export function createHudFrameInput(): HudFrameInput {
     pointerLocked: false,
     watchedId: NO_PLAYER,
     canSkipIntro: false,
+    cameraWorld: NO_CAMERA,
+    cameraProjection: NO_CAMERA,
+    terrain: null,
   };
 }
 
@@ -169,6 +185,18 @@ export function createHudBuilder(view: WorldView): HudBuilder {
   let riderCount = 0;
   let lobbySeen: LobbyState | null = null;
   let cameraYaw = 0;
+  // The markers over the dragons: the writer keeps what it remembers between frames, the
+  // frame object is refilled in place.
+  const tagWriter = createDragonTagWriter();
+  const tagFrame: DragonTagFrame = {
+    cameraWorld: NO_CAMERA,
+    cameraProjection: NO_CAMERA,
+    terrain: null,
+    viewer: null,
+    localId: NO_PLAYER,
+    watchedId: NO_PLAYER,
+    blinded: false,
+  };
 
   function teamOf(id: PlayerId): TeamId | null {
     const team = teams[id & (ID_SLOTS - 1)];
@@ -394,6 +422,27 @@ export function createHudBuilder(view: WorldView): HudBuilder {
     hud.compassCount = count;
   }
 
+  /** The friend-or-foe markers over the dragons in this frame's picture. */
+  function writeTags(input: Readonly<HudFrameInput>, local: Readonly<DragonView> | undefined): void {
+    const frame = tagFrame;
+    frame.cameraWorld = input.cameraWorld;
+    frame.cameraProjection = input.cameraProjection;
+    frame.terrain = input.terrain;
+    // A rider's side comes from the lobby (it is known before the dragon is in the picture);
+    // a rider nobody has placed on a team yet marks nobody rather than treat enemies as friends.
+    frame.viewer = input.isRider
+      ? (teamOf(hud.localPlayerId) ?? (local !== undefined ? local.team : null))
+      : 'spectator';
+    frame.localId = input.isRider ? view.localDragonId : NO_PLAYER;
+    frame.watchedId = input.watchedId;
+    frame.blinded =
+      local !== undefined &&
+      (local.flags & DRAGON_FLAG_ALIVE) !== 0 &&
+      view.local.valid &&
+      view.local.blindS > 0;
+    tagWriter.write(hud.dragonTags, view, frame, names);
+  }
+
   return {
     hud,
 
@@ -406,6 +455,7 @@ export function createHudBuilder(view: WorldView): HudBuilder {
       hud.spectatingName = '';
       // `resetHudState` empties the list; the next `setLobby` fills it again.
       lobbySeen = null;
+      tagWriter.reset();
     },
 
     setLobby,
@@ -459,6 +509,7 @@ export function createHudBuilder(view: WorldView): HudBuilder {
       writeScoreboard(input);
       writeCompass(local !== undefined ? local.team : null, localId);
       writeRelay(local);
+      writeTags(input, local);
     },
 
     setKeyLabels(labels: readonly string[]): void {

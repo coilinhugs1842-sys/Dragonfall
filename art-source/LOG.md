@@ -15,6 +15,12 @@ One row per job. Keep rejected ones too, so we don't repeat bad prompts.
 Prompt files are written by `node tools/pipeline/make-prompts.mjs` (STYLE FORMULA byte-for-byte plus the subject);
 `--check` fails if a prompt file has drifted from the formula.
 
+## Trailer (T-7.4, 2026-11-12 — in-game capture, 0 Higgsfield credits)
+
+| Date | Asset | How | Result | Notes |
+| --- | --- | --- | --- | --- |
+| 2026-11-12 | `art-source/trailer/dragonfall-trailer.mp4` | `node tools/trailer/build.mjs` (frame-exact capture + ffmpeg cut) | ~63 s, 1920×1080@60, 86 MB, game music | Caldera + Ember Relay shots unlocked; Seedance polish needs paid plan (DECISIONS 39). |
+
 ## Procedural assets (no Higgsfield job; DECISIONS 36)
 
 | Date | Asset | How it was made | Script | Raw output | Runtime output |
@@ -23,6 +29,13 @@ Prompt files are written by `node tools/pipeline/make-prompts.mjs` (STYLE FORMUL
 | 2026-11-11 | Dragon: Bastion (bronze) | same generator, armour plates + club tail | `tools/blender/dragons/build_all.sh bastion` (`classes/bastion.py`) | `art-source/dragons/bastion/` | `public/assets/dragons/bastion/` |
 | 2026-11-11 | Dragon: Tempest (sapphire) | same generator, crest fins + five-rib wings | `tools/blender/dragons/build_all.sh tempest` (`classes/tempest.py`) | `art-source/dragons/tempest/` | `public/assets/dragons/tempest/` |
 | 2026-11-11 | Dragon: Wraith (obsidian) | same generator, tattered membranes + tail streamers, painted iridescence | `tools/blender/dragons/build_all.sh wraith` (`classes/wraith.py`) | `art-source/dragons/wraith/` | `public/assets/dragons/wraith/` |
+| 2026-11-12 | Dragon: Verdant (jade/amethyst) | same generator, leafy crest fins | \	ools/blender/dragons\ (\classes/verdant.py\) | \rt-source/dragons/verdant/\ | \public/assets/dragons/verdant/\ |
+| 2026-11-12 | Dragon: Aureate (citrine/gold) | same generator, slim disruptor | \	ools/blender/dragons\ (\classes/aureate.py\) | \rt-source/dragons/aureate/\ | \public/assets/dragons/aureate/\ |
+| 2026-11-12 | Dragon: Zephyr (pearl/aquamarine) | same generator, light scout | \	ools/blender/dragons\ (\classes/zephyr.py\) | \rt-source/dragons/zephyr/\ | \public/assets/dragons/zephyr/\ |
+| 2026-11-12 | Dragon: Granite (slate-silver) | same generator, siege plates | \	ools/blender/dragons\ (\classes/granite.py\) | \rt-source/dragons/granite/\ | \public/assets/dragons/granite/\ |
+| 2026-11-12 | Dragon: Mirage (opal/rose) | same generator, trickster tatters | \	ools/blender/dragons\ (\classes/mirage.py\) | \rt-source/dragons/mirage/\ | \public/assets/dragons/mirage/\ |
+| 2026-11-12 | All nine dragons: anim polish rebuild | Stronger dive tuck / flap / bank in \dragonlib/anim.py\; re-export + finish | \uild_dragon.py\ + \inish.mjs\ / optimize | \rt-source/dragons/*/\ | \public/assets/dragons/*/\ |
+| 2026-11-11 | Dragons: rider rework, all four classes rebuilt (Talon, Bastion, Tempest, Wraith) | Procedural, 0 credits, same generator: the rider is now a helmed figure (crested helm with a glowing visor slit, shoulder plates, cowl, swallow-tailed cape, hands on a saddle grip), painted in the class's leather and horn colours, with the cape, cowl and crest in the team colour through the emissive mask. LOD0/LOD1 +107/+59 triangles, LOD2 -20 | `python tools/blender/dragons/paint_dragon.py <class>`, `blender -b -P tools/blender/dragons/build_dragon.py -- <class>`, `node tools/blender/dragons/finish.mjs` (`dragonlib/dragon.py` `build_rider`, `dragonlib/paint.py`, `classes/*.py`) | `art-source/dragons/<class>/` | `public/assets/dragons/<class>/` |
 
 Dragon previews (Blender EEVEE, warm low sun + cool hemisphere): `art-source/dragons/previews/`.
 

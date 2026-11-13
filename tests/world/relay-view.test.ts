@@ -216,6 +216,33 @@ describe('relay view', () => {
     relay.dispose();
   });
 
+  it('takes the beacons away on the results podium and brings them back for the next match', () => {
+    const relay = createEmberRelayView(QUALITY_PRESETS.medium);
+    const child = (name: string): Mesh =>
+      relay.object.children.find((entry) => entry.name === name) as Mesh;
+    const view = sceneView();
+    for (const phase of ['intro', 'countdown', 'playing', 'roundEnd'] as const) {
+      view.clock.phase = phase;
+      relay.update(view, 1);
+      expect(child('RelayBeacons').visible, phase).toBe(true);
+    }
+    expect(relay.drawCalls).toBe(4);
+    view.clock.phase = 'results';
+    relay.update(view, 2);
+    expect(relay.object.visible).toBe(true);
+    expect(child('RelayBeacons').visible).toBe(false);
+    expect(relay.drawCalls).toBe(3);
+    // The place itself stays in the podium shot.
+    expect(child('RelayStone').visible).toBe(true);
+    expect(child('RelayShards').visible).toBe(true);
+    expect(child('RelayCards').visible).toBe(true);
+    // A rematch.
+    view.clock.phase = 'intro';
+    relay.update(view, 3);
+    expect(child('RelayBeacons').visible).toBe(true);
+    relay.dispose();
+  });
+
   it('stays inside the draw-call budget on every preset', () => {
     const relay = createEmberRelayView(QUALITY_PRESETS.low);
     const stone = buildRelayStone().triangles;

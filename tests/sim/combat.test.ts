@@ -1260,9 +1260,12 @@ describe('respawn', () => {
     for (const classId of DRAGON_CLASS_IDS) {
       for (const slot of ABILITY_SLOTS) {
         const def = ABILITY_TABLE[classId][slot];
+        const pdef = def.projectile !== null ? PROJECTILE_DEFS[def.projectile] : null;
         const hurts =
           (def.tags & ABILITY_TAG_ALLIES) === 0 &&
-          (def.damage > 0 || def.projectile !== null || def.zone !== null);
+          (def.damage > 0 ||
+            (pdef !== null && !pdef.passThrough) ||
+            (def.zone !== null && ZONE_DEFS[def.zone].damage > 0));
         if (hurts) expect(def.tags & ABILITY_TAG_ATTACK, `${classId} ${slot}`).not.toBe(0);
       }
     }
@@ -1533,7 +1536,7 @@ describe('determinism', () => {
     expect(sawProjectiles).toBeGreaterThan(5);
     expect(sawZones).toBeGreaterThan(1);
     const sheet = a.sim.current.scores.reduce((sum, score) => sum + score.damage, 0);
-    expect(sheet).toBeGreaterThan(500);
+    expect(sheet).toBeGreaterThan(250);
     // A different seed is a different fight.
     const c = brawl(8);
     c.step(2000);

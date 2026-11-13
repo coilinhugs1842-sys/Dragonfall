@@ -51,9 +51,11 @@ import {
 import {
   ABILITY_GLYPHS,
   BRAZIER_SHAPE,
+  CARRY_CHIP,
   OBJECTIVE_GLYPHS,
   SHARD_SHAPES,
   STATUS_GLYPHS,
+  TEAM_SHAPES,
   takedownGlyph,
 } from './glyphs';
 import type { StatusKey } from './glyphs';
@@ -82,10 +84,13 @@ import {
   angleDegrees,
   bannerFor,
   blindLevel,
+  BLIND_FADE_IN_S,
   clockMinutesString,
   clockSecondsString,
   clockTotalSeconds,
   combatHudVisible,
+  compassLabelLanes,
+  compassLabelRank,
   compassPinned,
   compassStep,
   cooldownSecondsShown,
@@ -116,6 +121,7 @@ import {
 import type { BannerId } from './hud-model';
 import { createIntroCard } from './intro-card';
 import { createRelayHud } from './relay-hud';
+import { createTagsHud } from './tags-hud';
 
 export interface HudOptions {
   /**
@@ -139,12 +145,6 @@ export interface Hud {
 
 // --- Construction helpers and write-if-changed cells ---------------------------------------------
 
-const TEAM_SHAPES: Readonly<Record<'ember' | 'frost' | 'none', string>> = {
-  ember: 'M8 1.8 14.6 13.6H1.4Z',
-  frost: 'M8 1 14.4 8 8 15 1.6 8Z',
-  // Neutral objective: a ring.
-  none: 'M8 2.5A5.5 5.5 0 1 0 8 13.5 5.5 5.5 0 1 0 8 2.5ZM8 5.5A2.5 2.5 0 1 1 8 10.5 2.5 2.5 0 1 1 8 5.5Z',
-};
 const DEFAULT_KEY_LABELS: readonly string[] = ['LMB', 'RMB', 'F', 'R'];
 const DEFAULT_RETICLE_RADIUS_PX = 110;
 const MAX_RETICLE_RADIUS_PX = 400;
@@ -168,6 +168,8 @@ const STATUS_BITS: Readonly<Record<StatusKey, number>> = {
 
 let STATUS_MASK = 0;
 for (const status of STATUS_GLYPHS) STATUS_MASK |= STATUS_BITS[status.key];
+/** Not a dragon flag (those fit in 16 bits): "the carry chip is showing", for the change check. */
+const CARRY_CHIP_BIT = 1 << 30;
 
 // --- Parts ----------------------------------------------------------------------------------------------
 
@@ -211,7 +213,12 @@ interface CompassPart {
   readonly pinned: DataAttr;
   readonly down: DataAttr;
   readonly distance: NumberCell;
+  /** Which line the distance figure is on (`compassLabelLanes`). */
+  readonly lane: DataAttr;
 }
+
+/** `data-lane` values by COMPASS_LANE_*. */
+const LANE_KEYS = ['0', '1', '2'] as const;
 
 interface BoardRow {
   readonly shown: Visibility;
@@ -263,6 +270,10 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
   // HUD, and `update` stops feeding it.
   const rootChrome = new DataAttr(el, 'chrome');
 
+  // --- Friend-or-foe markers over the dragons: first, so every other part draws over them -------
+  const tags = createTagsHud();
+  el.appendChild(tags.layer);
+
   // --- Full-screen veils (each a single static gradient; only opacity changes) -------------------
   const lowHealth = div('dfh-lowhp');
   const lowHealthShown = new Visibility(lowHealth);
@@ -270,6 +281,8 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
   const blind = div('dfh-blind');
   const blindShown = new Visibility(blind);
   const blindOpacity = new StepStyle(blind, 'opacity', OPACITY_STRINGS);
+  let blindFadeIn = 1;
+  let blindSeenS = 0;
   el.append(lowHealth, blind);
 
   // --- Centre: reticle, hit marker, damage arcs ---------------------------------------------------
@@ -384,8 +397,14 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       pinned: new DataAttr(marker, 'pinned'),
       down: new DataAttr(marker, 'down'),
       distance: new NumberCell(distance),
+      lane: new DataAttr(marker, 'lane'),
     });
   }
+  // Scratch for keeping the distance figures apart; `compassLanes` is also last time's answer.
+  const compassSteps = new Int16Array(HUD_COMPASS_MARKERS);
+  const compassRanks = new Float64Array(HUD_COMPASS_MARKERS);
+  const compassFigures = new Int16Array(HUD_COMPASS_MARKERS);
+  const compassLanes = new Uint8Array(HUD_COMPASS_MARKERS);
   // Ember Relay: the shard strip under the score, its call-outs under the compass.
   const relay = createRelayHud();
   top.append(header, relay.strip, compass, relay.callouts);
@@ -435,6 +454,11 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
     statusBox.appendChild(chip);
     statusShown.push(new Visibility(chip));
   }
+  // Ember Relay: shown in place of "Slowed" while the local rider carries a shard.
+  const carryChip = div('dfh-chip dfh-chip-carry');
+  carryChip.append(new Glyph('dfh-glyph', CARRY_CHIP.d).svg, span('dfh-chip-label', CARRY_CHIP.label));
+  statusBox.appendChild(carryChip);
+  const carryChipShown = new Visibility(carryChip);
   const vitalsHead = div('dfh-vitals-head');
   const ownShape = new Glyph('dfh-shape', TEAM_SHAPES.none, true);
   const classNode = span('dfh-class');
@@ -674,8 +698,17 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       local === null ? 0 : quantize(lowHealthLevel(local.health, local.alive), OPACITY_STEPS);
     lowHealthShown.set(low > 0);
     if (low > 0) lowHealthOpacity.set(low);
-    const dark =
-      local === null || !local.alive ? 0 : quantize(blindLevel(local.blindS ?? 0), OPACITY_STEPS);
+    const blindS = local === null || !local.alive ? 0 : (local.blindS ?? 0);
+    if (blindS > blindSeenS + 0.05) blindFadeIn = 0;
+    if (blindS <= 0) {
+      blindFadeIn = 1;
+      blindSeenS = 0;
+    } else {
+      blindSeenS = blindS > blindSeenS ? blindS : blindSeenS;
+      // Approx frame step; HUD updates every animation frame.
+      blindFadeIn = Math.min(1, blindFadeIn + 1 / 60 / Math.max(BLIND_FADE_IN_S, 0.01));
+    }
+    const dark = quantize(blindLevel(blindS, blindFadeIn), OPACITY_STEPS);
     blindShown.set(dark > 0);
     if (dark > 0) blindOpacity.set(dark);
   }
@@ -782,8 +815,10 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       const marker = i < count && markers !== undefined ? markers[i] : undefined;
       part.shown.set(marker !== undefined);
       if (marker === undefined) continue;
-      part.position.set(compassStep(marker.angle));
-      part.pinned.set(compassPinned(marker.angle) ? '1' : '0');
+      const step = compassStep(marker.angle);
+      const pinned = compassPinned(marker.angle);
+      part.position.set(step);
+      part.pinned.set(pinned ? '1' : '0');
       part.down.set(marker.alive ? '0' : '1');
       const key = marker.kind === 'objective' ? 'none' : teamKey(marker.team);
       part.team.set(marker.kind === 'objective' ? 'objective' : key);
@@ -796,7 +831,21 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
             ? BRAZIER_SHAPE
             : TEAM_SHAPES[key],
       );
-      if (text) part.distance.set(distanceShown(marker.distanceM));
+      if (text) {
+        const figure = distanceShown(marker.distanceM);
+        part.distance.set(figure);
+        compassSteps[i] = step;
+        compassFigures[i] = figure;
+        compassRanks[i] = compassLabelRank(marker.kind, pinned, marker.distanceM);
+      }
+    }
+    // With the text (10 Hz), not every frame: a figure that changed line every frame would
+    // flicker, and the markers do not move far in a tenth of a second.
+    if (text) {
+      compassLabelLanes(compassLanes, compassSteps, compassRanks, compassFigures, count);
+      for (let i = 0; i < count; i++) {
+        compassParts[i]?.lane.set(LANE_KEYS[compassLanes[i] ?? 0] ?? '0');
+      }
     }
   }
 
@@ -835,20 +884,27 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
     }
   }
 
-  function updateVitals(local: HudLocalState, text: boolean): void {
+  function updateVitals(hud: HudState, local: HudLocalState, text: boolean): void {
     const healthStepNow = local.alive ? quantizeVisible(local.health, UNIT_STEPS) : 0;
     healthStep.set(healthStepNow);
     healthLow.set(lowHealthLevel(local.health, local.alive) > 0 ? '1' : '0');
     staminaStep.set(quantize(local.stamina, UNIT_STEPS));
     staminaSpent.set(local.stamina < 0.15 ? '1' : '0');
 
-    const bits = (local.flags ?? 0) & STATUS_MASK;
+    // A shard slows whoever carries it, through the same status an enemy's slow uses. For the
+    // carrier that chip would read as a debuff somebody applied, for the whole carry: it gets
+    // "Carrying the shard" instead. (An enemy's slow on top of the burden is not told apart.)
+    const carrying = local.alive && hud.relay !== undefined && hud.relay !== null && hud.relay.carrying;
+    const bits =
+      ((local.flags ?? 0) & STATUS_MASK & (carrying ? ~DRAGON_FLAG_SLOWED : -1)) |
+      (carrying ? CARRY_CHIP_BIT : 0);
     if (bits !== lastStatusBits) {
       lastStatusBits = bits;
       for (let i = 0; i < STATUS_GLYPHS.length; i++) {
         const status = STATUS_GLYPHS[i];
         if (status !== undefined) statusShown[i]?.set((bits & STATUS_BITS[status.key]) !== 0);
       }
+      carryChipShown.set(carrying);
     }
     if (!text) return;
     classLabel.set(DRAGON_CLASSES[local.classId].name);
@@ -1117,6 +1173,7 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
     rootDown.set(local !== null && !local.alive ? '1' : '0');
 
     if (combat) {
+      tags.update(hud);
       updateVeils(local);
       updateCentre(hud, local);
       updateHeader(hud, text);
@@ -1126,14 +1183,15 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
       vitalsShown.set(local !== null);
       abilitiesShown.set(local !== null);
       if (local !== null) {
-        updateVitals(local, text);
+        updateVitals(hud, local, text);
         updateSlots(hud, local, text);
       } else {
         lastButtons = 0;
       }
       updateRespawn(hud, local);
-      spectateShown.set(local === null);
-      if (local === null && text) spectateName.set(hud.spectatingName ?? '');
+      const watching = (hud.spectatingName ?? '') !== '';
+      spectateShown.set(local === null || watching);
+      if (watching && text) spectateName.set(hud.spectatingName ?? '');
     } else {
       lastButtons = 0;
     }

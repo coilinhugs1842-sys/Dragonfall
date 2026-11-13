@@ -3,10 +3,29 @@
  * Identity and display text only; the numbers are in tuning.ts.
  */
 
-export type DragonClassId = 'talon' | 'bastion' | 'tempest' | 'wraith';
+export type DragonClassId =
+  | 'talon'
+  | 'bastion'
+  | 'tempest'
+  | 'wraith'
+  | 'verdant'
+  | 'aureate'
+  | 'zephyr'
+  | 'granite'
+  | 'mirage';
 
 /** Order is the wire encoding (index = `u8` class id). Append only. */
-export const DRAGON_CLASS_IDS: readonly DragonClassId[] = ['talon', 'bastion', 'tempest', 'wraith'];
+export const DRAGON_CLASS_IDS: readonly DragonClassId[] = [
+  'talon',
+  'bastion',
+  'tempest',
+  'wraith',
+  'verdant',
+  'aureate',
+  'zephyr',
+  'granite',
+  'mirage',
+];
 
 export const DEFAULT_DRAGON_CLASS: DragonClassId = 'talon';
 
@@ -75,6 +94,61 @@ export const DRAGON_CLASSES: Readonly<Record<DragonClassId, DragonClassInfo>> = 
       secondary: { name: 'Veil', summary: 'Briefly invisible until you attack' },
       utility: { name: 'Phase dive', summary: 'Pass through terrain for 1 s' },
       ultimate: { name: 'Night terror', summary: 'Blinds enemies in a cone' },
+    },
+  },
+  verdant: {
+    id: 'verdant',
+    name: 'Verdant',
+    role: 'support',
+    abilities: {
+      primary: { name: 'Bloom bolts', summary: 'Rapid thorn projectiles' },
+      secondary: { name: 'Mending pod', summary: 'Heal bubble allies can fly through' },
+      utility: { name: 'Spur bubble', summary: 'Minor haste buff bubble' },
+      ultimate: { name: 'Canopy', summary: 'Large regen field for your team' },
+    },
+  },
+  aureate: {
+    id: 'aureate',
+    name: 'Aureate',
+    role: 'disruptor',
+    abilities: {
+      primary: { name: 'Prism shards', summary: 'Midrange crystal bolts' },
+      secondary: { name: 'Flash orb', summary: 'Light ball that flashbangs enemies' },
+      utility: { name: 'Drift haze', summary: 'Bubble that softens enemy control' },
+      ultimate: { name: 'Prism storm', summary: 'Lingering deny field ahead' },
+    },
+  },
+  zephyr: {
+    id: 'zephyr',
+    name: 'Zephyr',
+    role: 'scout',
+    abilities: {
+      primary: { name: 'Gale bolts', summary: 'Fast light projectiles' },
+      secondary: { name: 'Blink', summary: 'Short forward teleport' },
+      utility: { name: 'Slipstream', summary: 'Speed burst' },
+      ultimate: { name: 'Gale wall', summary: 'Deny a lane with wind' },
+    },
+  },
+  granite: {
+    id: 'granite',
+    name: 'Granite',
+    role: 'siege',
+    abilities: {
+      primary: { name: 'Magma spit', summary: 'Heavy arcing bombs' },
+      secondary: { name: 'Magma burst', summary: 'Proximity explosion around you' },
+      utility: { name: 'Stone mend', summary: 'Self regen over a few seconds' },
+      ultimate: { name: 'Crater smash', summary: 'Impact crater ahead' },
+    },
+  },
+  mirage: {
+    id: 'mirage',
+    name: 'Mirage',
+    role: 'trickster',
+    abilities: {
+      primary: { name: 'Decoy bolt', summary: 'Soft phantom projectiles' },
+      secondary: { name: 'Phantom double', summary: 'Fake dragon that flies straight' },
+      utility: { name: 'Mirror step', summary: 'Short blink dash' },
+      ultimate: { name: 'Phantasm', summary: 'Blinding mirage field' },
     },
   },
 };

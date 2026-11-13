@@ -21,6 +21,7 @@ import type { CameraTerrainRaycaster, ChaseTarget } from '../../src/render/camer
 import {
   DRAGON_FLAG_ALIVE,
   DRAGON_FLAG_BOOSTING,
+  DRAGON_FLAG_DODGING,
   FLIGHT_TUNING,
   acquireDragonView,
   beginWorldView,
@@ -296,8 +297,14 @@ describe('ChaseCamera', () => {
     expect(camera.update(pose, 1 / 60)).toBe(true);
     const t = CAMERA_RIG_TUNING;
     const forward = new Vector3(0, 0, 1).applyQuaternion(pose.orientation);
-    const expected = pose.position.clone().addScaledVector(forward, -t.distance);
-    expected.y += t.height;
+    // Soft-up is the bank-free horizon for this heading (not always world +Y).
+    const soft = new Vector3(0, 1, 0).addScaledVector(forward, -forward.y);
+    if (soft.lengthSq() > 1e-8) soft.normalize();
+    else soft.set(0, 1, 0);
+    const expected = pose.position
+      .clone()
+      .addScaledVector(forward, -t.distance)
+      .addScaledVector(soft, t.height);
     expect(camera.position.distanceTo(expected)).toBeLessThan(1e-6);
     expect(camera.fov).toBe(DEFAULT_BASE_FOV);
   });
@@ -402,10 +409,49 @@ describe('ChaseCamera', () => {
     for (let i = 1; i <= 60; i++) {
       straightPose(pose, i * 0.75, 45);
       setHeading(pose, 0, 0, (Math.min(i, 30) / 30) * Math.PI * 2);
+      // Soft-up ignores local up while dodging so a 180° roll does not flip the horizon.
+      pose.flags = DRAGON_FLAG_ALIVE | DRAGON_FLAG_DODGING;
       camera.update(pose, 1 / 60);
       expect(camera.quaternion.angleTo(previous)).toBeLessThan(0.03);
       previous.copy(camera.quaternion);
     }
+  });
+
+  it('eases through an inverted-to-upright loop without whipping', () => {
+    const camera = new ChaseCamera();
+    const pose = createPose();
+    camera.update(straightPose(pose, 0, 45), 0);
+    const previous = camera.quaternion.clone();
+    for (let i = 1; i <= 120; i++) {
+      const pitch = (i / 120) * Math.PI * 2;
+      straightPose(pose, i * 0.75, 45);
+      setHeading(pose, 0, pitch, 0);
+      pose.flags = DRAGON_FLAG_ALIVE;
+      camera.update(pose, 1 / 60);
+      expect(camera.quaternion.angleTo(previous), `frame ${i}`).toBeLessThan(0.2);
+      previous.copy(camera.quaternion);
+    }
+  });
+
+  it('does not tip with bank while inverted (horizon stays bank-free)', () => {
+    const camera = new ChaseCamera();
+    const pose = createPose();
+    // Settle inverted and level.
+    for (let i = 0; i < 90; i++) {
+      straightPose(pose, i * 0.75, 45);
+      setHeading(pose, 0, Math.PI, 0);
+      pose.flags = DRAGON_FLAG_ALIVE;
+      camera.update(pose, 1 / 60);
+    }
+    const level = camera.quaternion.clone();
+    // Hard bank while still inverted: camera should barely move (unlike following local up).
+    for (let i = 0; i < 90; i++) {
+      straightPose(pose, (90 + i) * 0.75, 45);
+      setHeading(pose, 0, Math.PI, 0.9);
+      pose.flags = DRAGON_FLAG_ALIVE;
+      camera.update(pose, 1 / 60);
+    }
+    expect(camera.quaternion.angleTo(level)).toBeLessThan(0.08);
   });
 
   it('reduce motion: no roll and no shake', () => {

@@ -22,17 +22,17 @@ import {
 describe('default bindings', () => {
   it('follow the controls table and have no conflicts', () => {
     expect(DEFAULT_BINDINGS.boost).toContain('ShiftLeft');
-    expect(DEFAULT_BINDINGS.flap).toEqual(['Space']);
+    expect(DEFAULT_BINDINGS.flap).toEqual([]);
     expect(DEFAULT_BINDINGS.dive).toContain('ControlLeft');
     expect(DEFAULT_BINDINGS.dodgeLeft).toEqual(['KeyQ']);
     expect(DEFAULT_BINDINGS.dodgeRight).toEqual(['KeyE']);
-    expect(DEFAULT_BINDINGS.primary).toEqual(['Mouse0']);
+    expect(DEFAULT_BINDINGS.primary).toEqual(['Mouse0', 'Space']);
     expect(DEFAULT_BINDINGS.secondary).toEqual(['Mouse2']);
     expect(DEFAULT_BINDINGS.utility).toEqual(['KeyF']);
     expect(DEFAULT_BINDINGS.ultimate).toEqual(['KeyR']);
     expect(DEFAULT_BINDINGS.scoreboard).toEqual(['Tab']);
     expect(findBindingConflicts(DEFAULT_BINDINGS)).toEqual([]);
-    expect(findUnboundActions(DEFAULT_BINDINGS)).toEqual([]);
+    expect(findUnboundActions(DEFAULT_BINDINGS)).toEqual(['flap']);
     for (const action of INPUT_ACTIONS) {
       expect(DEFAULT_BINDINGS[action].length).toBeLessThanOrEqual(MAX_CODES_PER_ACTION);
       for (const code of DEFAULT_BINDINGS[action]) expect(isBindableCode(code)).toBe(true);
@@ -64,10 +64,11 @@ describe('rebindAction', () => {
   });
 
   it('appends an alternative in slot 1 and replaces an existing alternative', () => {
-    const added = rebindAction(DEFAULT_BINDINGS, 'flap', 1, 'KeyV');
-    expect(added.flap).toEqual(['Space', 'KeyV']);
+    const base = rebindAction(DEFAULT_BINDINGS, 'flap', 0, 'KeyZ');
+    const added = rebindAction(base, 'flap', 1, 'KeyV');
+    expect(added.flap).toEqual(['KeyZ', 'KeyV']);
     const replaced = rebindAction(added, 'flap', 1, 'KeyB');
-    expect(replaced.flap).toEqual(['Space', 'KeyB']);
+    expect(replaced.flap).toEqual(['KeyZ', 'KeyB']);
   });
 
   it('steals the code from other actions by default', () => {
@@ -109,18 +110,18 @@ describe('rebindAction', () => {
 describe('unbind and reset', () => {
   it('unbinds one slot', () => {
     expect(unbindAction(DEFAULT_BINDINGS, 'boost', 0).boost).toEqual(['ShiftRight']);
-    expect(unbindAction(DEFAULT_BINDINGS, 'flap', 0).flap).toEqual([]);
+    expect(unbindAction(DEFAULT_BINDINGS, 'primary', 1).primary).toEqual(['Mouse0']);
   });
 
   it('resets one action or the whole table', () => {
     let table = rebindAction(DEFAULT_BINDINGS, 'flap', 0, 'KeyV');
     table = rebindAction(table, 'ultimate', 0, 'KeyG');
     const one = resetActionBinding(table, 'flap');
-    expect(one.flap).toEqual(['Space']);
+    expect(one.flap).toEqual([]);
     expect(one.ultimate).toEqual(['KeyG']);
     expect(bindingsEqual(resetBindings(), DEFAULT_BINDINGS)).toBe(true);
     expect(resetBindings()).not.toBe(DEFAULT_BINDINGS);
-    expect(resetBindings().flap).not.toBe(DEFAULT_BINDINGS.flap);
+    expect(resetBindings().primary).not.toBe(DEFAULT_BINDINGS.primary);
   });
 });
 

@@ -288,11 +288,12 @@ describe('bots among the other lobby rules', () => {
     expect(shrunk.effects).toHaveLength(6);
     expect(validateLobbyState(JSON.parse(JSON.stringify(shrunk.lobby.state)))).not.toBeNull();
 
-    // Duel caps the teams at 2 the same way.
+    // Duel allows up to 5v5, so a filled 5v5 room keeps everyone seated.
     const duel = setMode(lobby, HOST, 'duel');
     if (!duel.ok) throw new Error(duel.reason);
     expect(countLobbySide(duel.lobby.state.players, 'spectator')).toBe(0);
-    expect(duel.lobby.state.players.length).toBeLessThanOrEqual(4);
+    expect(duel.lobby.state.settings.teamSize).toBe(5);
+    expect(duel.lobby.state.players.length).toBe(10);
 
     // A person on a shrunk team still moves to the spectators.
     lobby = join(must(setTeamSize(newLobby(), HOST, 2)), 'Ada', 'tok-a');

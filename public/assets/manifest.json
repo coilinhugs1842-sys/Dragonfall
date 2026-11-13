@@ -4,7 +4,12 @@
     "talon": "dragons/talon/manifest.json",
     "bastion": "dragons/bastion/manifest.json",
     "tempest": "dragons/tempest/manifest.json",
-    "wraith": "dragons/wraith/manifest.json"
+    "wraith": "dragons/wraith/manifest.json",
+    "verdant": "dragons/verdant/manifest.json",
+    "aureate": "dragons/aureate/manifest.json",
+    "zephyr": "dragons/zephyr/manifest.json",
+    "granite": "dragons/granite/manifest.json",
+    "mirage": "dragons/mirage/manifest.json"
   },
   "maps": {
     "shattered-spires": "maps/shattered-spires/manifest.json",

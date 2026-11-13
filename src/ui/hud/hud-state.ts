@@ -21,7 +21,12 @@ import { NO_PLAYER, TEAM_EMBER } from '../../shared/constants';
 import type { DamageSource, ObjectiveKind } from '../../shared/events';
 import type { MatchPhase, MatchWinner, ModeId } from '../../shared/match';
 import { CLASS_TUNING } from '../../shared/tuning';
-import { HUD_COMPASS_MARKERS, HUD_DAMAGE_ARCS, HUD_KILLFEED_ROWS } from '../../shared/ui';
+import {
+  HUD_COMPASS_MARKERS,
+  HUD_DAMAGE_ARCS,
+  HUD_DRAGON_TAGS,
+  HUD_KILLFEED_ROWS,
+} from '../../shared/ui';
 import type { HudCompassKind } from '../../shared/ui';
 import { DRAGON_FLAG_ALIVE, SHARD_HOME } from '../../shared/world-view';
 import type { DragonView, LocalCombatView, MatchClockView } from '../../shared/world-view';
@@ -121,6 +126,18 @@ export interface MutableHudCompassMarker {
   alive: boolean;
 }
 
+/** Structurally assignable to HudDragonTag. */
+export interface MutableHudDragonTag {
+  shown: boolean;
+  team: TeamId;
+  foe: boolean;
+  near: boolean;
+  name: string;
+  x: number;
+  y: number;
+  opacity: number;
+}
+
 /** The match intro's title card; `opacity` is rewritten every intro frame (T-5.4). */
 export interface MutableIntroCardState {
   mapName: string;
@@ -167,6 +184,8 @@ export interface MutableHudState {
   relay: MutableHudRelayState | null;
   /** The one relay object to reuse. */
   readonly relayPool: MutableHudRelayState;
+  /** Markers over the dragons: HUD_DRAGON_TAGS entries, `shown` false = unused. */
+  dragonTags: MutableHudDragonTag[];
 }
 
 function createKillfeedEntry(): MutableKillfeedEntry {
@@ -267,6 +286,19 @@ export function createHudState(scoreboardRows = 10): MutableHudState {
   for (let i = 0; i < HUD_COMPASS_MARKERS; i++) {
     compass.push({ kind: 'ally', team: null, angle: 0, distanceM: 0, alive: true });
   }
+  const dragonTags: MutableHudDragonTag[] = [];
+  for (let i = 0; i < HUD_DRAGON_TAGS; i++) {
+    dragonTags.push({
+      shown: false,
+      team: TEAM_EMBER,
+      foe: false,
+      near: false,
+      name: '',
+      x: 0,
+      y: 0,
+      opacity: 0,
+    });
+  }
   return {
     mode: 'skirmish',
     phase: 'playing',
@@ -298,6 +330,7 @@ export function createHudState(scoreboardRows = 10): MutableHudState {
     introCardPool: { mapName: '', modeName: '', opacity: 0 },
     relay: null,
     relayPool: createHudRelayState(),
+    dragonTags,
   };
 }
 
@@ -326,6 +359,7 @@ export function resetHudState(hud: MutableHudState): void {
   hud.introCardPool.opacity = 0;
   hud.relay = null;
   resetHudRelayState(hud.relayPool);
+  for (const tag of hud.dragonTags) tag.shown = false;
 }
 
 /**

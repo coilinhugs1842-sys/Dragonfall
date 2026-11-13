@@ -27,10 +27,18 @@ export const AWARD_TITLES: readonly string[] = ['MVP', 'Most takedowns', 'Most d
  * the award cards spell them out.
  */
 export const AWARD_MARKS: readonly string[] = ['MVP', 'TKD', 'DMG'];
+/**
+ * Ember Relay gives its second award for shards brought home instead of takedowns (the mode is
+ * won by captures, and takedowns do not score there): the card's title and the table's mark.
+ */
+export const AWARD_TITLE_CAPTURES = 'Most captures';
+export const AWARD_MARK_CAPTURES = 'CAP';
 
 export interface AwardView {
   /** False when nobody earned it (NO_PLAYER) or the rider is not in the table. */
   shown: boolean;
+  /** The card's heading ("MVP", "Most takedowns", in Ember Relay "Most captures"). */
+  title: string;
   playerId: PlayerId;
   name: string;
   classId: DragonClassId;
@@ -53,12 +61,18 @@ export interface ResultsView {
   title: string;
   /** The local rider's team, or null for a watcher. */
   localTeam: TeamId | null;
+  /**
+   * The match was won by captures (Ember Relay): the table has a captures column and the
+   * second award is for captures.
+   */
+  captures: boolean;
   readonly awards: AwardView[];
 }
 
-function createAward(): AwardView {
+function createAward(title: string): AwardView {
   return {
     shown: false,
+    title,
     playerId: NO_PLAYER,
     name: '',
     classId: DEFAULT_DRAGON_CLASS,
@@ -76,7 +90,12 @@ export function createResultsView(): ResultsView {
     overline: '',
     title: '',
     localTeam: null,
-    awards: [createAward(), createAward(), createAward()],
+    captures: false,
+    awards: [
+      createAward(AWARD_TITLES[AWARD_MVP] ?? ''),
+      createAward(AWARD_TITLES[AWARD_TAKEDOWNS] ?? ''),
+      createAward(AWARD_TITLES[AWARD_DAMAGE] ?? ''),
+    ],
   };
 }
 
@@ -97,13 +116,17 @@ function findRow(rows: readonly ScoreboardRow[], playerId: PlayerId): Scoreboard
   return null;
 }
 
+/** `captures`: an Ember Relay match, where slot AWARD_TAKEDOWNS is given for captures. */
 function fillAward(
   out: AwardView,
   award: AwardId,
   row: ScoreboardRow | null,
   localId: PlayerId,
+  captures: boolean,
 ): void {
   out.shown = row !== null;
+  out.title =
+    captures && award === AWARD_TAKEDOWNS ? AWARD_TITLE_CAPTURES : (AWARD_TITLES[award] ?? '');
   if (row === null) {
     out.playerId = NO_PLAYER;
     out.name = '';
@@ -126,6 +149,11 @@ function fillAward(
     out.value = String(damage);
     out.unit = 'damage';
     out.detail = `${plural(takedowns, 'takedown', 'takedowns')}  ·  ${plural(assists, 'assist', 'assists')}`;
+  } else if (award === AWARD_TAKEDOWNS && captures) {
+    const brought = whole(row.captures ?? 0);
+    out.value = String(brought);
+    out.unit = brought === 1 ? 'capture' : 'captures';
+    out.detail = `${plural(takedowns, 'takedown', 'takedowns')}  ·  ${plural(deaths, 'death', 'deaths')}`;
   } else if (award === AWARD_TAKEDOWNS) {
     out.value = String(takedowns);
     out.unit = takedowns === 1 ? 'takedown' : 'takedowns';
@@ -134,8 +162,16 @@ function fillAward(
     // The MVP is judged on the whole line, so the whole line is shown.
     out.value = `${takedowns} / ${deaths} / ${assists}`;
     out.unit = 'takedowns / deaths / assists';
-    out.detail = `${damage} damage`;
+    // In Ember Relay the shards brought home weigh most in that judgement: they lead the line.
+    out.detail = captures
+      ? `${plural(whole(row.captures ?? 0), 'capture', 'captures')}  ·  ${damage} damage`
+      : `${damage} damage`;
   }
+}
+
+/** The match was Ember Relay. Results without a mode (older callers, tests) count takedowns. */
+function countsCaptures(results: Readonly<ResultsState>): boolean {
+  return results.mode === 'emberRelay';
 }
 
 /**
@@ -161,15 +197,20 @@ export function computeResultsView(
     out.title = TEAMS[winner].name;
     out.overline = localTeam === null ? 'The match goes to' : localTeam === winner ? 'Victory' : 'Defeat';
   }
+  const captures = countsCaptures(results);
+  out.captures = captures;
   const mvp = out.awards[AWARD_MVP];
   const takedowns = out.awards[AWARD_TAKEDOWNS];
   const damage = out.awards[AWARD_DAMAGE];
-  if (mvp !== undefined) fillAward(mvp, AWARD_MVP, findRow(rows, results.mvpId), localId);
+  if (mvp !== undefined) {
+    fillAward(mvp, AWARD_MVP, findRow(rows, results.mvpId), localId, captures);
+  }
   if (takedowns !== undefined) {
-    fillAward(takedowns, AWARD_TAKEDOWNS, findRow(rows, results.mostTakedownsId), localId);
+    const holder = captures ? (results.mostCapturesId ?? NO_PLAYER) : results.mostTakedownsId;
+    fillAward(takedowns, AWARD_TAKEDOWNS, findRow(rows, holder), localId, captures);
   }
   if (damage !== undefined) {
-    fillAward(damage, AWARD_DAMAGE, findRow(rows, results.mostDamageId), localId);
+    fillAward(damage, AWARD_DAMAGE, findRow(rows, results.mostDamageId), localId, captures);
   }
   return out;
 }
@@ -179,8 +220,12 @@ export function awardMarks(results: Readonly<ResultsState>, playerId: PlayerId):
   if (playerId === NO_PLAYER) return '';
   let text = '';
   if (playerId === results.mvpId) text = AWARD_MARKS[AWARD_MVP] ?? '';
-  if (playerId === results.mostTakedownsId) {
-    text = text === '' ? (AWARD_MARKS[AWARD_TAKEDOWNS] ?? '') : `${text} · ${AWARD_MARKS[AWARD_TAKEDOWNS]}`;
+  // The second award: captures in Ember Relay (the takedowns award is not given there).
+  const captures = countsCaptures(results);
+  const second = captures ? (results.mostCapturesId ?? NO_PLAYER) : results.mostTakedownsId;
+  if (playerId === second) {
+    const mark = captures ? AWARD_MARK_CAPTURES : (AWARD_MARKS[AWARD_TAKEDOWNS] ?? '');
+    text = text === '' ? mark : `${text} · ${mark}`;
   }
   if (playerId === results.mostDamageId) {
     text = text === '' ? (AWARD_MARKS[AWARD_DAMAGE] ?? '') : `${text} · ${AWARD_MARKS[AWARD_DAMAGE]}`;

@@ -672,7 +672,7 @@ describe('shattered spires in the sim', () => {
     const diver = fly({ x: 0, y: 60, z: 285 }, 0, -1.2);
     expect(diver.position.y).toBeGreaterThan(SPIRES_FLOOR_Y - 45);
     // up through the ceiling
-    const climber = fly({ x: 0, y: 660, z: 285 }, 0, 1.2);
+    const climber = fly({ x: 0, y: 760, z: 285 }, 0, 1.2);
     expect(climber.position.y).toBeLessThan(SPIRES_CEILING_Y + 45);
   });
 });

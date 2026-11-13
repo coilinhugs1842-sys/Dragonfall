@@ -4,15 +4,15 @@
   "lods": [
     {
       "node": "LOD0",
-      "triangles": 7518
+      "triangles": 7625
     },
     {
       "node": "LOD1",
-      "triangles": 2460
+      "triangles": 2519
     },
     {
       "node": "LOD2",
-      "triangles": 792
+      "triangles": 772
     }
   ],
   "clips": {
@@ -70,19 +70,19 @@
   },
   "wingspan": 13.82,
   "muzzleOffset": {
-    "x": 0,
+    "x": 0.0,
     "y": 0.834,
     "z": 6.453
   },
-  "source": "art-source/dragons/tempest/tempest.glb (procedural: tools/blender/dragons, LOG.md 2026-11-11)",
+  "source": "art-source/dragons/tempest/tempest.glb (procedural: tools/blender/dragons)",
   "clipInfo": {
     "glide": {
-      "duration": 4,
+      "duration": 4.0,
       "loop": true,
       "frames": 121
     },
     "flap": {
-      "duration": 1,
+      "duration": 1.0,
       "loop": true,
       "frames": 31
     },
@@ -92,17 +92,17 @@
       "frames": 19
     },
     "dive": {
-      "duration": 2,
+      "duration": 2.0,
       "loop": true,
       "frames": 61
     },
     "bank_l": {
-      "duration": 3,
+      "duration": 3.0,
       "loop": true,
       "frames": 91
     },
     "bank_r": {
-      "duration": 3,
+      "duration": 3.0,
       "loop": true,
       "frames": 91
     },
@@ -132,7 +132,7 @@
       "frames": 16
     },
     "death_fall": {
-      "duration": 2,
+      "duration": 2.0,
       "loop": true,
       "frames": 61
     }

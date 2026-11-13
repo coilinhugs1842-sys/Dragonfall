@@ -41,6 +41,11 @@ export const PERCH_SEAT_HEIGHT: Readonly<Record<DragonClassId, number>> = {
   bastion: 1.55,
   tempest: 1.35,
   wraith: 1.25,
+  verdant: 1.35,
+  aureate: 1.32,
+  zephyr: 1.2,
+  granite: 1.6,
+  mirage: 1.25,
 };
 
 /**

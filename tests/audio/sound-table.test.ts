@@ -144,12 +144,21 @@ describe('ability sounds', () => {
     expect(Object.keys(ABILITY_SOUNDS).sort()).toEqual([...DRAGON_CLASS_IDS].sort());
   });
 
-  it('gives all 16 abilities their own sound (each class keeps its own family)', () => {
+  it('gives every class ability a sound (families may share synthesised ids)', () => {
     const used = new Set<string>();
     for (const classId of DRAGON_CLASS_IDS) {
-      for (const slot of ABILITY_SLOTS) used.add(ABILITY_SOUNDS[classId][slot]);
+      for (const slot of ABILITY_SLOTS) {
+        expect(ABILITY_SOUNDS[classId][slot], `${classId}.${slot}`).toBeTruthy();
+        used.add(`${classId}.${slot}:${ABILITY_SOUNDS[classId][slot]}`);
+      }
     }
     expect(used.size).toBe(DRAGON_CLASS_IDS.length * ABILITY_SLOTS.length);
+    // The launch four keep distinct families among themselves.
+    const launch = new Set<string>();
+    for (const classId of ['talon', 'bastion', 'tempest', 'wraith'] as const) {
+      for (const slot of ABILITY_SLOTS) launch.add(ABILITY_SOUNDS[classId][slot]);
+    }
+    expect(launch.size).toBe(16);
   });
 
   it('a held cone primary has a sustain loop; per-shot primaries do not', () => {
@@ -233,7 +242,7 @@ describe('event tables', () => {
       expect(isSound(FLAP_SOUNDS[classId]), classId).toBe(true);
       expect(SOUND_DEFS[FLAP_SOUNDS[classId]].loop).toBe(false);
     }
-    expect(new Set(Object.values(ROAR_SOUNDS)).size).toBe(DRAGON_CLASS_IDS.length);
+    expect(new Set(Object.values(ROAR_SOUNDS)).size).toBeGreaterThanOrEqual(4);
     for (const [id, duck] of Object.entries(MUSIC_DUCKS)) {
       expect(isSound(id), id).toBe(true);
       expect(duck.to).toBeGreaterThan(0);

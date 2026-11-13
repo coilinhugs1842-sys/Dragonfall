@@ -2,6 +2,7 @@ import type { WebGLRenderer } from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDragonAssetLibrary } from '../../src/dragons';
 import type { DragonAssetLibrary } from '../../src/dragons';
+import { DRAGON_CLASS_IDS } from '../../src/shared';
 
 const ASSETS = 'http://test.invalid/assets/';
 const ROOT = `${ASSETS}manifest.json`;
@@ -129,7 +130,7 @@ describe('a failed dragon load is tried again', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     await assets.loadAll();
     expect(count(calls, ROOT)).toBe(1);
-    for (const classId of ['talon', 'bastion', 'tempest', 'wraith'] as const) {
+    for (const classId of DRAGON_CLASS_IDS) {
       expect(assets.status(classId)).toBe('failed');
     }
     // loadAll never rejects, and it can simply be called again.

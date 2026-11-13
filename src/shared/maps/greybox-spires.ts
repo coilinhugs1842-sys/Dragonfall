@@ -63,7 +63,7 @@ export const GREYBOX_CHUNK_SIZE = 250;
  */
 export const GREYBOX_CLOUD_SEA_Y = 0;
 export const GREYBOX_FLOOR_Y = -4;
-export const GREYBOX_CEILING_Y = 700;
+export const GREYBOX_CEILING_Y = 800;
 
 /** Gates sit this far from the centre on the Z axis, at this altitude. */
 export const GREYBOX_GATE_DISTANCE = 780;

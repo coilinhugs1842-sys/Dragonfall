@@ -274,7 +274,7 @@ function wireIndex(index: number, w: Writer): number {
  *   lobby.ready, host.setUnevenTeams, host.setFriendlyFire, host.lockTeams   u8 (0 or 1)
  *   lobby.pickClass          u8 class            host.setMode / host.setMap   u8 index
  *   host.setTeamSize         u8                  host.setScoreLimit           u16
- *   host.setTimeLimit        u16 seconds         host.setAllowedClasses       u8 bitmask
+ *   host.setTimeLimit        u16 seconds         host.setAllowedClasses       u16 bitmask
  *   host.movePlayer          u8 playerId, u8 side (0, 1, 2 = spectator)
  *   host.kick                u8 playerId         lobby.switchSide             u8 side
  *   lobby.leave, host.autoBalance, host.shuffle, host.start                   nothing
@@ -320,7 +320,7 @@ export function encodeIntent(w: Writer, msg: Readonly<IntentMessage>): number {
       for (const classId of intent.classes) {
         mask |= 1 << wireIndex(DRAGON_CLASS_IDS.indexOf(classId), w);
       }
-      w.u8(mask);
+      w.u16(mask);
       break;
     }
     case 'host.movePlayer':
@@ -384,7 +384,7 @@ function readIntent(r: Reader, type: NetIntentType): NetIntent | null {
     case 'host.setTimeLimit':
       return { type, timeLimitS: r.u16() };
     case 'host.setAllowedClasses': {
-      const mask = r.u8();
+      const mask = r.u16();
       if (mask >>> DRAGON_CLASS_IDS.length !== 0) return null;
       const classes: DragonClassId[] = [];
       for (let i = 0; i < DRAGON_CLASS_IDS.length; i++) {

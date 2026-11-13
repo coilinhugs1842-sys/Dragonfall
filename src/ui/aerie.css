@@ -285,9 +285,11 @@
 }
 
 .dfa-you .dfu-classes {
-  grid-template-columns: repeat(4, minmax(0, 7.4em));
+  grid-template-columns: repeat(3, minmax(0, 6.6em));
   gap: 0.35em;
   min-width: 0;
+  max-height: 11.5em;
+  overflow-y: auto;
 }
 
 .dfa-you .dfu-class {
