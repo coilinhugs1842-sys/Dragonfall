@@ -115,7 +115,9 @@ describe('BotPilot', () => {
       const pilot = new BotPilot(seed);
       const frame = createInputFrame();
       const own = createSnapshotOwner();
-      own.position.y = 350;
+      // Dive only applies above half the floor..ceiling band (see BotPilot).
+      const band = GREYBOX_BOT_ARENA.ceilingY - GREYBOX_BOT_ARENA.floorY;
+      own.position.y = GREYBOX_BOT_ARENA.floorY + band * 0.65;
       let digest = 0;
       let buttons = 0;
       for (let i = 0; i < 3000; i++) {

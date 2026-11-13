@@ -17,7 +17,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { NETSIM_PROFILES, createNetsimProfile } from '../../src/dev/netsim';
 import { createGreyboxMatchWorld } from '../../src/net/session';
 import type { MatchWorld } from '../../src/net/session';
-import { DRAGON_FLAG_ALIVE, TICK_HZ } from '../../src/shared';
+import { DAMAGE_IGNORE_IMMUNITY } from '../../src/sim';
+import { DRAGON_FLAG_ALIVE, NO_PLAYER, TICK_HZ } from '../../src/shared';
 import type { PlayerId } from '../../src/shared';
 import { createRoom, startMatch } from './session-harness';
 import type { Rig } from './session-harness';
@@ -452,18 +453,25 @@ describe('host + 3 clients, clean link', () => {
       });
     }
     startMatch(rig);
-    // Fly one dragon into the ground: a takedown, then a respawn.
+    // Kill one rider, then wait for its respawn. A held dive stick now loops (inverted flight)
+    // instead of driving into the cloud sea, so the test applies a lethal hit directly.
     const victim = rig.clients[0];
     if (victim === undefined) throw new Error('no client');
-    victim.pilot.sample = (frame) => {
-      frame.steerX = 0;
-      frame.steerY = -1;
-      frame.buttons = 0;
-    };
-    rig.runUntil(() => hostEvents.filter((e) => e.startsWith('spawn')).length >= 5, 60_000);
+    const sim = rig.host.sim;
+    if (sim === null) throw new Error('no sim');
+    expect(
+      sim.applyDamage(
+        victim.session.localPlayerId,
+        1e6,
+        NO_PLAYER,
+        'terrain',
+        DAMAGE_IGNORE_IMMUNITY,
+      ),
+    ).toBeGreaterThan(0);
+    rig.runUntil(() => hostEvents.filter((e) => e.startsWith('spawn')).length >= 5, 10_000);
     rig.run(200);
 
-    expect(hostEvents.filter((e) => e.startsWith('spawn'))).toHaveLength(5);
+    expect(hostEvents.filter((e) => e.startsWith('spawn')).length).toBe(5);
     expect(hostEvents.filter((e) => e.startsWith('takedown'))).toHaveLength(1);
     expect(hostEvents.filter((e) => e.startsWith('matchPhase'))).toHaveLength(2);
     for (const log of seen) expect(log).toEqual(hostEvents);

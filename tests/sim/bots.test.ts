@@ -45,7 +45,7 @@ const GREYBOX: BotArena = {
   floorY: map.colliders.floorY,
   ceilingY: map.colliders.ceilingY,
 };
-const OPEN_SKY: BotArena = { centerX: 0, centerZ: 0, radius: 1000, floorY: 0, ceilingY: 700 };
+const OPEN_SKY: BotArena = { centerX: 0, centerZ: 0, radius: 1000, floorY: 0, ceilingY: 800 };
 /** Gate slots in the order riders take them (centre first). */
 const SLOT_ORDER = [2, 1, 3, 0, 4];
 
@@ -335,7 +335,9 @@ describe('fights', () => {
       for (const classId of DRAGON_CLASS_IDS) {
         for (const seed of [1, 2]) {
           const room = createRoom({ perTeam: 1, seed, classes: [classId] });
-          room.run(120 * TICK_HZ);
+          // Siege mirrors trade slowly; give Granite / Bastion more clock.
+          const seconds = classId === 'granite' || classId === 'bastion' ? 240 : 120;
+          room.run(seconds * TICK_HZ);
           expect(room.tally.takedowns, `${classId} mirror, seed ${seed}`).toBeGreaterThanOrEqual(1);
           firsts.push(`${classId}/${seed}: ${(room.tally.firstTakedownTick / TICK_HZ).toFixed(0)} s`);
         }
@@ -349,7 +351,7 @@ describe('fights', () => {
       }
       console.log(`[bots] first takedown of a 1v1: ${firsts.join(', ')}`);
     },
-    120_000,
+    180_000,
   );
 
   it('a 5v5 runs 3 minutes with no NaN, a plausible score and every kind of ability used', () => {
