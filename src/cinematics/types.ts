@@ -54,6 +54,13 @@ export interface DeathCam extends CameraDirector {
   begin(terrain: TerrainQuery | null): void;
   /** Forget the current orbit (round reset, match unload). */
   reset(): void;
+  /**
+   * End the orbit immediately (Space / click). Local only — other players keep their own cam.
+   * Returns true when an orbit was actually cut short.
+   */
+  requestSkip(): boolean;
+  /** True while `direct` would own the camera this fall. */
+  readonly active: boolean;
   setReduceMotion(on: boolean): void;
 }
 

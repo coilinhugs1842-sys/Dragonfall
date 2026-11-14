@@ -309,7 +309,7 @@ export interface MatchTuning {
   respawnDelayS: number;
   spawnProtectionS: number;
   deathCamS: number;
-  /** Approximate; the intro is skippable after the first match. */
+  /** Match intro length; always skippable (anyone → host advances for the room). */
   matchIntroS: number;
   /**
    * Seconds between the host pressing Start and the match beginning: the lobby is in its
@@ -328,9 +328,9 @@ export interface MatchTuning {
 export const MATCH_TUNING: MatchTuning = {
   respawnDelayS: 5, // doc
   spawnProtectionS: 2, // doc
-  deathCamS: 3, // doc
-  matchIntroS: 6, // doc (~6 s)
-  lobbyLaunchS: 3, // the aerie take-off (T-5.2)
+  deathCamS: 3.5, // slightly longer dramatic orbit; skippable at once
+  matchIntroS: 12, // multi-beat flyby + gates (~12 s)
+  lobbyLaunchS: 3.5, // aerie take-off; skippable
   countdownS: 3, // doc (3-2-1)
   duelRounds: 5, // doc
   stormDamagePerS: 10, // PLACEHOLDER (T-3.x)

@@ -1419,6 +1419,33 @@
   text-transform: uppercase;
 }
 
+/* Soft letterbox bars during directed cinematics (Genshin-like framing, cheap). */
+.dfh-letterbox {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0;
+}
+.dfh-letterbox[data-on='1'] {
+  opacity: 1;
+}
+.dfh-letterbox::before,
+.dfh-letterbox::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: calc(7.5% * var(--dfh-lb, 1));
+  background: rgb(8 10 16 / 92%);
+}
+.dfh-letterbox::before {
+  top: 0;
+}
+.dfh-letterbox::after {
+  bottom: 0;
+}
+
 /* Skip hint: small, bottom right, out of the card's way. */
 .dfh-skip {
   position: absolute;

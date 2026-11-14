@@ -43,11 +43,11 @@ export function createIntroCard(root: HTMLElement): IntroCard {
   key.className = 'dfh-skip-key';
   key.textContent = 'Space';
   const words = document.createElement('span');
-  words.textContent = 'Skip intro';
+  words.textContent = 'Skip';
   hint.append(key, words);
   // Screen readers get the sentence; the key cap is the sighted shorthand for it.
   hint.setAttribute('role', 'note');
-  hint.setAttribute('aria-label', 'Press Space to skip the intro');
+  hint.setAttribute('aria-label', 'Press Space to skip');
 
   root.append(card, hint);
 
@@ -55,6 +55,7 @@ export function createIntroCard(root: HTMLElement): IntroCard {
   let shownMap = '';
   let shownMode = '';
   let hintShown = false;
+  let hintWords = 'Skip';
 
   function setCard(step: number): void {
     if (step === shownStep) return;
@@ -90,7 +91,20 @@ export function createIntroCard(root: HTMLElement): IntroCard {
         }
       }
       setCard(step);
-      setHint(hud.phase === 'intro' && hud.canSkipIntro);
+      const skip =
+        hud.deathCamActive === true ||
+        (hud.canSkipIntro && (hud.phase === 'intro' || hud.phase === 'results'));
+      setHint(skip);
+      const label =
+        hud.deathCamActive === true
+          ? 'Skip cam'
+          : hud.phase === 'results'
+            ? 'Skip podium'
+            : 'Skip';
+      if (label !== hintWords) {
+        hintWords = label;
+        words.textContent = label;
+      }
     },
     hide(): void {
       setCard(0);

@@ -44,8 +44,10 @@ export const RECONNECT_GRACE_MS = 30_000;
  *    `intro`, and during intro and countdown the MATCH_PHASE header tick is the tick play begins.
  * 4: maps and Ember Relay (Phase 6). MATCH_START carries the map id, the new RELAY message
  *    carries the shards and braziers, and a SCOREBOARD row grew by one byte (captures).
+ * 5: nine classes / allowed-classes u16.
+ * 6: `match.skipCinematic` net intent — anyone may skip launch / intro / podium for the room.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 // --- Rooms and signaling ------------------------------------------------------------------------
 

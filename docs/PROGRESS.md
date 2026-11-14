@@ -5,17 +5,27 @@ up where the last one stopped.
 
 ## Current state
 
-- **Phase:** 7 (ship). Phases 5 and 6 code are in; trailer rough cut is complete from in-game captures.
-  Higgsfield mood boards / Seedance polish still need a paid plan or the 3-day trial (balance 10, free plan).
-- **Next for the user:** start the Higgsfield trial or upgrade if you want mood boards + Seedance trailer
-  polish; create an empty GitHub repo and say to push so Pages can deploy; run the U-series gates
-  (T-4.9 / T-6.1 / T-7.3).
-- **Next for Claude (after push / credits):** enable Pages on the repo, optional Seedance pass on trailer
-  stills, close T-7.1.
-- **Open issues:** spot-check nine-class lobby + inverted loops on U-series. Large uncommitted polish
-  (dragon riders/tags/hit-flash, etc.) may still sit in the working tree from a parallel pass.
+- **Phase:** 7 (ship). Cinematic cutscene polish is in (always-skippable host-synced skip, ~12 s
+  multi-beat intro, death/podium/launch punches, anim.py + nine-dragon rebuild).
+- **Next for the user:** playtest skip + intro feel; run U-series gates (T-4.9 / T-6.1 / T-7.3); optional
+  Higgsfield mood boards / Seedance if you want paid polish.
+- **Next for Claude:** commit cinematic polish when asked; spot-check perf HUD on U-series if letterbox
+  feels heavy (expected negligible).
+- **Open issues:** uncommitted working-tree polish may still include riders/tags/hit-flash from parallel
+  passes — commit intentionally.
 
 ## Log
+
+### 2026-11-14: cinematic cutscene polish
+
+- **Skip:** launch / intro / podium always skippable; anyone → host advances shared clocks
+  (`match.skipCinematic`, PROTOCOL 6). Death cam skip is local. HUD skip hints on all four.
+- **Intro:** ~12 s multi-beat (establish → dive → skim → far gate → local gate) with letterbox,
+  per-shot FOV, tighter title-card curve. Death cam / podium / aerie launch camera punches.
+- **Anim:** dragon-animator blend/look/tail gains; shared `anim.py` flap/dive/hover/roar polish;
+  Blender rebuild of all nine classes into `public/assets/dragons/*`.
+- **Verify:** typecheck + focused cinematic / timeline / UI skip tests. Perf: letterbox CSS only
+  (negligible vs prior HUD).
 
 ### 2026-11-13: secondary on V, chase-cam hysteresis, default TURN
 

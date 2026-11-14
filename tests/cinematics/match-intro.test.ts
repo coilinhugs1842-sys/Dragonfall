@@ -152,19 +152,29 @@ function nearRock(point: Vec3, margin: number): boolean {
 }
 
 describe('the timeline', () => {
-  it('runs flyby, far gate, local gate in that order, the flyby about 55 % of it', () => {
-    expect(MATCH_INTRO_TIMELINE.flybyEnd).toBeGreaterThan(0.5);
-    expect(MATCH_INTRO_TIMELINE.flybyEnd).toBeLessThan(0.6);
-    expect(MATCH_INTRO_TIMELINE.farGateEnd).toBeGreaterThan(MATCH_INTRO_TIMELINE.flybyEnd);
-    expect(MATCH_INTRO_TIMELINE.farGateEnd).toBeLessThan(1);
-    expect(matchIntroShot(0)).toBe('flyby');
-    expect(matchIntroShot(MATCH_INTRO_TIMELINE.flybyEnd - 1e-6)).toBe('flyby');
-    expect(matchIntroShot(MATCH_INTRO_TIMELINE.flybyEnd)).toBe('farGate');
-    expect(matchIntroShot(MATCH_INTRO_TIMELINE.farGateEnd)).toBe('localGate');
+  it('runs establish → dive → skim → far gate → local gate; flyby about half of it', () => {
+    const t = MATCH_INTRO_TIMELINE;
+    expect(t.establishEnd).toBeGreaterThan(0);
+    expect(t.diveInEnd).toBeGreaterThan(t.establishEnd);
+    expect(t.flybyEnd).toBe(t.heroSkimEnd);
+    expect(t.flybyEnd).toBeGreaterThan(0.45);
+    expect(t.flybyEnd).toBeLessThan(0.6);
+    expect(t.farGateEnd).toBeGreaterThan(t.flybyEnd);
+    expect(t.farGateEnd).toBeLessThan(1);
+    expect(matchIntroShot(0)).toBe('establish');
+    expect(matchIntroShot(t.establishEnd - 1e-6)).toBe('establish');
+    expect(matchIntroShot(t.establishEnd)).toBe('diveIn');
+    expect(matchIntroShot(t.diveInEnd)).toBe('heroSkim');
+    expect(matchIntroShot(t.flybyEnd - 1e-6)).toBe('heroSkim');
+    expect(matchIntroShot(t.flybyEnd)).toBe('farGate');
+    expect(matchIntroShot(t.farGateEnd)).toBe('localGate');
     expect(matchIntroShot(1)).toBe('localGate');
-    // Every shot is long enough to read (at least 0.9 s of a 6 s intro).
-    expect((MATCH_INTRO_TIMELINE.farGateEnd - MATCH_INTRO_TIMELINE.flybyEnd) * INTRO_S).toBeGreaterThan(0.9);
-    expect((1 - MATCH_INTRO_TIMELINE.farGateEnd) * INTRO_S).toBeGreaterThan(1.5);
+    // Every shot is long enough to read on a ~12 s intro.
+    expect(t.establishEnd * INTRO_S).toBeGreaterThan(1);
+    expect((t.diveInEnd - t.establishEnd) * INTRO_S).toBeGreaterThan(1.5);
+    expect((t.flybyEnd - t.diveInEnd) * INTRO_S).toBeGreaterThan(1.5);
+    expect((t.farGateEnd - t.flybyEnd) * INTRO_S).toBeGreaterThan(1.5);
+    expect((1 - t.farGateEnd) * INTRO_S).toBeGreaterThan(2);
   });
 
   it('is a pure function of the clock: same inputs, same camera, whatever came before', () => {
@@ -172,7 +182,17 @@ describe('the timeline', () => {
     const intro = begun();
     const reference = createCamera();
     const again = createCamera();
-    const times = [0, 0.5, 1.5, 3, FLYBY_END_S - EDGE_S, 3.6, 4.5, 5.5, INTRO_S];
+    const times = [
+      0,
+      0.5,
+      INTRO_S * MATCH_INTRO_TIMELINE.establishEnd * 0.5,
+      INTRO_S * MATCH_INTRO_TIMELINE.diveInEnd - EDGE_S,
+      FLYBY_END_S - EDGE_S,
+      FLYBY_END_S + 0.2,
+      FAR_END_S - EDGE_S,
+      FAR_END_S + 0.2,
+      INTRO_S,
+    ];
     for (const timeS of times) {
       expect(at(intro, reference, view, timeS)).toBe(true);
       const card = intro.cardOpacity;
@@ -287,14 +307,17 @@ describe('the timeline', () => {
 });
 
 describe('the title card', () => {
-  it('is 0 at the start, up within about 0.4 s, held, and gone before the first cut', () => {
+  it('is 0 at the start, up by cardInEnd, held, and gone before the far-gate cut', () => {
+    const t = MATCH_INTRO_TIMELINE;
     expect(matchIntroCardOpacity(0)).toBe(0);
-    expect(matchIntroCardOpacity(0.4 / 6)).toBeCloseTo(1, 2);
-    expect(matchIntroCardOpacity(0.2 / 6)).toBeGreaterThan(0.2);
-    expect(matchIntroCardOpacity(0.2 / 6)).toBeLessThan(0.8);
-    for (const fraction of [0.1, 0.2, 0.3, 0.4]) expect(matchIntroCardOpacity(fraction)).toBe(1);
-    expect(MATCH_INTRO_TIMELINE.cardOutEnd).toBeLessThan(MATCH_INTRO_TIMELINE.flybyEnd);
-    for (const fraction of [MATCH_INTRO_TIMELINE.cardOutEnd, MATCH_INTRO_TIMELINE.flybyEnd, 0.8, 1]) {
+    expect(matchIntroCardOpacity(t.cardInEnd)).toBeCloseTo(1, 2);
+    expect(matchIntroCardOpacity(t.cardInEnd * 0.5)).toBeGreaterThan(0.2);
+    expect(matchIntroCardOpacity(t.cardInEnd * 0.5)).toBeLessThan(0.8);
+    for (const fraction of [0.1, 0.2, 0.3, t.cardOutStart]) {
+      expect(matchIntroCardOpacity(fraction)).toBe(1);
+    }
+    expect(t.cardOutEnd).toBeLessThan(t.flybyEnd);
+    for (const fraction of [t.cardOutEnd, t.flybyEnd, 0.8, 1]) {
       expect(matchIntroCardOpacity(fraction)).toBe(0);
     }
     for (const outside of [-0.5, 1.5, Number.NaN, Infinity]) {
@@ -309,7 +332,7 @@ describe('the title card', () => {
       const value = matchIntroCardOpacity(i / steps);
       expect(value).toBeGreaterThanOrEqual(0);
       expect(value).toBeLessThanOrEqual(1);
-      // One millisecond of a 6 s intro never changes it by more than 1 %.
+      // One millisecond of a ~12 s intro never changes it by more than 1 %.
       expect(Math.abs(value - last)).toBeLessThan(0.01);
       last = value;
     }
@@ -319,7 +342,7 @@ describe('the title card', () => {
     const view = fullCast();
     const intro = begun();
     const camera = createCamera();
-    for (const timeS of [0, 0.1, 0.4, 2, 2.8, 3.2, 4, 6]) {
+    for (const timeS of [0, 0.2, 0.6, 2, 4, 5.5, 7, INTRO_S]) {
       at(intro, camera, view, timeS);
       expect(intro.cardOpacity).toBe(matchIntroCardOpacity(timeS / INTRO_S));
     }

@@ -82,6 +82,12 @@ export interface Show {
   matchFrame(view: MutableWorldView, results: ResultsState | null, dtS: number): void;
   /** Opacity of the intro's title card, 0..1. Valid after `stage.updateMatch`. */
   readonly cardOpacity: number;
+  /** 0..1 soft letterbox while a directed cinematic owns the camera. */
+  readonly letterbox: number;
+  /** True while the local death-cam orbit is active. */
+  readonly deathCamActive: boolean;
+  /** End the local death-cam orbit early. Returns true when it did. */
+  skipDeathCam(): boolean;
   /** The page left the room: the aerie is freed. */
   leaveRoom(): void;
   /**
@@ -122,6 +128,8 @@ export function createShow(options: ShowOptions): Show {
 
   const plates: MutableLobbyPlate[] = [];
   let plateCount = 0;
+  /** Soft letterbox strength after the last `direct` (0 = none). */
+  let letterbox = 0;
 
   // --- The fade ----------------------------------------------------------------------------------
   let lastScene: ShowScene = 'title';
@@ -132,11 +140,30 @@ export function createShow(options: ShowOptions): Show {
 
   const director: CameraDirector = {
     direct(camera: PerspectiveCamera, view: WorldView | null, dtS: number): boolean {
-      if (dev !== null) return dev.direct(camera, view, dtS);
-      if (view === null) return lobbyOn && aerie !== null && aerie.direct(camera, null, dtS);
-      if (intro.direct(camera, view, dtS)) return true;
-      if (podium !== null && podium.active && podium.direct(camera, view, dtS)) return true;
-      return deathCam.direct(camera, view, dtS);
+      if (dev !== null) {
+        letterbox = 0;
+        return dev.direct(camera, view, dtS);
+      }
+      if (view === null) {
+        const on = lobbyOn && aerie !== null && aerie.direct(camera, null, dtS);
+        // Aerie launch: light letterbox while dragons take off.
+        letterbox = on && aerie !== null && aerie.launchProgress > 0 ? 0.7 : on ? 0.35 : 0;
+        return on;
+      }
+      if (intro.direct(camera, view, dtS)) {
+        letterbox = 1;
+        return true;
+      }
+      if (podium !== null && podium.active && podium.direct(camera, view, dtS)) {
+        letterbox = 0.85;
+        return true;
+      }
+      if (deathCam.direct(camera, view, dtS)) {
+        letterbox = 0.55;
+        return true;
+      }
+      letterbox = 0;
+      return false;
     },
   };
   stage.setCameraDirector(director);
@@ -227,6 +254,18 @@ export function createShow(options: ShowOptions): Show {
 
     get cardOpacity() {
       return dev === null ? intro.cardOpacity : 0;
+    },
+
+    get letterbox() {
+      return letterbox;
+    },
+
+    get deathCamActive() {
+      return deathCam.active;
+    },
+
+    skipDeathCam(): boolean {
+      return deathCam.requestSkip();
     },
 
     leaveRoom(): void {

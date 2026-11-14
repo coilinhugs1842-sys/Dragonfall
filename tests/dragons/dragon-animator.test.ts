@@ -95,11 +95,11 @@ function expectFiniteState(state: DragonAnimState): void {
   within('oneShotWeight', state.oneShotWeight, 0, 1);
   within('jaw', state.jaw, 0, 1);
   // The springs are clamped: a wild turn rate cannot fold the tail through the body.
-  within('tailYaw', state.tailYaw, -0.9 - 1e-6, 0.9 + 1e-6);
-  within('tailPitch', state.tailPitch, -0.9 - 1e-6, 0.9 + 1e-6);
-  within('wingLag', state.wingLag, -0.35 - 1e-6, 0.35 + 1e-6);
-  within('lookYaw', state.lookYaw, -0.6 - 1e-6, 0.6 + 1e-6);
-  within('lookPitch', state.lookPitch, -0.4 - 1e-6, 0.4 + 1e-6);
+  within('tailYaw', state.tailYaw, -0.95 - 1e-6, 0.95 + 1e-6);
+  within('tailPitch', state.tailPitch, -0.95 - 1e-6, 0.95 + 1e-6);
+  within('wingLag', state.wingLag, -0.4 - 1e-6, 0.4 + 1e-6);
+  within('lookYaw', state.lookYaw, -0.65 - 1e-6, 0.65 + 1e-6);
+  within('lookPitch', state.lookPitch, -0.45 - 1e-6, 0.45 + 1e-6);
 }
 
 function expectUnitPose(quats: Float32Array): void {
@@ -285,7 +285,7 @@ describe('advanceDragonAnim', () => {
     writeLocomotionTargets(target, after);
     const dying = (target[DRAGON_ANIM_DEATH_FALL] as number) > 0;
     // The most a weight may move in one frame: the ease's own step (death eases faster).
-    const maxWeightStep = 1 - Math.exp(-(dying ? 10 : ANIM_BLEND_RATE) * DT) + 1e-3;
+    const maxWeightStep = 1 - Math.exp(-(dying ? 12 : ANIM_BLEND_RATE) * DT) + 1e-3;
     let previous = state.weights.slice();
     let worstPose = 0;
     for (let i = 0; i < 90; i++) {
@@ -369,7 +369,7 @@ describe('one-shots', () => {
       previous = state.oneShotWeight;
       peak = Math.max(peak, state.oneShotWeight);
     }
-    expect(peak).toBeCloseTo(0.8, 5);
+    expect(peak).toBeCloseTo(0.85, 5);
     // The last frame before it ended had all but faded out.
     expect(previous).toBeLessThan(0.1);
     expect(frames * DT).toBeGreaterThanOrEqual(duration);

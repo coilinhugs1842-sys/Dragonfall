@@ -657,6 +657,14 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
   // --- Match intro: title card and skip hint ------------------------------------------------------
   const intro = createIntroCard(el);
 
+  // Soft letterbox during directed cinematics.
+  const letterbox = document.createElement('div');
+  letterbox.className = 'dfh-letterbox';
+  letterbox.setAttribute('aria-hidden', 'true');
+  el.appendChild(letterbox);
+  let letterboxOn = false;
+  let letterboxAmt = -1;
+
   root.appendChild(el);
 
   // --- State kept between frames ------------------------------------------------------------------
@@ -1198,6 +1206,19 @@ export function createHud(root: HTMLElement, options: HudOptions = {}): Hud {
     updateBanner(hud);
     updateBoard(hud, nowMs);
     intro.update(hud);
+    const lb = hud.letterbox ?? 0;
+    const lbOn = lb > 0.04;
+    if (lbOn !== letterboxOn) {
+      letterboxOn = lbOn;
+      letterbox.dataset.on = lbOn ? '1' : '0';
+    }
+    if (lbOn) {
+      const q = Math.round(lb * 20) / 20;
+      if (q !== letterboxAmt) {
+        letterboxAmt = q;
+        letterbox.style.setProperty('--dfh-lb', String(q));
+      }
+    }
 
     rootShown.set(true);
     fresh = false;

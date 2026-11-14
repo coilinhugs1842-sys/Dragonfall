@@ -173,6 +173,8 @@ export class WorkerHost implements HostHandle {
   private phase: MatchPhase = 'lobby';
   private blocker: StartBlocker | null = null;
   private skippable = false;
+  /** True while the lobby launch (`starting`) may be skipped. */
+  private skippableCinematic = false;
   private readonly info: HostTickInfo = createHostTickInfo();
   private readonly prevState: HostViewState = createHostViewState();
   private readonly currentState: HostViewState = createHostViewState();
@@ -340,6 +342,14 @@ export class WorkerHost implements HostHandle {
     return this.matchRunning && this.skippable && this.phase === 'intro';
   }
 
+  get canSkipCinematic(): boolean {
+    return (
+      this.skippableCinematic ||
+      (this.matchRunning && this.skippable && this.phase === 'intro') ||
+      (this.matchRunning && this.phase === 'results')
+    );
+  }
+
   get clientCount(): number {
     return this.stats.clientCount;
   }
@@ -402,6 +412,13 @@ export class WorkerHost implements HostHandle {
     if (this.ended || !this.matchRunning || this.phase !== 'intro') return false;
     if (!force && !this.skippable) return false;
     this.postObject({ t: 'skipIntro', force });
+    return true;
+  }
+
+  requestSkipCinematic(force = false): boolean {
+    if (this.ended) return false;
+    if (!force && !this.canSkipCinematic) return false;
+    this.postObject({ t: 'intent', intent: { type: 'match.skipCinematic' } });
     return true;
   }
 
@@ -524,6 +541,7 @@ export class WorkerHost implements HostHandle {
     this.phase = meta.matchPhase;
     this.blocker = meta.startBlocker;
     this.skippable = meta.canSkipIntro;
+    this.skippableCinematic = meta.canSkipCinematic;
     if (!meta.inMatch) {
       // The next match must not start from the last picture of this one.
       this.hasState = false;

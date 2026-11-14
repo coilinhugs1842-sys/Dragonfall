@@ -155,6 +155,7 @@ describe('applyLobbyIntent', () => {
       { type: 'title.dismissError' },
       { type: 'lobby.focusPlayer', playerId: 1 },
       { type: 'match.skipIntro' },
+      { type: 'match.skipCinematic' },
       { type: 'match.leave' },
       { type: 'settings.update', patch: {} },
       { type: 'settings.reset' },

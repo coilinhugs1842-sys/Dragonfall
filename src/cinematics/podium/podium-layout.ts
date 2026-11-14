@@ -121,16 +121,17 @@ export const PASS_GROUP_UP = 7;
 // --- The camera ------------------------------------------------------------------------------------
 
 /** Wide shot of the pass: position at the start and the end of its slow push-in, and the aim. */
-export const CAM_WIDE_FROM: readonly number[] = [12, 6.5, 64];
+/** Wider establish than the pass close; stays far enough that parked waiters stay off-screen. */
+export const CAM_WIDE_FROM: readonly number[] = [13, 6.8, 70];
 export const CAM_WIDE_TO: readonly number[] = [10.5, 7, 58];
-export const CAM_WIDE_AIM: readonly number[] = [-2, 12, 0];
+export const CAM_WIDE_AIM: readonly number[] = [-2, 12.5, 0];
 export const CAM_WIDE_FOV = 46;
-/** Three-quarter shot of the podium: bearing from the front (toward the sun), distance, height. */
+/** Three-quarter shot of the podium: tighter hold on the MVP roar. */
 export const CAM_PODIUM_BEARING = 0.42;
-export const CAM_PODIUM_DISTANCE = 40;
-export const CAM_PODIUM_Y = 9;
-export const CAM_PODIUM_AIM: readonly number[] = [0, 7, -1];
-export const CAM_PODIUM_FOV = 41;
+export const CAM_PODIUM_DISTANCE = 37;
+export const CAM_PODIUM_Y = 8.7;
+export const CAM_PODIUM_AIM: readonly number[] = [0, 7.15, -1];
+export const CAM_PODIUM_FOV = 39;
 /**
  * The podium shot aims this many metres to the right of the steps (the camera's right, on any
  * site), which puts them a little left of the middle of the picture: the result screen's score

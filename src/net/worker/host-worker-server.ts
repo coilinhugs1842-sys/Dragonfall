@@ -562,7 +562,8 @@ export class HostWorkerServer {
       last.inMatch === session.inMatch &&
       last.matchPhase === session.matchPhase &&
       last.startBlocker === blocker &&
-      last.canSkipIntro === session.canSkipIntro
+      last.canSkipIntro === session.canSkipIntro &&
+      last.canSkipCinematic === session.canSkipCinematic
     ) {
       return;
     }
@@ -577,6 +578,7 @@ export class HostWorkerServer {
       matchPhase: session.matchPhase,
       startBlocker: blocker,
       canSkipIntro: session.canSkipIntro,
+      canSkipCinematic: session.canSkipCinematic,
     };
     this.meta = meta;
     this.env.post({ t: 'meta', meta }, []);

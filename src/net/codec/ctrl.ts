@@ -277,7 +277,7 @@ function wireIndex(index: number, w: Writer): number {
  *   host.setTimeLimit        u16 seconds         host.setAllowedClasses       u16 bitmask
  *   host.movePlayer          u8 playerId, u8 side (0, 1, 2 = spectator)
  *   host.kick                u8 playerId         lobby.switchSide             u8 side
- *   lobby.leave, host.autoBalance, host.shuffle, host.start                   nothing
+ *   lobby.leave, host.autoBalance, host.shuffle, host.start, match.skipCinematic   nothing
  * Returns 0 if `msg.intent` is null or holds a value that has no wire encoding.
  */
 export function encodeIntent(w: Writer, msg: Readonly<IntentMessage>): number {
@@ -337,6 +337,7 @@ export function encodeIntent(w: Writer, msg: Readonly<IntentMessage>): number {
     case 'host.autoBalance':
     case 'host.shuffle':
     case 'host.start':
+    case 'match.skipCinematic':
       break;
   }
   return w.finish();
@@ -410,6 +411,7 @@ function readIntent(r: Reader, type: NetIntentType): NetIntent | null {
     case 'host.autoBalance':
     case 'host.shuffle':
     case 'host.start':
+    case 'match.skipCinematic':
       return { type };
   }
 }

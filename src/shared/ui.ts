@@ -509,8 +509,18 @@ export interface HudState {
   /** Newest first. */
   readonly killfeed: readonly KillfeedEntry[];
   readonly scoreboard: readonly ScoreboardRow[];
-  /** True once this client may skip the intro (not on its first match). */
+  /**
+   * True when this client may ask the host to skip the current shared cinematic (intro, or
+   * results podium). Launch skip uses the lobby `starting` phase instead. Always true for every
+   * player while those moments run (host advances the shared clock).
+   */
   readonly canSkipIntro: boolean;
+  /**
+   * Local death-cam orbit is on screen. Space skips it without asking the host (camera is local).
+   */
+  readonly deathCamActive?: boolean;
+  /** 0..1 letterbox bar strength while a directed cinematic owns the camera. */
+  readonly letterbox?: number;
 
   // --- Combat HUD (T-3.6 / T-3.7). All optional and additive. ----------------------------------
   /** Own scoreboard row and the lookup for "who am I riding with". Absent = NO_PLAYER. */
@@ -685,6 +695,9 @@ export type UiIntent =
   /** Bot riders (T-3.10): add / remove / fill / clear, and how well they fly. Host's page only. */
   | LobbyBotIntent
   // Match
+  /** Skip the current shared cinematic (launch / intro / podium). Alias: `match.skipIntro`. */
+  | { readonly type: 'match.skipCinematic' }
+  /** @deprecated Prefer `match.skipCinematic`; kept so older UI / tests still compile. */
   | { readonly type: 'match.skipIntro' }
   | { readonly type: 'match.leave' }
   /**

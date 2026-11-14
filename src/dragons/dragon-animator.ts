@@ -54,30 +54,30 @@ import type { BakedClip, PoseAccumulator } from './pose-math';
 export const DRAGON_CLIP_COUNT = DRAGON_ANIM_CLIPS.length;
 
 /** Cross-fade rate for locomotion weights (higher = snappier glide↔dive↔boost). */
-export const ANIM_BLEND_RATE = 9;
+export const ANIM_BLEND_RATE = 11;
 /** The fall takes over faster than that. */
-const DEATH_BLEND_RATE = 10;
-const ONE_SHOT_FADE_IN_S = 0.08;
-const ONE_SHOT_FADE_OUT_S = 0.2;
+const DEATH_BLEND_RATE = 12;
+const ONE_SHOT_FADE_IN_S = 0.07;
+const ONE_SHOT_FADE_OUT_S = 0.18;
 /** A hit reaction leaves this much of the flight animation showing. */
-const HIT_PEAK_WEIGHT = 0.8;
+const HIT_PEAK_WEIGHT = 0.85;
 
 /** Radians of neck + head turn per radian/second of yaw and pitch, and the caps. */
-const LOOK_YAW_GAIN = 0.42;
-const LOOK_PITCH_GAIN = 0.3;
-const LOOK_YAW_MAX = 0.6;
-const LOOK_PITCH_MAX = 0.4;
-const LOOK_RATE = 5;
+const LOOK_YAW_GAIN = 0.48;
+const LOOK_PITCH_GAIN = 0.34;
+const LOOK_YAW_MAX = 0.65;
+const LOOK_PITCH_MAX = 0.45;
+const LOOK_RATE = 6;
 /** Tail spring: stiffness (1/s^2), damping (1/s), and radians of bend per radian/second. */
-const TAIL_STIFFNESS = 42;
-const TAIL_DAMPING = 7.5;
-const TAIL_GAIN = 0.5;
-const TAIL_MAX = 0.9;
+const TAIL_STIFFNESS = 48;
+const TAIL_DAMPING = 8;
+const TAIL_GAIN = 0.58;
+const TAIL_MAX = 0.95;
 /** Wing-tip lag spring, driven by the roll rate. */
-const WING_STIFFNESS = 90;
-const WING_DAMPING = 12;
-const WING_GAIN = 0.11;
-const WING_MAX = 0.35;
+const WING_STIFFNESS = 100;
+const WING_DAMPING = 13;
+const WING_GAIN = 0.14;
+const WING_MAX = 0.4;
 /** Breaths per second and the chest's scale swing. */
 const BREATH_HZ = 0.45;
 export const BREATH_SCALE = 0.014;

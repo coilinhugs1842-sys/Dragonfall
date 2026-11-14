@@ -280,7 +280,11 @@ describe('the match timeline, host to client', () => {
     const launch = secondsToTicks(MATCH_TUNING.lobbyLaunchS);
     const intro = secondsToTicks(MATCH_TUNING.matchIntroS);
     const countdown = secondsToTicks(MATCH_TUNING.countdownS);
-    expect([launch, intro, countdown]).toEqual([3 * TICK_HZ, 6 * TICK_HZ, 3 * TICK_HZ]);
+    expect([launch, intro, countdown]).toEqual([
+      secondsToTicks(3.5),
+      secondsToTicks(12),
+      3 * TICK_HZ,
+    ]);
     const first = pressStart(rig, launch);
     untilPhase(rig, 'playing');
     expect(hostPhases.map((event) => [event.phase, event.tick])).toEqual([
@@ -394,8 +398,8 @@ describe('the match timeline, host to client', () => {
   });
 });
 
-describe('skipping the intro', () => {
-  it('is refused on the room’s first match, except with force; clients cannot ask', () => {
+describe('skipping shared cinematics', () => {
+  it('skips the first-match intro for everyone; guests send match.skipCinematic', () => {
     const made = timeline(1);
     const { rig, hostPhases } = made;
     const client = made.clients[0];
@@ -403,54 +407,50 @@ describe('skipping the intro', () => {
     apply(rig, { type: 'host.setTeamSize', teamSize: 1 });
     readyUp(rig);
     const first = pressStart(rig);
-    // Nothing to skip during the launch.
+    // Launch may be skipped as a shared cinematic, but not as "intro".
     expect(rig.host.canSkipIntro).toBe(false);
-    expect(rig.host.requestSkipIntro(true)).toBe(false);
+    expect(rig.host.canSkipCinematic).toBe(true);
     untilPhase(rig, 'intro');
     rig.runTicks(10);
 
-    expect(rig.host.canSkipIntro).toBe(false);
-    expect(rig.host.requestSkipIntro()).toBe(false);
-    expect(rig.host.applyIntent({ type: 'match.skipIntro' })).toBe(false);
-    // The intent has no wire form: a client's Skip never leaves its page.
+    expect(rig.host.canSkipIntro).toBe(true);
+    expect(rig.host.canSkipCinematic).toBe(true);
     expect(isNetIntent({ type: 'match.skipIntro' })).toBe(false);
+    expect(isNetIntent({ type: 'match.skipCinematic' })).toBe(true);
     expect(client.session.sendIntent({ type: 'match.skipIntro' })).toBe(false);
-    rig.runTicks(5);
-    expect(rig.host.matchPhase).toBe('intro');
 
-    // Forced (dev flag): the countdown starts on the very next tick, for everyone.
+    // Guest skip reaches the host and advances the shared clock.
+    expect(client.session.sendIntent({ type: 'match.skipCinematic' })).toBe(true);
     const askedAt = rig.host.hostTick;
-    expect(rig.host.requestSkipIntro(true)).toBe(true);
+    rig.run(80);
     expect(rig.host.matchPhase).toBe('countdown');
-    expect(rig.host.matchStartTick).toBe(askedAt + 1 + COUNTDOWN);
-    expect(rig.host.requestSkipIntro(true)).toBe(false);
-    rig.run(200);
+    expect(rig.host.canSkipIntro).toBe(false);
+    expect(rig.host.matchStartTick).toBeGreaterThanOrEqual(askedAt + 1 + COUNTDOWN);
+    expect(rig.host.matchStartTick).toBeLessThanOrEqual(askedAt + 8 + COUNTDOWN);
     expect(client.session.matchPhase).toBe('countdown');
-    expect(client.session.phaseStartTick).toBe(askedAt + 1);
-    expect(client.session.matchStartTick).toBe(askedAt + 1 + COUNTDOWN);
+    const countdownTick = rig.host.matchStartTick - COUNTDOWN;
+    expect(client.session.phaseStartTick).toBe(countdownTick);
+    expect(client.session.matchStartTick).toBe(rig.host.matchStartTick);
 
     untilPhase(rig, 'playing');
-    expect(rig.host.hostTick).toBe(askedAt + 1 + COUNTDOWN);
     expect(rig.host.requestSkipIntro(true)).toBe(false);
-    // The client let go of its dragon on the same tick: no correction at the handover.
     rig.runTicks(90);
-    expect(client.session.matchStartTick).toBe(askedAt + 1 + COUNTDOWN);
     expect(client.session.predictor.matchCount).toBeGreaterThan(40);
     expect(client.session.predictor.correctionCount).toBe(0);
     expect(hostPhases.map((event) => [event.phase, event.tick])).toEqual([
       ['intro', first],
-      ['countdown', askedAt + 1],
-      ['playing', askedAt + 1 + COUNTDOWN],
+      ['countdown', countdownTick],
+      ['playing', rig.host.matchStartTick],
     ]);
     expect(made.clientPhases[0]).toEqual([
       ['intro', first],
-      ['countdown', askedAt + 1],
-      ['playing', askedAt + 1 + COUNTDOWN],
+      ['countdown', countdownTick],
+      ['playing', rig.host.matchStartTick],
     ]);
     rig.dispose();
   });
 
-  it('is the host’s to use from the room’s second match on', () => {
+  it('lets the host skip intro and results on any match', () => {
     const made = timeline(1);
     const { rig } = made;
     const client = made.clients[0];
@@ -458,20 +458,11 @@ describe('skipping the intro', () => {
     apply(rig, { type: 'host.setTeamSize', teamSize: 1 });
     readyUp(rig);
     pressStart(rig);
-    untilPhase(rig, 'playing');
-    expect(rig.host.endMatch()).toBe(true);
-    rig.run(300);
-    expect(rig.host.lobby.phase).toBe('lobby');
-
-    // The second match of the same room.
-    readyUp(rig);
-    pressStart(rig);
-    expect(rig.host.canSkipIntro).toBe(false);
     untilPhase(rig, 'intro');
     rig.runTicks(8);
     expect(rig.host.canSkipIntro).toBe(true);
     const askedAt = rig.host.hostTick;
-    expect(rig.host.applyIntent({ type: 'match.skipIntro' })).toBe(true);
+    expect(rig.host.applyIntent({ type: 'match.skipCinematic' })).toBe(true);
     expect(rig.host.canSkipIntro).toBe(false);
     expect(rig.host.matchPhase).toBe('countdown');
     rig.run(200);
@@ -480,6 +471,18 @@ describe('skipping the intro', () => {
     untilPhase(rig, 'playing');
     expect(rig.host.hostTick).toBe(askedAt + 1 + COUNTDOWN);
     expect(rig.host.canSkipIntro).toBe(false);
+
+    // Second match of the same room: still skippable without force.
+    expect(rig.host.endMatch()).toBe(true);
+    rig.run(300);
+    expect(rig.host.lobby.phase).toBe('lobby');
+    readyUp(rig);
+    pressStart(rig);
+    untilPhase(rig, 'intro');
+    rig.runTicks(4);
+    expect(rig.host.canSkipIntro).toBe(true);
+    expect(rig.host.applyIntent({ type: 'match.skipIntro' })).toBe(true);
+    expect(rig.host.matchPhase).toBe('countdown');
     rig.dispose();
   });
 });
@@ -769,11 +772,11 @@ describe('the lobby launch', () => {
     expect(client.session.lobby?.phase).toBe('lobby');
     expect(client.session.inMatch).toBe(false);
     expect(teamsOf(rig.host.lobby)).toEqual(teams);
-    // And the room starts again as if nothing had happened: this is still its first match.
+    // And the room starts again: intro is still skippable on every match.
     readyUp(rig);
     pressStart(rig);
     untilPhase(rig, 'intro');
-    expect(rig.host.canSkipIntro).toBe(false);
+    expect(rig.host.canSkipIntro).toBe(true);
     rig.dispose();
   });
 });

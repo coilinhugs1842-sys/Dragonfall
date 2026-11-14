@@ -1181,10 +1181,15 @@ export function createGame(options: GameOptions): Game {
         // Local only: which perch this player's camera frames.
         show.focus(intent.playerId);
         return;
-      case 'match.skipIntro': {
-        // The host decides (and only from the room's second match on); a guest cannot ask.
+      case 'match.skipIntro':
+      case 'match.skipCinematic': {
+        // Local death cam: Space ends the orbit without asking the host (camera is local).
+        if (show.skipDeathCam()) return;
         const current = run;
-        if (current !== null && current.kind !== 'client') current.session.requestSkipIntro();
+        if (current === null) return;
+        // Anyone may skip launch / intro / podium; the host advances the shared clock.
+        if (current.kind === 'client') current.session.sendIntent({ type: 'match.skipCinematic' });
+        else current.session.requestSkipCinematic();
         return;
       }
       default: {
@@ -1509,7 +1514,6 @@ export function createGame(options: GameOptions): Game {
     // "Has control", by pointer lock or by gamepad: what hides the "click to fly" prompt.
     info.pointerLocked = input.flying;
     info.watchedId = stage.watchedId;
-    info.canSkipIntro = current.kind !== 'client' && current.session.canSkipIntro;
     let phase: MatchPhase;
     if (current.kind === 'client') {
       const session = current.session;
@@ -1531,6 +1535,14 @@ export function createGame(options: GameOptions): Game {
       info.pings = session.playerPings;
       phase = session.matchPhase;
     }
+    // Shared cinematics: every player may ask; the host accepts during intro / results / launch.
+    const skipShared =
+      current.kind === 'client'
+        ? facts.lobby?.phase === 'starting' || phase === 'intro' || phase === 'results'
+        : current.session.canSkipCinematic;
+    info.canSkipIntro = skipShared;
+    info.deathCamActive = show.deathCamActive;
+    info.letterbox = show.letterbox;
     hudBuilder.setLobby(facts.lobby);
     hudBuilder.frame(dtS, info);
     // Held, not toggled; never over the pause menu or the settings.

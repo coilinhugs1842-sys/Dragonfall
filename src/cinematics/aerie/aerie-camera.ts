@@ -208,14 +208,14 @@ export function createAerieCamera(layout: AerieLayout): AerieCamera {
     writeWide(out, aspect, !reduceMotion);
     if (reduceMotion) return;
     // Push in over the first half...
-    const push = smooth01(progress * 1.8);
-    out.px = lerp(out.px, out.tx, push * 0.34);
-    out.py = lerp(out.py, out.ty - 3, push * 0.34);
-    out.pz = lerp(out.pz, out.tz, push * 0.34);
+    const push = smooth01(progress * 1.95);
+    out.px = lerp(out.px, out.tx, push * 0.42);
+    out.py = lerp(out.py, out.ty - 4, push * 0.42);
+    out.pz = lerp(out.pz, out.tz, push * 0.42);
     // ...then look up after the dragons as they pass overhead.
-    const tilt = smooth01((progress - 0.22) / 0.78);
-    out.ty += tilt * tilt * 58 + tilt * 10;
-    out.fov = lerp(WIDE_FOV, 46, push);
+    const tilt = smooth01((progress - 0.18) / 0.82);
+    out.ty += tilt * tilt * 72 + tilt * 14;
+    out.fov = lerp(WIDE_FOV, 50, push);
   }
 
   return {

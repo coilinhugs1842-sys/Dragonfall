@@ -165,10 +165,12 @@ export interface HostHandle {
   /** Why Start is unavailable, or null when the host may start. */
   readonly startBlocker: StartBlocker | null;
   /**
-   * The host may skip the intro that is running (`requestSkipIntro()` would work): true only
-   * during `intro`, from the room's second match on. For the HUD's Skip prompt.
+   * Anyone may skip the intro that is running (`requestSkipIntro()` would work): true during
+   * `intro` on every match. For the HUD's Skip prompt.
    */
   readonly canSkipIntro: boolean;
+  /** Launch, intro, or results podium may be skipped for the whole room. */
+  readonly canSkipCinematic: boolean;
   /** Round trip per player in ms, indexed by PlayerId; -1 = unknown. Mutated in place. */
   readonly playerPings: readonly number[];
   /** Links that completed the handshake (real players and bots). */
@@ -193,11 +195,13 @@ export interface HostHandle {
   endMatch(): void;
   /**
    * Asks to cut the intro short for everyone: the countdown starts on the next host tick.
-   * Refused unless `canSkipIntro`; `force` (dev flags, tests) skips any running intro. Returns
-   * whether the request was accepted as far as this page knows: exact on the main-thread host,
-   * and on a worker host the page's mirrored state decides (the worker checks again).
+   * Allowed whenever `canSkipIntro`. Returns whether the request was accepted as far as this
+   * page knows: exact on the main-thread host, and on a worker host the page's mirrored state
+   * decides (the worker checks again).
    */
   requestSkipIntro(force?: boolean): boolean;
+  /** Skip launch / intro / podium for the room. */
+  requestSkipCinematic(force?: boolean): boolean;
   /** Once per rendered frame. `nowMs` is the page's monotonic clock. */
   update(nowMs: number): void;
   /** Once per fixed 30 Hz step of the page's loop. Does nothing when a worker owns the ticks. */
@@ -399,6 +403,10 @@ export class DirectHost implements HostHandle {
     return this.core.session.canSkipIntro;
   }
 
+  get canSkipCinematic(): boolean {
+    return this.core.session.canSkipCinematic;
+  }
+
   get playerPings(): readonly number[] {
     return this.core.session.playerPings;
   }
@@ -441,6 +449,10 @@ export class DirectHost implements HostHandle {
 
   requestSkipIntro(force = false): boolean {
     return this.core.session.requestSkipIntro(force);
+  }
+
+  requestSkipCinematic(force = false): boolean {
+    return this.core.session.requestSkipCinematic(force);
   }
 
   update(nowMs: number): void {

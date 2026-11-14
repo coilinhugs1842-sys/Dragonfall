@@ -46,8 +46,15 @@ import type {
 import type { DragonState } from '../sim';
 import { MAX_RECONNECT_TOKEN_LENGTH } from '../sim/lobby';
 import type { LobbyIntent } from '../sim/lobby';
+import type { UiIntent } from '../shared/ui';
 
 export { PROTOCOL_VERSION };
+
+/** Host-synced cinematic skip (launch / intro / podium). Anyone may send; host advances clocks. */
+export type MatchSkipCinematicIntent = Extract<
+  UiIntent,
+  { readonly type: 'match.skipCinematic' | 'match.skipIntro' }
+>;
 
 // --- Message ids ---------------------------------------------------------------------------------
 
@@ -335,12 +342,14 @@ export const NET_INTENT_TYPES = [
   'host.lockTeams',
   'host.kick',
   'host.start',
-] as const satisfies readonly LobbyIntent['type'][];
+  // Appended in PROTOCOL_VERSION 6: shared cinematic skip.
+  'match.skipCinematic',
+] as const;
 
-export type NetIntent = LobbyIntent;
+export type NetIntent = LobbyIntent | { readonly type: 'match.skipCinematic' };
 export type NetIntentType = NetIntent['type'];
 
-/** Compile-time check that the table lists every LobbyIntent. */
+/** Compile-time check that the table lists every NetIntent. */
 type MissingIntentType = Exclude<NetIntentType, (typeof NET_INTENT_TYPES)[number]>;
 const NET_INTENT_TYPES_COMPLETE: MissingIntentType extends never ? true : never = true;
 void NET_INTENT_TYPES_COMPLETE;

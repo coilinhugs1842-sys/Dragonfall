@@ -65,8 +65,10 @@ export interface HostMeta {
   readonly inMatch: boolean;
   readonly matchPhase: MatchPhase;
   readonly startBlocker: StartBlocker | null;
-  /** `HostSession.canSkipIntro`: the host may skip the running intro. */
+  /** `HostSession.canSkipIntro`: the intro may be skipped. */
   readonly canSkipIntro: boolean;
+  /** Launch / intro / results may be skipped for the room. */
+  readonly canSkipCinematic: boolean;
 }
 
 export type ToWorkerMessage =

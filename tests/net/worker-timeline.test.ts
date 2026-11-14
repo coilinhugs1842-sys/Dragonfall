@@ -86,16 +86,13 @@ describe.each([
     expect(room.host.lobby?.phase).toBe('inMatch');
     expect(room.host.matchPhase).toBe('intro');
 
-    // The room's first match: the intro cannot be skipped (without force).
+    // First match: intro is skippable; without a skip it runs its full length.
     room.run(300);
     expect(room.host.matchPhase).toBe('intro');
-    expect(room.host.canSkipIntro).toBe(false);
-    expect(room.host.requestSkipIntro()).toBe(false);
-    room.host.applyIntent({ type: 'match.skipIntro' });
-    room.run(300);
-    expect(room.host.matchPhase).toBe('intro');
+    expect(room.host.canSkipIntro).toBe(true);
+    expect(room.host.canSkipCinematic).toBe(true);
     expect(client.session.matchPhase).toBe('intro');
-    expect(room.host.phaseTimeS).toBeGreaterThan(0.4);
+    expect(room.host.phaseTimeS).toBeGreaterThan(0.2);
 
     untilPhase(room, 'playing');
     room.run(300);
@@ -107,14 +104,14 @@ describe.each([
     room.dispose();
   });
 
-  it('skips the intro with force, and without it from the second match on', () => {
+  it('skips the intro on the first match and again on later matches', () => {
     const made = timelineRoom(direct);
     const { room, client, phases } = made;
     start(made);
     untilPhase(room, 'intro');
     room.run(200);
-    expect(room.host.canSkipIntro).toBe(false);
-    expect(room.host.requestSkipIntro(true)).toBe(true);
+    expect(room.host.canSkipIntro).toBe(true);
+    expect(room.host.requestSkipIntro()).toBe(true);
     room.runUntil(() => room.host.matchPhase === 'countdown', 500);
     expect(room.host.canSkipIntro).toBe(false);
     expect(room.host.requestSkipIntro(true)).toBe(false);
@@ -126,7 +123,7 @@ describe.each([
     expect((phases[2]?.[1] ?? 0) - (phases[1]?.[1] ?? 0)).toBe(COUNTDOWN);
     expect(client.session.matchStartTick).toBe(phases[2]?.[1]);
 
-    // Back to the lobby and off again: the room has played before, so the host may skip.
+    // Back to the lobby and off again: still skippable.
     room.host.endMatch();
     room.runUntil(() => !room.host.inMatch && room.host.lobby?.phase === 'lobby', 5000);
     phases.length = 0;
@@ -134,7 +131,7 @@ describe.each([
     untilPhase(room, 'intro');
     room.runUntil(() => room.host.canSkipIntro, 1000);
     room.run(100);
-    expect(room.host.requestSkipIntro()).toBe(true);
+    expect(room.host.requestSkipCinematic()).toBe(true);
     room.runUntil(() => room.host.matchPhase === 'countdown', 500);
     expect(room.host.canSkipIntro).toBe(false);
     room.run(200);
@@ -148,7 +145,7 @@ describe.each([
     start(made);
     untilPhase(room, 'intro');
     room.runUntil(() => room.host.canSkipIntro, 1000);
-    room.host.applyIntent({ type: 'match.skipIntro' });
+    room.host.applyIntent({ type: 'match.skipCinematic' });
     room.runUntil(() => room.host.matchPhase === 'countdown', 500);
     room.dispose();
   });

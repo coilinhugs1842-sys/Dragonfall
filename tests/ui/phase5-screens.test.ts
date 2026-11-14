@@ -520,7 +520,7 @@ describe('Phase 5 screens', () => {
       expect(one('.dfh-skip').hidden).toBe(false);
       const space = pressKey(' ', 'Space');
       expect(space.defaultPrevented).toBe(true);
-      expect(intents).toEqual([{ type: 'match.skipIntro' }]);
+      expect(intents).toEqual([{ type: 'match.skipCinematic' }]);
       pressKey('Enter', 'Enter');
       pressKey(' ', 'Space');
       expect(intents).toHaveLength(1);
@@ -534,7 +534,7 @@ describe('Phase 5 screens', () => {
       pressKey('Enter', 'Enter', true);
       expect(intents).toEqual([]);
       pressKey('Enter', 'Enter');
-      expect(intents).toEqual([{ type: 'match.skipIntro' }]);
+      expect(intents).toEqual([{ type: 'match.skipCinematic' }]);
 
       hud.phase = 'playing';
       ui.update(state);
@@ -561,7 +561,7 @@ describe('Phase 5 screens', () => {
       state.settingsOpen = false;
       ui.update(state);
       pressKey(' ', 'Space');
-      expect(intents).toEqual([{ type: 'match.skipIntro' }]);
+      expect(intents).toEqual([{ type: 'match.skipCinematic' }]);
     });
   });
 

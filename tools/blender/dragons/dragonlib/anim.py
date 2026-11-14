@@ -114,7 +114,7 @@ def glide(ph, P):
     return pose
 
 
-def _flap_wings(pose, P, ph, amp=42.0, bias=5.0, fold=1.05, sweep=0.0, sweep_amp=8.0):
+def _flap_wings(pose, P, ph, amp=48.0, bias=6.0, fold=1.08, sweep=0.0, sweep_amp=9.0):
     th = TAU * ph
     f = max(0.0, -np.sin(th)) ** 1.25 * fold  # peaks mid upstroke
     wings(pose, P,
@@ -164,12 +164,12 @@ def _tuck(pose, P, k=1.0, flutter=0.0):
 def dive(ph, P):
     pose = {}
     fl = 1.6 * s(ph, 4)
-    spine(pose, root_pitch=-4, chest=-2, neck=(-7, -8 + 0.7 * s(ph, 2), -5), head=12 + 1.0 * s(ph, 2, 1.0), jaw=3,
-          hips=-2.5,
-          tail=tuple(3.2 + (1.0 + 0.6 * k) * s(ph, 3, 0.9 * k) for k in range(4)),
+    spine(pose, root_pitch=-6, chest=-3, neck=(-8, -9 + 0.7 * s(ph, 2), -6), head=14 + 1.0 * s(ph, 2, 1.0), jaw=3,
+          hips=-3.0,
+          tail=tuple(3.6 + (1.0 + 0.6 * k) * s(ph, 3, 0.9 * k) for k in range(4)),
           tail_yaw=tuple((0.8 + 0.6 * k) * s(ph, 2, 0.5 + 0.9 * k) for k in range(4)),
           loc=(0.014 * s(ph, 4, 1.0), 0.025 * s(ph, 4), 0))
-    _tuck(pose, P, 1.12, fl)
+    _tuck(pose, P, 1.2, fl)
     return pose
 
 
@@ -203,7 +203,7 @@ def hover(ph, P):
           tail_yaw=tuple(2.0 * np.sin(th - 0.8 * k) for k in range(4)),
           loc=(0, 0.22 * -np.cos(th - 0.7), 0))
     f = max(0.0, -np.sin(th)) ** 1.25
-    wings(pose, P, flap=2 + 38 * np.cos(th), sweep=-6 - 14 * np.cos(th) + 12 * f, twist=-8 + 12 * np.sin(th) - 6 * f,
+    wings(pose, P, flap=4 + 42 * np.cos(th), sweep=-6 - 14 * np.cos(th) + 12 * f, twist=-8 + 12 * np.sin(th) - 6 * f,
           elbow=8 + 34 * f, wrist=5 + 44 * f, close=0.04 + 0.34 * f,
           elbow_lag=11 * np.sin(th - 0.45), wrist_lag=16 * np.sin(th - 0.85), finger_lag=12 * np.sin(th - 1.3))
     return pose
@@ -241,7 +241,7 @@ def roar(ph, P):
           tail=tuple((5 + 2 * k) * track(ph, [(0, 0), (0.25 + 0.05 * k, -0.5), (0.5 + 0.06 * k, 1), (1, 0)]) for k in range(4)),
           tail_yaw=tuple(5 * np.sin(TAU * 2 * ph - 0.8 * k) * flare for k in range(4)),
           loc=(0, 0.1 * flare, 0.06 * rear))
-    wings(pose, P, flap=17 * flare + 1.2 * shake, sweep=-7 * flare, twist=-9 * flare, elbow=2 - 3 * flare, wrist=-3 * flare,
+    wings(pose, P, flap=22 * flare + 1.4 * shake, sweep=-9 * flare, twist=-11 * flare, elbow=2 - 4 * flare, wrist=-4 * flare,
           wrist_lag=7 * flare + 2 * shake, finger_lag=6 * flare + 2.5 * shake)
     return pose
 

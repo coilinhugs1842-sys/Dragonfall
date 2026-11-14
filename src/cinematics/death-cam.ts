@@ -100,14 +100,14 @@ export interface DeathCamTuning {
 }
 
 export const DEATH_CAM_TUNING: DeathCamTuning = {
-  radiusStart: 27,
-  radiusEnd: 20,
-  heightStart: 7.5,
-  heightEnd: 5,
+  radiusStart: 34,
+  radiusEnd: 18,
+  heightStart: 11,
+  heightEnd: 4.5,
   lookLift: 1.5,
-  minRate: 0.25,
-  maxRate: 0.6,
-  fovDeg: 50,
+  minRate: 0.22,
+  maxRate: 0.55,
+  fovDeg: 48,
   leadS: 0.1,
   maxLead: 6,
   leadRate: 4,
@@ -196,11 +196,14 @@ export function createDeathCam(): DeathCam {
   const wantLead = createVec3();
   const wantAvoid = createVec3();
 
+  let skipped = false;
+
   function forget(): void {
     down = false;
     downForS = 0;
     orbitId = NO_PLAYER;
     pull = 1;
+    skipped = false;
   }
 
   /**
@@ -287,6 +290,17 @@ export function createDeathCam(): DeathCam {
       forget();
     },
 
+    requestSkip(): boolean {
+      if (!down || skipped) return false;
+      skipped = true;
+      orbitId = NO_PLAYER;
+      return true;
+    },
+
+    get active(): boolean {
+      return down && !skipped && downForS < MATCH_TUNING.deathCamS;
+    },
+
     setReduceMotion(on: boolean): void {
       reduceMotion = on;
     },
@@ -313,7 +327,7 @@ export function createDeathCam(): DeathCam {
       } else {
         downForS += elapsed;
       }
-      if (!(downForS < MATCH_TUNING.deathCamS)) {
+      if (skipped || !(downForS < MATCH_TUNING.deathCamS)) {
         orbitId = NO_PLAYER;
         return false;
       }

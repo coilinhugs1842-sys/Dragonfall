@@ -258,11 +258,27 @@ describe('match intro', () => {
     expect(introCardStep(0.0001)).toBeGreaterThan(0);
   });
 
-  it('offers the skip only during the intro and only when allowed', () => {
-    expect(skipHintShown(hudIn('intro', true))).toBe(true);
-    expect(skipHintShown(hudIn('intro', false))).toBe(false);
-    expect(skipHintShown(hudIn('countdown', true))).toBe(false);
-    expect(skipHintShown(null)).toBe(false);
+  it('offers the skip during intro / results / launch / death cam when allowed', () => {
+    expect(skipHintShown('match', hudIn('intro', true))).toBe(true);
+    expect(skipHintShown('match', hudIn('intro', false))).toBe(false);
+    expect(skipHintShown('match', hudIn('countdown', true))).toBe(false);
+    expect(skipHintShown('match', null)).toBe(false);
+    const results = hudIn('results', true);
+    expect(skipHintShown('match', results)).toBe(true);
+    const death = createHudState();
+    death.phase = 'playing';
+    death.canSkipIntro = false;
+    death.deathCamActive = true;
+    expect(skipHintShown('match', death)).toBe(true);
+    expect(
+      skipHintShown('lobby', null, {
+        roomCode: 'ABCDE',
+        phase: 'starting',
+        hostId: 1,
+        players: [],
+        settings: DEFAULT_HOST_SETTINGS,
+      }),
+    ).toBe(true);
   });
 
   it('skips on Space and Enter only', () => {

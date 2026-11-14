@@ -70,19 +70,19 @@
   },
   "wingspan": 13.35,
   "muzzleOffset": {
-    "x": 0.0,
+    "x": 0,
     "y": 0.292,
     "z": 5.306
   },
-  "source": "art-source/dragons/wraith/wraith.glb (procedural)",
+  "source": "art-source/dragons/wraith/wraith.glb (procedural: tools/blender/dragons, LOG.md 2026-11-11)",
   "clipInfo": {
     "glide": {
-      "duration": 4.0,
+      "duration": 4,
       "loop": true,
       "frames": 121
     },
     "flap": {
-      "duration": 1.0,
+      "duration": 1,
       "loop": true,
       "frames": 31
     },
@@ -92,17 +92,17 @@
       "frames": 19
     },
     "dive": {
-      "duration": 2.0,
+      "duration": 2,
       "loop": true,
       "frames": 61
     },
     "bank_l": {
-      "duration": 3.0,
+      "duration": 3,
       "loop": true,
       "frames": 91
     },
     "bank_r": {
-      "duration": 3.0,
+      "duration": 3,
       "loop": true,
       "frames": 91
     },
@@ -132,7 +132,7 @@
       "frames": 16
     },
     "death_fall": {
-      "duration": 2.0,
+      "duration": 2,
       "loop": true,
       "frames": 61
     }

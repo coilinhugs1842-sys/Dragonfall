@@ -210,6 +210,18 @@ describe('death cam timing', () => {
     expect(shown).toBeLessThanOrEqual(61);
   });
 
+  it('ends the orbit early when requestSkip is called', () => {
+    const { view } = createCast();
+    const cam = begun();
+    const camera = createCamera();
+    expect(cam.direct(camera, view, FRAME_S)).toBe(true);
+    expect(cam.active).toBe(true);
+    expect(cam.requestSkip()).toBe(true);
+    expect(cam.requestSkip()).toBe(false);
+    expect(cam.active).toBe(false);
+    expect(cam.direct(camera, view, FRAME_S)).toBe(false);
+  });
+
   it('counts a long hitch in full: the clock is the wall clock', () => {
     const { view } = createCast();
     const cam = begun();

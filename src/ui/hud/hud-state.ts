@@ -163,6 +163,8 @@ export interface MutableHudState {
   scoreboard: MutableScoreboardRow[];
   scoreboardCount: number;
   canSkipIntro: boolean;
+  deathCamActive: boolean;
+  letterbox: number;
   localPlayerId: PlayerId;
   reticle: MutableHudReticleState | null;
   /** The one reticle object to reuse. */
@@ -314,6 +316,8 @@ export function createHudState(scoreboardRows = 10): MutableHudState {
     scoreboard,
     scoreboardCount: 0,
     canSkipIntro: false,
+    deathCamActive: false,
+    letterbox: 0,
     localPlayerId: NO_PLAYER,
     reticle: null,
     reticlePool: { x: 0, y: 0, locked: false },

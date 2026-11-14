@@ -29,11 +29,12 @@
  * has settled by then.
  *
  * THE TIMELINE (T-5.1) is the host's alone, in host ticks, so every browser shows the same
- * moment: `starting` (MATCH_TUNING.lobbyLaunchS) -> `intro` (matchIntroS, round 1 only) ->
+ * moment: `starting` (MATCH_TUNING.lobbyLaunchS) -> `intro` (matchIntroS) ->
  * `countdown` (countdownS) -> `playing` -> `roundEnd` -> next round or `results`
- * (MODE_TUNING.resultsS) -> back to the lobby with the teams kept. The host may cut the intro
- * short (`requestSkipIntro`, see `canSkipIntro`). With `cinematics: false` (and in a solo
- * sandbox session) there is no launch delay and no intro: Start leads straight to the countdown.
+ * (MODE_TUNING.resultsS) -> back to the lobby with the teams kept. Anyone may skip launch /
+ * intro / podium (`match.skipCinematic` → `requestSkipCinematic`); the host advances the shared
+ * clocks. With `cinematics: false` (and in a solo sandbox session) there is no launch delay and
+ * no intro: Start leads straight to the countdown.
  *
  * COMBAT (T-3.1 / T-3.2) is inside the sim: abilities, the damage pipeline, takedowns, assists
  * and respawns at the gate slot. The session only wires it: the sim's GameEvents go out through
@@ -693,13 +694,22 @@ export class HostSession {
   }
 
   /**
-   * May the host skip the intro right now without `force`? True only during `intro`, and only
-   * when this room has already started a match before this one (everyone has seen the fly-in
-   * once). Cheap enough to read every frame.
+   * May anyone ask to skip the intro right now? True during `intro` on every match (first
+   * included). Guests send `match.skipCinematic`; the host advances the shared clock.
    */
   get canSkipIntro(): boolean {
     const match = this.match;
-    return match !== null && match.phase === 'intro' && this.matchesStarted > 1;
+    return match !== null && match.phase === 'intro';
+  }
+
+  /**
+   * True while a shared cinematic is skippable: aerie launch, match intro, or results podium.
+   */
+  get canSkipCinematic(): boolean {
+    if (this.launching) return true;
+    const match = this.match;
+    if (match === null) return false;
+    return match.phase === 'intro' || match.phase === 'results';
   }
 
   /** The lobby launch is running: Start was accepted and the match has not been loaded yet. */
@@ -826,9 +836,10 @@ export class HostSession {
    */
   applyIntent(intent: UiIntent): boolean {
     if (this.sessionState === 'closed') return false;
-    // Host-only by construction: the intent has no wire form, so it can only come from this
-    // page. A client's Skip button does nothing.
-    if (intent.type === 'match.skipIntro') return this.requestSkipIntro();
+    // Shared cinematic skip: host UI or a guest's net intent (PROTOCOL_VERSION 6).
+    if (intent.type === 'match.skipIntro' || intent.type === 'match.skipCinematic') {
+      return this.requestSkipCinematic();
+    }
     // The bot controls are host-only and never cross the wire: they come from this page alone.
     if (!isNetIntent(intent) && !isLobbyBotIntent(intent)) return false;
     const result = applyLobbyIntent(this.hostLobby, this.hostLobby.state.hostId, intent, {
@@ -855,16 +866,36 @@ export class HostSession {
   }
 
   /**
-   * The host cuts the intro short: the countdown starts on the next tick and every client is
-   * told through the ordinary MATCH_PHASE. Without `force` only when `canSkipIntro` (the room
-   * has played before); `force` (dev flags, tests) skips whenever an intro is running. False
-   * when nothing was skipped.
+   * Cuts the intro short: the countdown starts on the next tick and every client is told
+   * through the ordinary MATCH_PHASE. Always allowed during `intro` (first match included).
+   * `force` also skips when an intro is somehow still running after checks. False when nothing
+   * was skipped.
    */
   requestSkipIntro(force = false): boolean {
     const match = this.match;
     if (this.sessionState === 'closed' || match === null || match.phase !== 'intro') return false;
     if (!force && !this.canSkipIntro) return false;
     return this.director.skipIntro(this.tickNow + 1);
+  }
+
+  /**
+   * Skip the current shared cinematic for the whole room: aerie launch → start match, intro →
+   * countdown, or results → lobby. Anyone may request via `match.skipCinematic`.
+   */
+  requestSkipCinematic(force = false): boolean {
+    if (this.sessionState === 'closed') return false;
+    if (this.launching) {
+      this.finishLaunch();
+      return true;
+    }
+    const match = this.match;
+    if (match === null) return false;
+    if (match.phase === 'intro') return this.requestSkipIntro(force);
+    if (match.phase === 'results') {
+      // Same as the natural end of the podium: everyone back to the aerie together.
+      return this.endMatch();
+    }
+    return false;
   }
 
   /**
@@ -1795,6 +1826,11 @@ export class HostSession {
       return;
     }
     peer.lastHeardMs = this.nowMs;
+    // Anyone may skip a shared cinematic; not a lobby intent.
+    if (message.intent.type === 'match.skipCinematic') {
+      if (!this.requestSkipCinematic()) this.counters.intentsRefused++;
+      return;
+    }
     // `applyLobbyIntent` is the gate: `host.*` from anyone but the host is refused there, and
     // the limiter caps how often a client may ask.
     const result = applyLobbyIntent(this.hostLobby, peer.playerId, message.intent, {

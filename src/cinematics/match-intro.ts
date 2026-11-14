@@ -1,15 +1,12 @@
 /**
  * The match intro (T-5.4): what the camera does during the `intro` match phase.
  *
- * THREE SHOTS, as fractions of MATCH_TUNING.matchIntroS (MATCH_INTRO_TIMELINE):
- * 1. Flyby. The camera travels the map's intro spline (`MapManifest.introSpline`, Catmull-Rom,
- *    even speed) with the title card up. It looks partly where it is going and partly at the
- *    sky-well, so the centre of the map stays in frame the whole way.
- * 2. The far team's gate: from in front of the riders and a little below them, looking back,
- *    with a slow push-in. The riders stand against the sky.
- * 3. The local team's gate: the same view, then the camera swings up over the row of riders and
- *    settles behind and above the local dragon, on the pose the chase camera holds for a
- *    hovering dragon. The cut to the 3-2-1 is then no cut at all.
+ * MULTI-BEAT (~12 s), as fractions of MATCH_TUNING.matchIntroS (MATCH_INTRO_TIMELINE):
+ * 1. Establish — high wide hold on the storm rim (letterbox in, title card up).
+ * 2. Dive-in — steep push along the map intro spline toward the sky-well.
+ * 3. Hero skim — lower altitude, tighter FOV, look-ahead bias.
+ * 4. Far gate — low angle on the opposing team with a slow push-in.
+ * 5. Local gate — swing over the local riders into the chase camera pose (no cut into countdown).
  *
  * ONE CLOCK. Every number comes from `view.clock.phaseTimeS` and the frame's dragons; nothing is
  * integrated over `dtS` and nothing is remembered between frames. Every browser therefore shows
@@ -69,25 +66,37 @@ import type { MatchIntro } from './types';
 
 // --- Timeline --------------------------------------------------------------------------------------
 
-/** Where each beat starts and ends, as fractions of MATCH_TUNING.matchIntroS. */
+/**
+ * Where each beat starts and ends, as fractions of MATCH_TUNING.matchIntroS (~12 s).
+ * Multi-beat “establish → dive → skim → gates” language; one shared clock, no per-client dt.
+ */
 export const MATCH_INTRO_TIMELINE = {
-  /** The title card is fully up here (0.4 s of a 6 s intro). */
-  cardInEnd: 0.065,
-  /** The card starts to fade here and is gone at `cardOutEnd`, before the first cut. */
-  cardOutStart: 0.42,
-  cardOutEnd: 0.52,
-  /** Flyby until here, then the cut to the far team's gate. */
-  flybyEnd: 0.55,
+  /** Title card fully up (~0.6 s). */
+  cardInEnd: 0.05,
+  /** Card holds through the establish + dive, fades before the far gate. */
+  cardOutStart: 0.38,
+  cardOutEnd: 0.48,
+  /** High wide establish hold ends here. */
+  establishEnd: 0.14,
+  /** Steep dive-in along the spline ends here. */
+  diveInEnd: 0.32,
+  /** Low hero skim ends here; then far gate. (Alias: whole flyby arc ends at `flybyEnd`.) */
+  heroSkimEnd: 0.52,
+  /** Flyby (establish+dive+skim) until here, then the cut to the far team's gate. */
+  flybyEnd: 0.52,
   /** Far gate until here, then the cut to the local team's gate, which runs to the end. */
-  farGateEnd: 0.705,
+  farGateEnd: 0.72,
 } as const;
 
-export type MatchIntroShot = 'flyby' | 'farGate' | 'localGate';
+export type MatchIntroShot = 'establish' | 'diveIn' | 'heroSkim' | 'farGate' | 'localGate';
 
 /** Which shot is on screen at `fraction` (0..1) of the intro. */
 export function matchIntroShot(fraction: number): MatchIntroShot {
-  if (fraction < MATCH_INTRO_TIMELINE.flybyEnd) return 'flyby';
-  return fraction < MATCH_INTRO_TIMELINE.farGateEnd ? 'farGate' : 'localGate';
+  const t = MATCH_INTRO_TIMELINE;
+  if (fraction < t.establishEnd) return 'establish';
+  if (fraction < t.diveInEnd) return 'diveIn';
+  if (fraction < t.flybyEnd) return 'heroSkim';
+  return fraction < t.farGateEnd ? 'farGate' : 'localGate';
 }
 
 /**
@@ -122,15 +131,20 @@ const FLYBY_WELL_WEIGHT_END = 0.5;
  */
 const FLYBY_WELL_LIFT_START = 150;
 const FLYBY_WELL_LIFT_END = 12;
-const FLYBY_FOV_START = 60;
-const FLYBY_FOV_END = 50;
+const FLYBY_FOV_START = 58;
+const FLYBY_FOV_END = 48;
+/** Establish hold: wider FOV, then dive kicks in. */
+const ESTABLISH_FOV = 64;
+const DIVE_FOV = 52;
+const SKIM_FOV_START = 50;
+const SKIM_FOV_END = 46;
 /** Speed is 1.3x the mean on the first frame and 0.4x on the last (see `easeCoast`). */
-const FLYBY_BRAKE = 0.3;
+const FLYBY_BRAKE = 0.28;
 /** Bank into the path's turns: radians of roll per radian the heading turns over `BANK_SPAN`. */
-const FLYBY_BANK_GAIN = 0.22;
+const FLYBY_BANK_GAIN = 0.28;
 const FLYBY_BANK_SPAN = 0.05;
-/** About 2.5 degrees: enough to feel the turn, small enough that the horizon reads level. */
-const FLYBY_MAX_BANK = 0.045;
+/** About 3 degrees: readable bank without tipping the horizon. */
+const FLYBY_MAX_BANK = 0.055;
 /** Reduce motion: metres per second of the straight push-in, and its fixed FOV. */
 const REDUCED_DOLLY_SPEED = 20;
 const REDUCED_DOLLY_FOV = 56;
@@ -429,10 +443,19 @@ export function createMatchIntro(): MatchIntro {
   const tangent = createVec3();
   const pivot = createVec3();
 
-  /** The flyby at `e` (0..1 of the shot). */
-  function placeFlyby(camera: PerspectiveCamera, e: number): void {
+  /**
+   * Flyby beat at path fraction `s` (0..1 of the whole flyby arc) with a per-shot FOV.
+   * `e` is 0..1 of the current sub-shot (establish / dive / skim) for ease within the beat.
+   */
+  function placeFlybyAt(
+    camera: PerspectiveCamera,
+    s: number,
+    e: number,
+    fovStart: number,
+    fovEnd: number,
+    hold: boolean,
+  ): void {
     if (reduceMotion) {
-      // A straight, slow push-in from the opening viewpoint toward a point down the path.
       const from = catmullRomPoint(position, points, 0);
       const aim = catmullRomPoint(ahead, points, splineParamAtFraction(lengths, REDUCED_DOLLY_AIM));
       const dx = aim.x - from.x;
@@ -440,7 +463,7 @@ export function createMatchIntro(): MatchIntro {
       const dz = aim.z - from.z;
       const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
       const flybyS = MATCH_TUNING.matchIntroS * MATCH_INTRO_TIMELINE.flybyEnd;
-      const travel = length > 1e-3 ? Math.min(REDUCED_DOLLY_SPEED * flybyS * e, length) / length : 0;
+      const travel = length > 1e-3 ? Math.min(REDUCED_DOLLY_SPEED * flybyS * s, length) / length : 0;
       writeFlybyTarget(0);
       position.x += dx * travel;
       position.y += dy * travel;
@@ -448,19 +471,29 @@ export function createMatchIntro(): MatchIntro {
       aimCamera(camera, position, target, 0, REDUCED_DOLLY_FOV);
       return;
     }
-    const s = easeCoast(e, FLYBY_BRAKE);
-    const u = splineParamAtFraction(lengths, s);
-    writeFlybyTarget(s);
+    // Same coast curve for every flyby beat so establish → dive → skim never jumps on the path.
+    const coast = easeCoast(s, FLYBY_BRAKE);
+    const u = splineParamAtFraction(lengths, coast);
+    writeFlybyTarget(coast);
     catmullRomPoint(position, points, u);
+    // Establish: lift a little higher so the storm rim reads as a wide plate.
+    if (hold) position.y += 18 * (1 - e);
 
-    // Bank into the turn: how far the heading swings over the next stretch of path.
     catmullRomTangent(tangent, points, u);
     const yawNow = yawOfDirection(tangent.x, tangent.z);
-    catmullRomTangent(tangent, points, splineParamAtFraction(lengths, s + FLYBY_BANK_SPAN));
+    catmullRomTangent(tangent, points, splineParamAtFraction(lengths, coast + FLYBY_BANK_SPAN));
     const turn = wrapAngle(yawOfDirection(tangent.x, tangent.z) - yawNow);
-    // A growing yaw is a turn to the left (+X is on the left of +Z): left wing down.
-    const roll = clamp(-turn * FLYBY_BANK_GAIN, -FLYBY_MAX_BANK, FLYBY_MAX_BANK);
-    aimCamera(camera, position, target, roll, lerp(FLYBY_FOV_START, FLYBY_FOV_END, s));
+    const roll = hold
+      ? 0
+      : clamp(-turn * FLYBY_BANK_GAIN, -FLYBY_MAX_BANK, FLYBY_MAX_BANK);
+    aimCamera(camera, position, target, roll, lerp(fovStart, fovEnd, e));
+  }
+
+  /** Map a sub-shot's local 0..1 onto the flyby arc's 0..1 path fraction. */
+  function flybyPathS(shotStart: number, shotEnd: number, e: number): number {
+    const flybyEnd = MATCH_INTRO_TIMELINE.flybyEnd;
+    if (!(flybyEnd > 0)) return 0;
+    return clamp01(lerp(shotStart, shotEnd, e) / flybyEnd);
   }
 
   /** The flyby's look point at `s` (0..1 of the path's length) into `target`. */
@@ -656,8 +689,40 @@ export function createMatchIntro(): MatchIntro {
       if (!ready) return false;
 
       const timeline = MATCH_INTRO_TIMELINE;
+      if (fraction < timeline.establishEnd) {
+        const e = fraction / timeline.establishEnd;
+        placeFlybyAt(
+          camera,
+          flybyPathS(0, timeline.establishEnd, e),
+          e,
+          ESTABLISH_FOV,
+          FLYBY_FOV_START,
+          true,
+        );
+        return true;
+      }
+      if (fraction < timeline.diveInEnd) {
+        const e = (fraction - timeline.establishEnd) / (timeline.diveInEnd - timeline.establishEnd);
+        placeFlybyAt(
+          camera,
+          flybyPathS(timeline.establishEnd, timeline.diveInEnd, e),
+          e,
+          FLYBY_FOV_START,
+          DIVE_FOV,
+          false,
+        );
+        return true;
+      }
       if (fraction < timeline.flybyEnd) {
-        placeFlyby(camera, fraction / timeline.flybyEnd);
+        const e = (fraction - timeline.diveInEnd) / (timeline.flybyEnd - timeline.diveInEnd);
+        placeFlybyAt(
+          camera,
+          flybyPathS(timeline.diveInEnd, timeline.flybyEnd, e),
+          e,
+          SKIM_FOV_START,
+          SKIM_FOV_END,
+          false,
+        );
         return true;
       }
       // A spectator watches from Ember's side.

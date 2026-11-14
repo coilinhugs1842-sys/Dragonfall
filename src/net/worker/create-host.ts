@@ -222,6 +222,10 @@ class SwitchingHost implements HostHandle {
     return this.inner.canSkipIntro;
   }
 
+  get canSkipCinematic(): boolean {
+    return this.inner.canSkipCinematic;
+  }
+
   get playerPings(): readonly number[] {
     return this.inner.playerPings;
   }
@@ -270,6 +274,10 @@ class SwitchingHost implements HostHandle {
 
   requestSkipIntro(force = false): boolean {
     return this.inner.requestSkipIntro(force);
+  }
+
+  requestSkipCinematic(force = false): boolean {
+    return this.inner.requestSkipCinematic(force);
   }
 
   update(nowMs: number): void {

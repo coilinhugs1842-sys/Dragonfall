@@ -175,13 +175,14 @@ Add new entries at the bottom: date, decision, why, what would change it. Don't 
     camera to a fixed path round the map centre, skips 10 s of warm-up and measures the next 60 s
     (`?bench=20` for a shorter run). `node tools/capture/bench.mjs` runs it headless on all three presets.
 42. **Cinematics run on the host's clocks and put nothing extra on the wire.** The lobby has a `starting`
-    phase (3 s, `MATCH_TUNING.lobbyLaunchS`: the dragons take off) and a room's first round opens with an
-    `intro` phase (6 s) before the 3-2-1. Every browser plays the aerie launch, the flyby, the death cam and
-    the podium from `LobbyState.phase` and `WorldView.clock`, so all screens show the same moment (measured:
-    a guest is about 0.15 s behind the host, its interpolation delay). Combat damage is off outside `playing`.
-    The host may skip the intro from the room's second match on; guests cannot. `?nocine` (and `?bench`)
-    start matches at once. The MATCH_PHASE header tick now means "the tick play begins" during intro and
-    countdown, so `PROTOCOL_VERSION` is 3.
+    phase (`MATCH_TUNING.lobbyLaunchS`: the dragons take off) and each match opens with an `intro` phase
+    (~12 s multi-beat flyby, `matchIntroS`) before the 3-2-1. Every browser plays the aerie launch, the
+    flyby, the death cam and the podium from `LobbyState.phase` and `WorldView.clock`, so all screens show
+    the same moment (measured: a guest is about 0.15 s behind the host, its interpolation delay). Combat
+    damage is off outside `playing`. Anyone may skip a shared cinematic (launch / intro / results podium):
+    guests send `match.skipCinematic` and the host advances the shared clock for the whole room. Death cam
+    skip is local only. First match is skippable too. `?nocine` (and `?bench`) start matches at once.
+    `PROTOCOL_VERSION` 6 adds the skip intent on the wire.
 43. **One directed camera, one owner per frame.** The stage has a single `CameraDirector` slot;
     `src/game/show.ts` fills it and picks, in order: a dev tool (`?bench`), the aerie (lobby), the intro, the
     podium, the death cam. The chase rig keeps following underneath, so handing back is seamless.

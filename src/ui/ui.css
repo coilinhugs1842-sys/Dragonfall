@@ -1645,4 +1645,33 @@
   transition: none !important;
 }
 
+/* Launch skip hint (aerie starting): mirrors the HUD's .dfh-skip. */
+.dfu-skip {
+  position: absolute;
+  right: 1.7em;
+  bottom: 1.5em;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.35em 0.8em 0.4em 0.45em;
+  border: 1px solid var(--dfu-line);
+  border-radius: 2em;
+  background: var(--dfu-panel);
+  color: var(--dfu-muted);
+  font-size: 0.78em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.dfu-skip-key {
+  padding: 0.1em 0.7em 0.15em;
+  border: 1px solid var(--dfu-line-strong);
+  border-radius: 1em;
+  color: var(--dfu-text);
+  font-family: inherit;
+  font-size: 0.92em;
+}
+
 /* The match result (T-5.5) is in results.css; the aerie lobby (T-5.3) in aerie.css. */

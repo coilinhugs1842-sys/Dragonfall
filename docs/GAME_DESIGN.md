@@ -110,23 +110,26 @@ Title ─► Host / Join (room code) ─► Lobby (cinematic aerie) ─► Match
   close-up.
 - **Host panel:** mode, map, team size (1–5), uneven teams on/off, score limit, time limit, friendly fire,
   allowed classes, team assignment (drag, auto-balance, shuffle, lock), kick, and **Start**.
-- **Start:** the camera pushes in, the dragons launch in sequence, and the scene fades into the match intro.
+- **Start:** the camera pushes in (letterbox), the dragons launch in sequence; anyone may skip to the match.
+  The scene fades into the match intro.
 
-### Match intro (~6 s, skippable after the first match)
+### Match intro (~12 s, always skippable)
 
-- A spline flyby of the map with the map name and mode title card, then a cut to each team's gate showing its
-  riders, then a 3-2-1 countdown with control handed over.
+- Multi-beat directed cam: establish (wide storm rim) → dive-in → hero skim → far-team gate → local gate
+  swing into chase pose, with soft letterbox, per-shot FOV, and a title card for map/mode. Anyone's Skip
+  advances the shared host clock to the 3-2-1 for the whole room (first match included).
 
 ### During the match
 
 - Killfeed, team score, timer, ability cooldowns, and a teammate compass.
-- On death: a 3 s **death cam** that orbits your killer. In Duel (no respawns) you then spectate
-  living teammates (click / Space / gamepad A to cycle). Stretch: a short replay from the snapshot history.
+- On death: a short **death cam** that orbits your killer (skippable locally at once). In Duel (no respawns)
+  you then spectate living teammates (click / Space / gamepad A to cycle). Stretch: a short replay from the
+  snapshot history.
 
 ### Results podium
 
 - The winning team flies a formation pass. The MVP, most takedowns and most damage dragons land on a podium.
-  Then everyone goes back to the aerie with teams kept.
+  Anyone may skip the podium for the room. Then everyone goes back to the aerie with teams kept.
 
 ## Controls (defaults; rebindable)
 

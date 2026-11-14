@@ -19,7 +19,13 @@ import { ResultsPanel } from './screens/results';
 import { TitleScreen } from './screens/title';
 import type { NameStore } from './screens/title';
 import { FadeLayer, LoadingOverlay } from './screens/transitions';
-import { createSkipLatch, isSkipKey, rearmSkip, takeSkip } from './view-model/cinematic';
+import {
+  createSkipLatch,
+  isSkipKey,
+  rearmSkip,
+  skipHintShown,
+  takeSkip,
+} from './view-model/cinematic';
 import { computeLayers, createLayerFlags } from './view-model/connection';
 import type { LayerFlags } from './view-model/connection';
 import { isSessionEndError } from './view-model/messages';
@@ -93,6 +99,18 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
   const fade = new FadeLayer();
   const now = options?.now ?? ((): number => performance.now());
   const skip = createSkipLatch();
+  // Launch skip hint (HUD is not mounted in the aerie).
+  const lobbySkip = el('div', 'dfu-skip');
+  lobbySkip.hidden = true;
+  const lobbySkipKey = document.createElement('kbd');
+  lobbySkipKey.className = 'dfu-skip-key';
+  lobbySkipKey.textContent = 'Space';
+  const lobbySkipWords = document.createElement('span');
+  lobbySkipWords.textContent = 'Skip launch';
+  lobbySkip.append(lobbySkipKey, lobbySkipWords);
+  lobbySkip.setAttribute('role', 'note');
+  lobbySkip.setAttribute('aria-label', 'Press Space to skip the launch');
+  let lobbySkipShown = false;
   const chip = new ConnectionChip();
   const strip = createReconnectStrip();
   const pause = new PauseMenu(onIntent);
@@ -133,7 +151,7 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
   // Stacking, bottom to top: the page (HUD, menus), the scene-cut fade, the loading
   // presentation, then the dialogs that must stay usable whatever is going on underneath.
   // (The settings panel is its own root, mounted after this one, so it is above all of it.)
-  container.append(base, fade.root, loading.root, pause.root, notice.root);
+  container.append(base, fade.root, loading.root, pause.root, notice.root, lobbySkip);
   root.appendChild(container);
   // The match HUD sits inside `base`, under everything else there, so the escape menu and the
   // session notice cover it and `inert` disables it with the rest. The results go on top of it.
@@ -162,7 +180,17 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
     const nowMs = now();
     const inMatch = state.screen === 'match' && !layers.notice;
     hud.update(inMatch ? state.hud : null, nowMs);
-    rearmSkip(skip, inMatch ? state.hud : null);
+    rearmSkip(skip, inMatch ? state.hud : null, state.lobby);
+    const showLobbySkip =
+      !layers.notice &&
+      !layers.pause &&
+      state.settingsOpen !== true &&
+      skipHintShown(state.screen, state.hud, state.lobby) &&
+      state.screen === 'lobby';
+    if (showLobbySkip !== lobbySkipShown) {
+      lobbySkipShown = showLobbySkip;
+      lobbySkip.hidden = !showLobbySkip;
+    }
     const showResults = inMatch && state.results !== null;
     if (showResults) results.update(state, nowMs);
     if (showResults !== resultsShown) {
@@ -208,16 +236,16 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
   }
 
   /**
-   * Space or Enter during the match intro: skip it. Not while a menu is in front (there the
-   * same keys press its buttons) and only once per intro. Returns true when the key was used.
+   * Space or Enter during launch / intro / podium / death cam: skip it. Not while a menu is in
+   * front (there the same keys press its buttons) and only once per beat.
    */
   const onSkipKey = (event: KeyboardEvent, state: UiState): boolean => {
     if (!isSkipKey(event.code)) return false;
     const menuOpen = shown.pause || shown.notice || state.settingsOpen === true;
-    if (!takeSkip(skip, state.screen, state.hud, menuOpen)) return false;
+    if (!takeSkip(skip, state.screen, state.hud, menuOpen, state.lobby)) return false;
     // Space would otherwise also "click" whatever still has the focus from the lobby.
     event.preventDefault();
-    onIntent({ type: 'match.skipIntro' });
+    onIntent({ type: 'match.skipCinematic' });
     return true;
   };
 
@@ -256,15 +284,13 @@ export function createUi(root: HTMLElement, onIntent: UiIntentHandler, options?:
   const navigate = (command: UiNavCommand): void => {
     if (disposed || last === null) return;
     const dialogOpen = shown.pause || shown.notice || last.settingsOpen === true;
-    if (last.screen === 'match' && !dialogOpen) {
-      // No menu in front of the match. A skips the intro like Space does; B does not open the
-      // flight menu (that is the Menu button's job), and there is nothing to step through
-      // except the results' buttons.
-      if (command === 'accept' && takeSkip(skip, last.screen, last.hud, false)) {
-        onIntent({ type: 'match.skipIntro' });
+    if (!dialogOpen && (last.screen === 'match' || last.screen === 'lobby')) {
+      // A skips the cinematic like Space does.
+      if (command === 'accept' && takeSkip(skip, last.screen, last.hud, false, last.lobby)) {
+        onIntent({ type: 'match.skipCinematic' });
         return;
       }
-      if (command === 'back' || !resultsShown) return;
+      if (last.screen === 'match' && (command === 'back' || !resultsShown)) return;
     }
     padNav.navigate(command);
   };

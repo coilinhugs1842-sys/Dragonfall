@@ -408,6 +408,21 @@ export class MatchDirector {
     return true;
   }
 
+  /**
+   * Cuts the results podium short: the room returns to the lobby on `tick` (or the next
+   * beforeStep). False outside `results`.
+   */
+  skipResults(tick: number): boolean {
+    if (this.finished || this.phase !== 'results') return false;
+    this.phaseEndTick = tick;
+    this.finished = true;
+    this.phase = 'lobby';
+    this.phaseStartTick = tick;
+    this.winner = null;
+    this.listener?.onPhase('lobby', tick, this.round, null);
+    return true;
+  }
+
   // --- The tick ------------------------------------------------------------------------------------
 
   /** Timed transitions and forfeits. Call first on every host tick of a match. */

@@ -114,10 +114,14 @@ export interface HudFrameInput {
   /** Whose dragon the camera is on (`Stage.watchedId`). */
   watchedId: PlayerId;
   /**
-   * This player may skip the intro that is playing: the host's `HostHandle.canSkipIntro`,
-   * always false on a client (only the host can skip). Shown as the "skip" hint.
+   * This player may skip the current shared cinematic (intro / podium) or is in a skippable
+   * launch. Guests send `match.skipCinematic`; the host advances the room clock.
    */
   canSkipIntro: boolean;
+  /** Local death-cam orbit is on screen. */
+  deathCamActive: boolean;
+  /** 0..1 letterbox strength from the show director. */
+  letterbox: number;
   /**
    * This frame's camera, for the markers over the dragons: the element arrays of its
    * `matrixWorld` and `projectionMatrix` (16 numbers each, as three.js keeps them; held by
@@ -148,6 +152,8 @@ export function createHudFrameInput(): HudFrameInput {
     pointerLocked: false,
     watchedId: NO_PLAYER,
     canSkipIntro: false,
+    deathCamActive: false,
+    letterbox: 0,
     cameraWorld: NO_CAMERA,
     cameraProjection: NO_CAMERA,
     terrain: null,
@@ -478,7 +484,11 @@ export function createHudBuilder(view: WorldView): HudBuilder {
       hud.scores[0] = input.scoreEmber;
       hud.scores[1] = input.scoreFrost;
       hud.winner = input.winner;
-      hud.canSkipIntro = input.canSkipIntro && view.clock.phase === 'intro';
+      hud.canSkipIntro =
+        input.canSkipIntro &&
+        (view.clock.phase === 'intro' || view.clock.phase === 'results');
+      hud.deathCamActive = input.deathCamActive;
+      hud.letterbox = input.letterbox;
 
       const localId = view.localDragonId;
       const local = input.isRider ? findDragonView(view, localId) : undefined;

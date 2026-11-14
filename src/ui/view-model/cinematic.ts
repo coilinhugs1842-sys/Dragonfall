@@ -1,17 +1,29 @@
 /**
- * The cinematic beats around a match, without the DOM (T-5.4, T-5.6): when the intro may be
+ * The cinematic beats around a match, without the DOM (T-5.4, T-5.6): when a cinematic may be
  * skipped, how opaque the scene-cut fade is, and how long the loading presentation stays up.
  * Pure and allocation-free, so the screen manager can ask every frame.
  */
 
+import type { LobbyState } from '../../shared/lobby';
 import type { HudState, UiScreen } from '../../shared/ui';
 import { OPACITY_STEPS, UNIT_STEPS } from '../hud/hud-model';
 
-// --- Match intro ----------------------------------------------------------------------------------
+// --- Shared cinematic skip ------------------------------------------------------------------------
 
-/** The "Press Space to skip" hint: only while the flyby plays and this client may skip it. */
-export function skipHintShown(hud: Readonly<HudState> | null): boolean {
-  return hud !== null && hud.phase === 'intro' && hud.canSkipIntro;
+/**
+ * The "Press Space to skip" hint: launch (lobby starting), intro, results podium, or local
+ * death cam. Anyone may ask; the host advances shared clocks (death cam is local only).
+ */
+export function skipHintShown(
+  screen: UiScreen,
+  hud: Readonly<HudState> | null,
+  lobby: Readonly<LobbyState> | null = null,
+): boolean {
+  if (screen === 'lobby' && lobby !== null && lobby.phase === 'starting') return true;
+  if (screen !== 'match' || hud === null) return false;
+  if (hud.deathCamActive === true) return true;
+  if (!hud.canSkipIntro) return false;
+  return hud.phase === 'intro' || hud.phase === 'results';
 }
 
 /** Space or Enter (either Enter key). `code` is `KeyboardEvent.code`. */
@@ -19,7 +31,7 @@ export function isSkipKey(code: string): boolean {
   return code === 'Space' || code === 'Enter' || code === 'NumpadEnter';
 }
 
-/** One per screen manager: remembers that this intro's skip was already asked for. */
+/** One per screen manager: remembers that this cinematic's skip was already asked for. */
 export interface SkipLatch {
   sent: boolean;
 }
@@ -29,25 +41,33 @@ export function createSkipLatch(): SkipLatch {
 }
 
 /**
- * Call on a skip key press. True when `match.skipIntro` should be sent now: the intro is
- * playing, this client may skip it, no menu is in front (`menuOpen`: the escape menu, the
- * settings or a session notice, where Space and Enter press buttons), and it was not already
- * sent for this intro. Latches, so holding or hammering the key sends one intent.
+ * Call on a skip key press. True when `match.skipCinematic` should be sent now: a skippable
+ * cinematic is on screen, no menu is in front, and it was not already sent for this beat.
  */
 export function takeSkip(
   latch: SkipLatch,
   screen: UiScreen,
   hud: Readonly<HudState> | null,
   menuOpen: boolean,
+  lobby: Readonly<LobbyState> | null = null,
 ): boolean {
-  if (latch.sent || menuOpen || screen !== 'match' || !skipHintShown(hud)) return false;
+  if (latch.sent || menuOpen || !skipHintShown(screen, hud, lobby)) return false;
   latch.sent = true;
   return true;
 }
 
-/** Call every update: once the intro is over the latch is ready for the next match. */
-export function rearmSkip(latch: SkipLatch, hud: Readonly<HudState> | null): void {
-  if (latch.sent && (hud === null || hud.phase !== 'intro')) latch.sent = false;
+/** Call every update: once the skippable beat ends the latch is ready for the next one. */
+export function rearmSkip(
+  latch: SkipLatch,
+  hud: Readonly<HudState> | null,
+  lobby: Readonly<LobbyState> | null = null,
+): void {
+  if (!latch.sent) return;
+  const launching = lobby !== null && lobby.phase === 'starting';
+  const matchSkip =
+    hud !== null &&
+    (hud.deathCamActive === true || hud.phase === 'intro' || hud.phase === 'results');
+  if (!launching && !matchSkip) latch.sent = false;
 }
 
 // --- Scene-cut fade ---------------------------------------------------------------------------------
