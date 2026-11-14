@@ -9,7 +9,6 @@ import {
 } from '../../src/shared';
 import type { GameEvent, LobbyState } from '../../src/shared';
 import { createLobby, joinLobby } from '../../src/sim/lobby';
-import type { LobbyIntent } from '../../src/sim/lobby';
 import {
   Reader,
   Writer,
@@ -72,6 +71,7 @@ import {
   MSG_SNAPSHOT,
   MSG_WELCOME,
   NET_INTENT_TYPES,
+  type NetIntent,
   PING_BYTES,
   PONG_BYTES,
   REJECT_BYTES,
@@ -389,7 +389,7 @@ describe('REJECT', () => {
 });
 
 describe('INTENT', () => {
-  const intents: LobbyIntent[] = [
+  const intents: NetIntent[] = [
     { type: 'lobby.ready', ready: true },
     { type: 'lobby.ready', ready: false },
     { type: 'lobby.pickClass', classId: 'tempest' },
@@ -444,7 +444,7 @@ describe('INTENT', () => {
     const w = new Writer(CTRL_MAX_BYTES);
     expect(encodeIntent(w, { tick: 0, intent: null })).toBe(0);
     // Cast: a mode id that is not in the wire table (a newer build's mode, a typo in a test).
-    const bogus = { type: 'host.setMode', mode: 'battleRoyale' } as unknown as LobbyIntent;
+    const bogus = { type: 'host.setMode', mode: 'battleRoyale' } as unknown as NetIntent;
     expect(encodeIntent(w, { tick: 0, intent: bogus })).toBe(0);
   });
 
