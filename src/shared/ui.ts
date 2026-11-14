@@ -537,7 +537,7 @@ export interface HudState {
   readonly spectators?: readonly string[];
   /** Hold-to-show scoreboard, when `src/game` owns the binding (the HUD also listens for Tab). */
   readonly scoreboardOpen?: boolean;
-  /** Key captions per slot index (rebinding). Absent = LMB / RMB / F / R. */
+  /** Key captions per slot index (rebinding). Absent = LMB / V / F / R. */
   readonly keyLabels?: readonly string[];
   /** Match intro (T-5.4): the map / mode title card. Absent or null = no card. */
   readonly introCard?: IntroCardState | null;

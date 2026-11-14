@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BINDINGS_FORMAT_VERSION,
   DEFAULT_BINDINGS,
   INPUT_ACTIONS,
   MAX_CODES_PER_ACTION,
@@ -27,7 +28,7 @@ describe('default bindings', () => {
     expect(DEFAULT_BINDINGS.dodgeLeft).toEqual(['KeyQ']);
     expect(DEFAULT_BINDINGS.dodgeRight).toEqual(['KeyE']);
     expect(DEFAULT_BINDINGS.primary).toEqual(['Mouse0', 'Space']);
-    expect(DEFAULT_BINDINGS.secondary).toEqual(['Mouse2']);
+    expect(DEFAULT_BINDINGS.secondary).toEqual(['KeyV']);
     expect(DEFAULT_BINDINGS.utility).toEqual(['KeyF']);
     expect(DEFAULT_BINDINGS.ultimate).toEqual(['KeyR']);
     expect(DEFAULT_BINDINGS.scoreboard).toEqual(['Tab']);
@@ -151,15 +152,15 @@ describe('serialise / parse', () => {
   it('repairs a partly valid table', () => {
     const parsed = parseBindings(
       JSON.stringify({
-        version: 1,
+        version: BINDINGS_FORMAT_VERSION,
         bindings: {
-          flap: ['KeyV', 'KeyV', 7, 'Escape', 'KeyB', 'KeyN'],
+          flap: ['KeyG', 'KeyG', 7, 'Escape', 'KeyB', 'KeyN'],
           boost: 'ShiftLeft',
           madeUp: ['KeyZ'],
         },
       }),
     );
-    expect(parsed.flap).toEqual(['KeyV', 'KeyB']);
+    expect(parsed.flap).toEqual(['KeyG', 'KeyB']);
     expect(parsed.boost).toEqual(DEFAULT_BINDINGS.boost);
     expect(parsed.dive).toEqual(DEFAULT_BINDINGS.dive);
     expect(Object.keys(parsed).sort()).toEqual([...INPUT_ACTIONS].sort());

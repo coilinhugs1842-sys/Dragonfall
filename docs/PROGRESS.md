@@ -17,6 +17,16 @@ up where the last one stopped.
 
 ## Log
 
+### 2026-11-13: secondary on V, chase-cam hysteresis, default TURN
+
+- **Controls:** Secondary ability default is **V** (was RMB). Ultimate stays **R**. Bindings format v2
+  so old localStorage tables reset to the new defaults.
+- **Camera:** Soft-up invert uses hysteresis + a stable horizon near vertical so hard upright banks /
+  laptop turn-pitch no longer flip the chase view.
+- **Networking:** Online mode always offers free Open Relay TURN (plus Cloudflare STUN); connect
+  timeout 25 s; clearer “found room but couldn’t link” copy for school Wi-Fi.
+- **Verify:** typecheck + focused input / camera / signaling tests.
+
 ### 2026-11-12: ship to coilinhugs1842-sys GitHub Pages (T-7.1)
 
 - Repo: https://github.com/coilinhugs1842-sys/Dragonfall

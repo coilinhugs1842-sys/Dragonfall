@@ -85,14 +85,14 @@ export const DEFAULT_BINDINGS: InputBindings = {
   dodgeLeft: ['KeyQ'],
   dodgeRight: ['KeyE'],
   primary: ['Mouse0', 'Space'],
-  secondary: ['Mouse2'],
+  secondary: ['KeyV'],
   utility: ['KeyF'],
   ultimate: ['KeyR'],
   scoreboard: ['Tab'],
 };
 
 /** Version tag of the serialised form, so a later format change can migrate old saves. */
-export const BINDINGS_FORMAT_VERSION = 1;
+export const BINDINGS_FORMAT_VERSION = 2;
 
 export interface BindingConflict {
   readonly code: InputCode;

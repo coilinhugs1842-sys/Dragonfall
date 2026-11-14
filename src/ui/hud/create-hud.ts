@@ -145,7 +145,7 @@ export interface Hud {
 
 // --- Construction helpers and write-if-changed cells ---------------------------------------------
 
-const DEFAULT_KEY_LABELS: readonly string[] = ['LMB', 'RMB', 'F', 'R'];
+const DEFAULT_KEY_LABELS: readonly string[] = ['LMB', 'V', 'F', 'R'];
 const DEFAULT_RETICLE_RADIUS_PX = 110;
 const MAX_RETICLE_RADIUS_PX = 400;
 /** Most charge pips a slot draws. */

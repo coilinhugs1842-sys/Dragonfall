@@ -454,6 +454,23 @@ describe('ChaseCamera', () => {
     expect(camera.quaternion.angleTo(level)).toBeLessThan(0.08);
   });
 
+  it('does not flip soft-up during hard upright banks (no turn spasm)', () => {
+    const camera = new ChaseCamera();
+    const pose = createPose();
+    camera.update(straightPose(pose, 0, 45), 0);
+    const previous = camera.quaternion.clone();
+    for (let i = 1; i <= 120; i++) {
+      const yaw = (i / 120) * Math.PI * 2;
+      const bank = Math.sin(i / 8) * 1.1;
+      straightPose(pose, i * 0.75, 45);
+      setHeading(pose, yaw, 0.15 * Math.sin(i / 11), bank);
+      pose.flags = DRAGON_FLAG_ALIVE;
+      camera.update(pose, 1 / 60);
+      expect(camera.quaternion.angleTo(previous), `frame ${i}`).toBeLessThan(0.12);
+      previous.copy(camera.quaternion);
+    }
+  });
+
   it('reduce motion: no roll and no shake', () => {
     const steady = new ChaseCamera({ reduceMotion: true });
     const shaky = new ChaseCamera();

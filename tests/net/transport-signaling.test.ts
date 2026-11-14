@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_STUN_URLS,
+  DEFAULT_TURN,
   FAST_CHANNEL_ID,
   FAST_CHANNEL_INIT,
   buildIceServers,
@@ -32,14 +33,21 @@ describe('fast channel definition', () => {
 });
 
 describe('buildPeerOptions', () => {
-  it('leaves the cloud broker to the PeerJS defaults and adds STUN', () => {
+  it('leaves the cloud broker to the PeerJS defaults and adds STUN + Open Relay TURN', () => {
     const options = buildPeerOptions({ signaling: cloudSignaling() });
     expect(options.host).toBeUndefined();
     expect(options.port).toBeUndefined();
     expect(options.path).toBeUndefined();
     expect(options.secure).toBeUndefined();
     expect(options.debug).toBe(0);
-    expect(options.config.iceServers).toEqual([{ urls: [...DEFAULT_STUN_URLS] }]);
+    expect(options.config.iceServers).toEqual([
+      { urls: [...DEFAULT_STUN_URLS] },
+      {
+        urls: [...DEFAULT_TURN.urls],
+        username: DEFAULT_TURN.username,
+        credential: DEFAULT_TURN.credential,
+      },
+    ]);
     expect(options.config.iceTransportPolicy).toBeUndefined();
   });
 
@@ -61,7 +69,7 @@ describe('buildPeerOptions', () => {
     expect(options.config.iceServers).toEqual([{ urls: ['stun:box.local:3478'] }]);
   });
 
-  it('adds an optional TURN relay after STUN', () => {
+  it('adds TURN after STUN; custom TURN replaces Open Relay', () => {
     const turn = { urls: ['turn:relay.example:3478'], username: 'u', credential: 'p' };
     expect(buildIceServers({ signaling: cloudSignaling(), turn })).toEqual([
       { urls: [...DEFAULT_STUN_URLS] },
@@ -74,7 +82,9 @@ describe('buildPeerOptions', () => {
         turn: { ...turn, urls: 'turn:one.example' },
       }),
     ).toEqual([{ urls: 'turn:one.example', username: 'u', credential: 'p' }]);
-    expect(buildIceServers({ signaling: cloudSignaling(), turn: null })).toHaveLength(1);
+    // null / omitted in cloud → free Open Relay (school Wi-Fi).
+    expect(buildIceServers({ signaling: cloudSignaling(), turn: null })).toHaveLength(2);
+    expect(buildIceServers({ signaling: cloudSignaling() })).toHaveLength(2);
   });
 
   it('can force relay-only and pass the debug level', () => {
@@ -87,7 +97,14 @@ describe('buildPeerOptions', () => {
     const stunUrls = ['stun:a.example'];
     const options = buildPeerOptions({ signaling: cloudSignaling(), stunUrls });
     stunUrls.push('stun:b.example');
-    expect(options.config.iceServers).toEqual([{ urls: ['stun:a.example'] }]);
+    expect(options.config.iceServers).toEqual([
+      { urls: ['stun:a.example'] },
+      {
+        urls: [...DEFAULT_TURN.urls],
+        username: DEFAULT_TURN.username,
+        credential: DEFAULT_TURN.credential,
+      },
+    ]);
   });
 });
 

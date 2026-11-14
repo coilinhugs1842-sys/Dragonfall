@@ -29,11 +29,12 @@ each client.
 
 - **Room code:** the host registers the peer id `dragonfall-<CODE>`, where CODE is 5 characters from an
   unambiguous alphabet (no 0/O/1/I). Clients type the code to connect.
-- **NAT traversal:** STUN (Google's public STUN servers) by default. A **TURN relay** is optional and
-  configurable in settings, and is only needed on networks that block peer-to-peer traffic.
-- **Important for school, work and hotel Wi-Fi:** many of these networks use *client isolation*, which stops
-  laptops on the same Wi-Fi from talking to each other. If players can join the room but never connect, use a
-  phone hotspot or home router, or configure TURN.
+- **NAT traversal:** STUN (Google / Cloudflare) plus a free public **TURN** relay (Open Relay) in online
+  mode so school / hotel Wi-Fi with client isolation can still connect. Settings can replace the relay with
+  your own TURN URL. LAN mode stays STUN-free (same subnet) unless you set a relay.
+- **Important for school, work and hotel Wi-Fi:** if “Found the room, but couldn’t link up” still appears,
+  try a phone hotspot or home router. Online mode already tries TURN; a custom relay in Settings can help
+  when the public one is blocked.
 
 ## Where players load the game from
 

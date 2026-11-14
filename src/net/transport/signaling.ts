@@ -44,11 +44,12 @@ export const FAST_CHANNEL_INIT: Readonly<RTCDataChannelInit> = Object.freeze({
 export const DEFAULT_STUN_URLS: readonly string[] = Object.freeze([
   'stun:stun.l.google.com:19302',
   'stun:stun1.l.google.com:19302',
+  'stun:stun.cloudflare.com:3478',
 ]);
 
 export const DEFAULT_BROKER_TIMEOUT_MS = 10_000;
 /** Longer than the PeerServer's 5 s "no such peer" expiry, so a wrong code reads as roomNotFound. */
-export const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+export const DEFAULT_CONNECT_TIMEOUT_MS = 25_000;
 /** 10 riders plus spectators and a few half-open joins. */
 export const DEFAULT_MAX_LINKS = 24;
 export const DEFAULT_MAX_INBOUND_BYTES = 16 * 1024;
@@ -77,11 +78,30 @@ export interface TurnConfig {
   readonly credential: string;
 }
 
+/**
+ * Free public Open Relay (Metered) TURN. School / hotel Wi-Fi often blocks peer-to-peer; without a
+ * relay the guest finds the room then times out. Credentials are published by Open Relay for this
+ * use. A custom TURN in Settings replaces these.
+ */
+export const DEFAULT_TURN: TurnConfig = Object.freeze({
+  urls: Object.freeze([
+    'turn:openrelay.metered.ca:80',
+    'turn:openrelay.metered.ca:80?transport=tcp',
+    'turn:openrelay.metered.ca:443',
+    'turns:openrelay.metered.ca:443?transport=tcp',
+  ]),
+  username: 'openrelayproject',
+  credential: 'openrelayproject',
+});
+
 export interface PeerTransportConfig {
   readonly signaling: SignalingConfig;
   /** Defaults to `DEFAULT_STUN_URLS` in cloud mode and to none in LAN mode (works offline). */
   readonly stunUrls?: readonly string[];
-  /** Optional relay for networks that block peer-to-peer traffic. */
+  /**
+   * Relay for networks that block peer-to-peer. Cloud mode defaults to `DEFAULT_TURN` when this
+   * is omitted or null; pass a custom config to replace it. LAN mode stays relay-free unless set.
+   */
   readonly turn?: TurnConfig | null;
   /** Force all traffic through TURN (for testing a relay). */
   readonly relayOnly?: boolean;
@@ -112,8 +132,14 @@ export function buildIceServers(config: PeerTransportConfig): RTCIceServer[] {
   const servers: RTCIceServer[] = [];
   const stun = config.stunUrls ?? (config.signaling.mode === 'cloud' ? DEFAULT_STUN_URLS : []);
   if (stun.length > 0) servers.push({ urls: [...stun] });
-  const turn = config.turn;
-  if (turn !== undefined && turn !== null) {
+  // Cloud: always offer Open Relay so client-isolated Wi-Fi can still link. Custom `turn` replaces it.
+  const turn =
+    config.turn !== undefined && config.turn !== null
+      ? config.turn
+      : config.signaling.mode === 'cloud'
+        ? DEFAULT_TURN
+        : null;
+  if (turn !== null) {
     servers.push({
       urls: typeof turn.urls === 'string' ? turn.urls : [...turn.urls],
       username: turn.username,

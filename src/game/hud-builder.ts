@@ -68,7 +68,7 @@ const ID_SLOTS = 256;
 const DAMAGE_ARC_FULL_HP = 40;
 const UNKNOWN_NAME = 'Rider';
 /** Captions of the four ability slots under the default bindings. */
-const DEFAULT_KEY_LABELS: readonly string[] = ['LMB', 'RMB', 'F', 'R'];
+const DEFAULT_KEY_LABELS: readonly string[] = ['LMB', 'V', 'F', 'R'];
 
 /**
  * What one shard brought home weighs in the MVP score. A takedown is worth 100 plus the damage

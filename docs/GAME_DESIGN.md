@@ -48,7 +48,7 @@ shape icon, not colour alone.
 
 ## Dragons (9 classes)
 
-Every class has **Primary** (left mouse), **Secondary** (right mouse), **Utility** (F) and an **Ultimate** (R)
+Every class has **Primary** (left mouse), **Secondary** (V), **Utility** (F) and an **Ultimate** (R)
 that charges by dealing damage and capturing objectives. Matches still seat at most five riders per team;
 more classes means more pick variety, not more seats.
 
@@ -138,7 +138,7 @@ Title ─► Host / Join (room code) ─► Lobby (cinematic aerie) ─► Match
 | Flap up | Space | A |
 | Dive | Ctrl | B |
 | Dodge roll | Q / E | LB + stick |
-| Primary / Secondary | LMB / RMB | RT / LT |
+| Primary / Secondary | LMB / V | RT / LT |
 | Utility / Ultimate | F / R | X / Y |
 | Scoreboard | Tab | View |
 

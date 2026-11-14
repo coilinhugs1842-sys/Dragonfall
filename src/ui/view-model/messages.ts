@@ -40,7 +40,8 @@ const REJECT_TEXT: Readonly<Record<RejectReason, MessageText>> = {
 
 const WIFI_HINT =
   'School, work and hotel Wi-Fi often stop devices from talking to each other (client isolation). ' +
-  'Try a phone hotspot or a home router, or set up a TURN relay.';
+  'Online mode already tries a public TURN relay — if it still fails, try a phone hotspot or home router, ' +
+  'or put your own TURN URL in Settings.';
 
 const CONNECT_TEXT_ONLINE: Readonly<Record<ConnectFailureReason, MessageText>> = {
   roomNotFound: text(
@@ -56,8 +57,8 @@ const CONNECT_TEXT_ONLINE: Readonly<Record<ConnectFailureReason, MessageText>> =
     'Check your internet connection. With no internet, switch to Local network and have the host run the LAN relay.',
   ),
   peerUnavailable: text(
-    'The host isn’t answering',
-    'The room may have just closed. Ask the host whether it is still open, then try again.',
+    'Reached the host, but couldn’t link up',
+    `The peer link failed after the room answered. ${WIFI_HINT}`,
   ),
   timeout: text('Found the room, but couldn’t link up', `The connection timed out. ${WIFI_HINT}`),
   invalidRoomCode: text('That isn’t a room code', CODE_RULE),

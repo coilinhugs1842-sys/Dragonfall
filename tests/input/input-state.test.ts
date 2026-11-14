@@ -151,7 +151,7 @@ describe('keys -> buttons and fine steer', () => {
       ['KeyQ', BUTTON_DODGE_LEFT],
       ['KeyE', BUTTON_DODGE_RIGHT],
       ['Mouse0', BUTTON_PRIMARY],
-      ['Mouse2', BUTTON_SECONDARY],
+      ['KeyV', BUTTON_SECONDARY],
       ['KeyF', BUTTON_UTILITY],
       ['KeyR', BUTTON_ULTIMATE],
       ['KeyA', BUTTON_ROLL_LEFT],

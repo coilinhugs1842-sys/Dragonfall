@@ -331,6 +331,13 @@ export class ChaseCamera {
   private readonly camUp = new Vector3();
   /** Blended world/local up so the chase view can go inverted smoothly. */
   private readonly softUp = new Vector3(0, 1, 0);
+  /**
+   * Latched inverted state for soft-up. Soft `invertBlend` from bank-tilted `aligned` used to
+   * chatter during hard upright turns (laptop pitch/yaw), flipping the horizon mid-bank.
+   */
+  private inverted = false;
+  /** Last stable horizon reference; reused when the nose is near vertical so the basis does not whip. */
+  private readonly lastHorizonRef = new Vector3(0, 1, 0);
   private readonly look = new Vector3();
   private readonly matrix = new Matrix4();
   private readonly rollQuat = new Quaternion();
@@ -418,27 +425,71 @@ export class ChaseCamera {
     refY -= fy * fDotRef;
     refZ -= fz * fDotRef;
     const refLen = Math.sqrt(refX * refX + refY * refY + refZ * refZ);
-    if (refLen > TINY) {
+    if (refLen > 0.15) {
       refX /= refLen;
       refY /= refLen;
       refZ /= refLen;
-    } else {
-      // Nose straight up/down: pick a stable sideways reference in the XZ plane.
-      refX = -fz;
-      refY = 0;
-      refZ = fx;
-      const sideLen = Math.sqrt(refX * refX + refZ * refZ);
-      if (sideLen > TINY) {
-        refX /= sideLen;
-        refZ /= sideLen;
+      this.lastHorizonRef.set(refX, refY, refZ);
+    } else if (refLen > TINY) {
+      // Near vertical: keep the previous horizon axis so the basis does not spin with tiny noise.
+      refX = this.lastHorizonRef.x;
+      refY = this.lastHorizonRef.y;
+      refZ = this.lastHorizonRef.z;
+      const keep = refX * fx + refY * fy + refZ * fz;
+      refX -= fx * keep;
+      refY -= fy * keep;
+      refZ -= fz * keep;
+      const keepLen = Math.sqrt(refX * refX + refY * refY + refZ * refZ);
+      if (keepLen > TINY) {
+        refX /= keepLen;
+        refY /= keepLen;
+        refZ /= keepLen;
+        this.lastHorizonRef.set(refX, refY, refZ);
       } else {
-        refX = 1;
-        refY = 0;
-        refZ = 0;
+        refX = this.lastHorizonRef.x;
+        refY = this.lastHorizonRef.y;
+        refZ = this.lastHorizonRef.z;
       }
+    } else {
+      // Nose straight up/down: reuse last horizon, else a stable sideways in XZ.
+      refX = this.lastHorizonRef.x;
+      refY = this.lastHorizonRef.y;
+      refZ = this.lastHorizonRef.z;
+      const keep = refX * fx + refY * fy + refZ * fz;
+      refX -= fx * keep;
+      refY -= fy * keep;
+      refZ -= fz * keep;
+      const keepLen = Math.sqrt(refX * refX + refY * refY + refZ * refZ);
+      if (keepLen > TINY) {
+        refX /= keepLen;
+        refY /= keepLen;
+        refZ /= keepLen;
+      } else {
+        refX = -fz;
+        refY = 0;
+        refZ = fx;
+        const sideLen = Math.sqrt(refX * refX + refZ * refZ);
+        if (sideLen > TINY) {
+          refX /= sideLen;
+          refZ /= sideLen;
+        } else {
+          refX = 1;
+          refY = 0;
+          refZ = 0;
+        }
+      }
+      this.lastHorizonRef.set(refX, refY, refZ);
     }
     const aligned = ux * refX + uy * refY + uz * refZ;
-    const invertBlend = dodging ? 0 : clamp01((0.25 - aligned) / 0.5);
+    // Hysteresis: hard banks while upright must not start flipping soft-up.
+    if (dodging) {
+      // Soft-up ignores local up while dodging so a 180° roll does not flip the horizon.
+    } else if (!this.inverted && aligned < -0.2) {
+      this.inverted = true;
+    } else if (this.inverted && aligned > 0.35) {
+      this.inverted = false;
+    }
+    const invertBlend = dodging ? 0 : this.inverted ? 1 : 0;
     // 0 = +ref (upright horizon), 1 = -ref (inverted horizon). No bank in either.
     const flip = 1 - 2 * invertBlend;
     let wantX = refX * flip;
@@ -498,6 +549,7 @@ export class ChaseCamera {
     if (snap) {
       heading.set(fx, fy, fz);
       this.headingVelocity.set(0, 0, 0);
+      this.inverted = !dodging && aligned < 0;
       soft.set(wantX, wantY, wantZ);
       this.distance = distanceTarget;
       this.fov = fovTarget;
