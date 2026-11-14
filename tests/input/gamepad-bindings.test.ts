@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BINDINGS_FORMAT_VERSION,
   DEFAULT_BINDINGS,
   DEFAULT_GAMEPAD_BINDINGS,
   GAMEPAD_BUTTON_CODES,
@@ -152,7 +153,10 @@ describe('the shared table functions on the gamepad table', () => {
       expect(bindingsEqual(parseGamepadBindings(text), DEFAULT_GAMEPAD_BINDINGS)).toBe(true);
     }
     const partial = parseGamepadBindings(
-      JSON.stringify({ version: 1, bindings: { flap: ['Pad5'], boost: 'Pad4' } }),
+      JSON.stringify({
+        version: BINDINGS_FORMAT_VERSION,
+        bindings: { flap: ['Pad5'], boost: 'Pad4' },
+      }),
     );
     expect(partial.flap).toEqual(['Pad5']);
     expect(partial.boost).toEqual(['Pad4']);
@@ -164,7 +168,7 @@ describe('the shared table functions on the gamepad table', () => {
   it('drops keyboard, reserved and unknown codes from a gamepad table', () => {
     const parsed = parseGamepadBindings(
       JSON.stringify({
-        version: 1,
+        version: BINDINGS_FORMAT_VERSION,
         bindings: { flap: ['KeyV', 'Pad5'], dive: ['Pad9'], utility: ['Pad99'], ultimate: [] },
       }),
     );
