@@ -154,16 +154,23 @@ describe('applyHeatVents', () => {
     for (let i = 0; i < 20_000; i++) applyHeatVents(dragon, EMBERFALL_VENTS, VENT_TUNING);
     const gc = (globalThis as { gc?: () => void }).gc;
     gc?.();
-    const before = process.memoryUsage().heapUsed;
-    for (let i = 0; i < 400_000; i++) {
-      dragon.burst.y = 0;
-      dragon.speed = 45;
-      dragon.stamina = 0.5;
-      applyHeatVents(dragon, [VENT], VENT_TUNING);
+    // Single-shot heapUsed is noisy under CI parallel workers; median of trials matches
+    // codec-fast / combat allocation checks.
+    const iterations = 40_000;
+    const growth: number[] = [];
+    for (let trial = 0; trial < 9; trial++) {
+      const before = process.memoryUsage().heapUsed;
+      for (let i = 0; i < iterations; i++) {
+        dragon.burst.y = 0;
+        dragon.speed = 45;
+        dragon.stamina = 0.5;
+        applyHeatVents(dragon, [VENT], VENT_TUNING);
+      }
+      growth.push(process.memoryUsage().heapUsed - before);
     }
-    const grown = process.memoryUsage().heapUsed - before;
-    // 400k calls x the smallest object (16 B) would be 6.4 MB.
-    expect(grown).toBeLessThan(2 * 1024 * 1024);
+    growth.sort((a, b) => a - b);
+    // 40k calls × one small object (16 B) would be ~640 KB; median stays far under that when clean.
+    expect(growth[4]).toBeLessThan(256 * 1024);
   });
 });
 
