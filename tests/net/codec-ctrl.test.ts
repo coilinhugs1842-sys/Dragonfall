@@ -135,7 +135,7 @@ describe('message table', () => {
   });
 
   it('uses the protocol version of the shared constants', () => {
-    expect(PROTOCOL_VERSION).toBe(5);
+    expect(PROTOCOL_VERSION).toBe(6);
   });
 });
 
@@ -412,6 +412,7 @@ describe('INTENT', () => {
     { type: 'host.lockTeams', locked: true },
     { type: 'host.kick', playerId: 4 },
     { type: 'host.start' },
+    { type: 'match.skipCinematic' },
   ];
 
   it('covers every network intent type', () => {
