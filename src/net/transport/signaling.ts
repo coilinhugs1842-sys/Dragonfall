@@ -48,8 +48,11 @@ export const DEFAULT_STUN_URLS: readonly string[] = Object.freeze([
 ]);
 
 export const DEFAULT_BROKER_TIMEOUT_MS = 10_000;
-/** Longer than the PeerServer's 5 s "no such peer" expiry, so a wrong code reads as roomNotFound. */
-export const DEFAULT_CONNECT_TIMEOUT_MS = 25_000;
+/**
+ * Longer than the PeerServer's 5 s "no such peer" expiry, so a wrong code reads as roomNotFound.
+ * School Wi-Fi often needs extra time for TURN allocation over TCP/TLS.
+ */
+export const DEFAULT_CONNECT_TIMEOUT_MS = 35_000;
 /** 10 riders plus spectators and a few half-open joins. */
 export const DEFAULT_MAX_LINKS = 24;
 export const DEFAULT_MAX_INBOUND_BYTES = 16 * 1024;
@@ -79,11 +82,26 @@ export interface TurnConfig {
 }
 
 /**
- * Free public Open Relay (Metered) TURN. School / hotel Wi-Fi often blocks peer-to-peer; without a
- * relay the guest finds the room then times out. Credentials are published by Open Relay for this
- * use. A custom TURN in Settings replaces these.
+ * Free public TURN for Online mode (no signup, no Settings). School / hotel Wi-Fi often blocks
+ * direct peer links; without a relay the guest finds the room then times out.
+ *
+ * Primary: freeTURN (freeturn.net) — published free:free credentials, UDP + TLS.
+ * Fallback: Metered Open Relay static auth (may be rate-limited; kept as a second ICE candidate).
+ * A custom TURN in Settings replaces this whole list.
  */
 export const DEFAULT_TURN: TurnConfig = Object.freeze({
+  urls: Object.freeze([
+    'turn:freeturn.net:3478',
+    'turn:freeturn.net:3478?transport=tcp',
+    'turns:freeturn.net:5349',
+    'turns:freeturn.net:5349?transport=tcp',
+  ]),
+  username: 'free',
+  credential: 'free',
+});
+
+/** Second free relay offered alongside `DEFAULT_TURN` when Online mode uses the built-in list. */
+export const FALLBACK_TURN: TurnConfig = Object.freeze({
   urls: Object.freeze([
     'turn:openrelay.metered.ca:80',
     'turn:openrelay.metered.ca:80?transport=tcp',
@@ -128,23 +146,25 @@ export function lanSignaling(pageHostname: string): SignalingConfig {
   return { mode: 'lan', host: pageHostname };
 }
 
+function pushTurn(servers: RTCIceServer[], turn: TurnConfig): void {
+  servers.push({
+    urls: typeof turn.urls === 'string' ? turn.urls : [...turn.urls],
+    username: turn.username,
+    credential: turn.credential,
+  });
+}
+
 export function buildIceServers(config: PeerTransportConfig): RTCIceServer[] {
   const servers: RTCIceServer[] = [];
   const stun = config.stunUrls ?? (config.signaling.mode === 'cloud' ? DEFAULT_STUN_URLS : []);
   if (stun.length > 0) servers.push({ urls: [...stun] });
-  // Cloud: always offer Open Relay so client-isolated Wi-Fi can still link. Custom `turn` replaces it.
-  const turn =
-    config.turn !== undefined && config.turn !== null
-      ? config.turn
-      : config.signaling.mode === 'cloud'
-        ? DEFAULT_TURN
-        : null;
-  if (turn !== null) {
-    servers.push({
-      urls: typeof turn.urls === 'string' ? turn.urls : [...turn.urls],
-      username: turn.username,
-      credential: turn.credential,
-    });
+  // Cloud: always offer free public TURN so client-isolated Wi-Fi can still link.
+  // Custom `turn` replaces the built-in list; null/omitted → freeTURN + Open Relay fallback.
+  if (config.turn !== undefined && config.turn !== null) {
+    pushTurn(servers, config.turn);
+  } else if (config.signaling.mode === 'cloud') {
+    pushTurn(servers, DEFAULT_TURN);
+    pushTurn(servers, FALLBACK_TURN);
   }
   return servers;
 }

@@ -119,13 +119,14 @@ export const CAMERA_RIG_TUNING: CameraRigTuning = {
   lookLead: 0.45,
   aimShift: 4,
   aimRate: 6,
-  headingRate: 6.5,
-  positionRate: 12,
+  // Softer than the first pass: laptop iGPUs hitch; high rates whipped the chase view on turns.
+  headingRate: 5,
+  positionRate: 9,
   maxLag: 3,
-  rollFraction: 0.3,
-  maxRoll: 0.35,
-  rollRate: 4,
-  softUpRate: 5,
+  rollFraction: 0.22,
+  maxRoll: 0.28,
+  rollRate: 3.5,
+  softUpRate: 3.2,
   fovSpeedKick: 11,
   fovBoostKick: 6,
   fovRate: 3.5,
@@ -417,6 +418,9 @@ export class ChaseCamera {
     // `aligned` = how much the dragon's local up matches that horizon up (bank tilts it sideways
     // but keeps the sign until ~90°, so hard banks do not falsely flip the view).
     const dodging = (target.flags & DRAGON_FLAG_DODGING) !== 0;
+    // |nose·worldUp|: steep climb/dive collapses the horizon basis and used to whip on laptops.
+    const noseVertical = Math.abs(fy);
+    const steep = noseVertical > 0.72;
     let refX = 0;
     let refY = 1;
     let refZ = 0;
@@ -425,13 +429,14 @@ export class ChaseCamera {
     refY -= fy * fDotRef;
     refZ -= fz * fDotRef;
     const refLen = Math.sqrt(refX * refX + refY * refY + refZ * refZ);
-    if (refLen > 0.15) {
+    // Lock the horizon earlier than before (~44° from vertical) so up/down and loops stay stable.
+    if (refLen > 0.45 && !steep) {
       refX /= refLen;
       refY /= refLen;
       refZ /= refLen;
       this.lastHorizonRef.set(refX, refY, refZ);
-    } else if (refLen > TINY) {
-      // Near vertical: keep the previous horizon axis so the basis does not spin with tiny noise.
+    } else if (refLen > TINY && !steep) {
+      // Getting steep: keep the previous horizon axis so the basis does not spin with tiny noise.
       refX = this.lastHorizonRef.x;
       refY = this.lastHorizonRef.y;
       refZ = this.lastHorizonRef.z;
@@ -451,7 +456,7 @@ export class ChaseCamera {
         refZ = this.lastHorizonRef.z;
       }
     } else {
-      // Nose straight up/down: reuse last horizon, else a stable sideways in XZ.
+      // Nose steep / straight up/down: reuse last horizon, else a stable sideways in XZ.
       refX = this.lastHorizonRef.x;
       refY = this.lastHorizonRef.y;
       refZ = this.lastHorizonRef.z;
@@ -482,12 +487,15 @@ export class ChaseCamera {
     }
     const aligned = ux * refX + uy * refY + uz * refZ;
     // Hysteresis: hard banks while upright must not start flipping soft-up.
+    // Steep climb/dive: freeze the latch — aligned chatters near vertical and caused laptop spasms.
     if (dodging) {
       // Soft-up ignores local up while dodging so a 180° roll does not flip the horizon.
-    } else if (!this.inverted && aligned < -0.2) {
-      this.inverted = true;
-    } else if (this.inverted && aligned > 0.35) {
-      this.inverted = false;
+    } else if (!steep) {
+      if (!this.inverted && aligned < -0.28) {
+        this.inverted = true;
+      } else if (this.inverted && aligned > 0.42) {
+        this.inverted = false;
+      }
     }
     const invertBlend = dodging ? 0 : this.inverted ? 1 : 0;
     // 0 = +ref (upright horizon), 1 = -ref (inverted horizon). No bank in either.
@@ -526,10 +534,11 @@ export class ChaseCamera {
     const fovTarget = chaseFovTarget(this.baseFov, speedT, boosting, tuning, this.reduceMotion);
     // Mild bank lean only while upright. Inverted soft-up is already horizon-flipped; adding
     // leftY roll there made the camera tip with the dragon (unlike upright). Q/E dodge: none.
+    // Steep climb/dive: no bank lean — it stacks with the horizon lock and reads as a spasm.
     const rollTarget =
-      this.reduceMotion || dodging || invertBlend > 0.35
+      this.reduceMotion || dodging || steep || invertBlend > 0.35
         ? 0
-        : cameraRollTarget(leftY, tuning) * (1 - invertBlend);
+        : cameraRollTarget(leftY, tuning) * (1 - invertBlend) * (1 - noseVertical);
     const boostTarget = boosting ? 1 : 0;
 
     const jumpX = px - this.lastTarget.x;

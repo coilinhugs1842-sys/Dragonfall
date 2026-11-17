@@ -143,7 +143,7 @@ import type { ReconnectTokenStore } from './wire';
 /** After the link opens, WELCOME or REJECT must arrive within this. */
 export const CLIENT_HANDSHAKE_TIMEOUT_MS = 6000;
 /** Backstop on top of the transport's own connect timeout. */
-export const CLIENT_CONNECT_TIMEOUT_MS = 25_000;
+export const CLIENT_CONNECT_TIMEOUT_MS = 35_000;
 /**
  * Wait before the first reconnect attempt. Longer than the host's stale-link threshold, so by
  * the time the HELLO with the old token arrives the host accepts that the old link is dead.

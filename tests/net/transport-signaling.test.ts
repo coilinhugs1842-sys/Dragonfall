@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_STUN_URLS,
   DEFAULT_TURN,
+  FALLBACK_TURN,
   FAST_CHANNEL_ID,
   FAST_CHANNEL_INIT,
   buildIceServers,
@@ -33,7 +34,7 @@ describe('fast channel definition', () => {
 });
 
 describe('buildPeerOptions', () => {
-  it('leaves the cloud broker to the PeerJS defaults and adds STUN + Open Relay TURN', () => {
+  it('leaves the cloud broker to the PeerJS defaults and adds STUN + free TURN relays', () => {
     const options = buildPeerOptions({ signaling: cloudSignaling() });
     expect(options.host).toBeUndefined();
     expect(options.port).toBeUndefined();
@@ -46,6 +47,11 @@ describe('buildPeerOptions', () => {
         urls: [...DEFAULT_TURN.urls],
         username: DEFAULT_TURN.username,
         credential: DEFAULT_TURN.credential,
+      },
+      {
+        urls: [...FALLBACK_TURN.urls],
+        username: FALLBACK_TURN.username,
+        credential: FALLBACK_TURN.credential,
       },
     ]);
     expect(options.config.iceTransportPolicy).toBeUndefined();
@@ -69,7 +75,7 @@ describe('buildPeerOptions', () => {
     expect(options.config.iceServers).toEqual([{ urls: ['stun:box.local:3478'] }]);
   });
 
-  it('adds TURN after STUN; custom TURN replaces Open Relay', () => {
+  it('adds TURN after STUN; custom TURN replaces the free built-in relays', () => {
     const turn = { urls: ['turn:relay.example:3478'], username: 'u', credential: 'p' };
     expect(buildIceServers({ signaling: cloudSignaling(), turn })).toEqual([
       { urls: [...DEFAULT_STUN_URLS] },
@@ -82,9 +88,10 @@ describe('buildPeerOptions', () => {
         turn: { ...turn, urls: 'turn:one.example' },
       }),
     ).toEqual([{ urls: 'turn:one.example', username: 'u', credential: 'p' }]);
-    // null / omitted in cloud → free Open Relay (school Wi-Fi).
-    expect(buildIceServers({ signaling: cloudSignaling(), turn: null })).toHaveLength(2);
-    expect(buildIceServers({ signaling: cloudSignaling() })).toHaveLength(2);
+    // null / omitted in cloud → freeTURN + Open Relay fallback (school Wi-Fi).
+    expect(buildIceServers({ signaling: cloudSignaling(), turn: null })).toHaveLength(3);
+    expect(buildIceServers({ signaling: cloudSignaling() })).toHaveLength(3);
+    expect(DEFAULT_TURN.username).toBe('free');
   });
 
   it('can force relay-only and pass the debug level', () => {
@@ -103,6 +110,11 @@ describe('buildPeerOptions', () => {
         urls: [...DEFAULT_TURN.urls],
         username: DEFAULT_TURN.username,
         credential: DEFAULT_TURN.credential,
+      },
+      {
+        urls: [...FALLBACK_TURN.urls],
+        username: FALLBACK_TURN.username,
+        credential: FALLBACK_TURN.credential,
       },
     ]);
   });

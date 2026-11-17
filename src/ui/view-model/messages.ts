@@ -40,8 +40,8 @@ const REJECT_TEXT: Readonly<Record<RejectReason, MessageText>> = {
 
 const WIFI_HINT =
   'School, work and hotel Wi-Fi often stop devices from talking to each other (client isolation). ' +
-  'Online mode already tries a public TURN relay — if it still fails, try a phone hotspot or home router, ' +
-  'or put your own TURN URL in Settings.';
+  'Online mode already tries free public TURN relays automatically — both of you should use Online ' +
+  '(not Local network), then Host / Join with the code. If it still fails, try a phone hotspot.';
 
 const CONNECT_TEXT_ONLINE: Readonly<Record<ConnectFailureReason, MessageText>> = {
   roomNotFound: text(

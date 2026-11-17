@@ -471,6 +471,26 @@ describe('ChaseCamera', () => {
     }
   });
 
+  it('holds a stable horizon through steep climbs, dives and hitchy frames', () => {
+    const camera = new ChaseCamera();
+    const pose = createPose();
+    camera.update(straightPose(pose, 0, 70), 0);
+    const previous = camera.quaternion.clone();
+    // Uneven dt mimics a U-series laptop hitching while the rider pitches hard.
+    const dts = [1 / 60, 1 / 30, 1 / 45, 1 / 20, 1 / 60, 1 / 72];
+    for (let i = 1; i <= 180; i++) {
+      const pitch = Math.sin(i / 18) * 1.35; // past vertical enough to stress the basis
+      const yaw = Math.sin(i / 27) * 0.8;
+      const bank = Math.sin(i / 9) * 0.7;
+      straightPose(pose, i * 1.1, 70 + 25 * Math.sin(i / 14));
+      setHeading(pose, yaw, pitch, bank);
+      pose.flags = DRAGON_FLAG_ALIVE;
+      camera.update(pose, dts[i % dts.length] as number);
+      expect(camera.quaternion.angleTo(previous), `frame ${i}`).toBeLessThan(0.28);
+      previous.copy(camera.quaternion);
+    }
+  });
+
   it('reduce motion: no roll and no shake', () => {
     const steady = new ChaseCamera({ reduceMotion: true });
     const shaky = new ChaseCamera();

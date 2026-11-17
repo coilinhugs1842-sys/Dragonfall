@@ -5,16 +5,23 @@ up where the last one stopped.
 
 ## Current state
 
-- **Phase:** 7 (ship). Cinematic cutscene polish is in (always-skippable host-synced skip, ~12 s
-  multi-beat intro, death/podium/launch punches, anim.py + nine-dragon rebuild).
-- **Next for the user:** playtest skip + intro feel; run U-series gates (T-4.9 / T-6.1 / T-7.3); optional
-  Higgsfield mood boards / Seedance if you want paid polish.
-- **Next for Claude:** commit cinematic polish when asked; spot-check perf HUD on U-series if letterbox
-  feels heavy (expected negligible).
-- **Open issues:** uncommitted working-tree polish may still include riders/tags/hit-flash from parallel
-  passes — commit intentionally.
+- **Phase:** 7 (ship). Laptop chase-cam steep-pitch spasms and school-join TURN are patched
+  (freeTURN + Open Relay fallback, no Settings needed).
+- **Next for the user:** hard-refresh Pages, Host/Join on **Online** at school; fly hard turns /
+  climbs on the laptop and confirm the view stays calm.
+- **Next for Claude:** deploy when asked.
+- **Open issues:** if school still blocks PeerJS cloud or every TURN host, only a hotspot/home
+  network will work without a paid relay.
 
 ## Log
+
+### 2026-11-16: laptop cam + school join
+
+- **Camera:** freeze soft-up invert near vertical; lock horizon earlier on steep climb/dive; softer
+  heading/position/roll rates for hitchy iGPU frames.
+- **Networking:** Online Host/Join uses freeTURN (`free`/`free`) plus Open Relay fallback; connect
+  timeout 35 s. No Settings / no paid TURN required.
+- **Verify:** typecheck + camera-rig + transport-signaling tests.
 
 ### 2026-11-14: cinematic cutscene polish
 
